@@ -1,0 +1,45 @@
+I did a read-only code pass. No changes made.
+
+**Modals Already Made**
+- Dashboard quick-action modal: [App.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/App.jsx:494>)  
+  Opens for `New Invoice`, `New Job`, `New Proposal`, `Record Payment`, `Add Expense`, `New Vendor`, and `Quick Entry`. It has fields, `Download Draft`, `Share`, and `Preview`.
+- Generic preview modal: [PreviewModal.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/components/PreviewModal.jsx:3>)  
+  Used to show JSON/details for previews and search results.
+- Dashboard Recent Activity preview: [App.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/App.jsx:613>)
+- Global search results modal: [App.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/App.jsx:630>)
+- Invoice preview modal: [Invoices.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/Invoices.jsx:276>)
+- New Invoice draft preview: [Invoices.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/Invoices.jsx:180>)
+- Proposal preview modal: [Proposals.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/Proposals.jsx:160>)
+- New Proposal draft preview: [Proposals.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/Proposals.jsx:116>)
+- Job preview modal: [Jobs.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/Jobs.jsx:159>)
+- New Job draft preview: [Jobs.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/Jobs.jsx:115>)
+- Settings add-item modal and delete-confirm modal: [Settings.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/Settings.jsx:349>)
+
+**Buttons/Actions Already Wired**
+- Business Pulse filters now change chart range: [App.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/App.jsx:194>)
+- Dashboard quick actions open modals: [App.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/App.jsx:420>)
+- Top search calls backend invoices/jobs/vendors: [App.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/App.jsx:634>)
+- Invoice preview/download/share reminder: [Invoices.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/Invoices.jsx:75>)
+- Proposal preview/download: [Proposals.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/Proposals.jsx:61>)
+- Export download/retry downloads JSON files: [ExportData.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/ExportData.jsx:52>)
+- Report row download exports report JSON: [Reports.jsx](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/Reports.jsx:50>)
+- GET cache added for faster repeated frontend fetches: [client.js](</c:/Users/PRINCE/Desktop/Code/T-tech2/print-dashboard/src/api/client.js:2>)
+
+**Frontend Left**
+- The modals are mostly draft/preview modals. They do not yet submit `New Invoice`, `New Job`, `Add Expense`, etc. to backend POST endpoints.
+- `Jobs.jsx` and `Proposals.jsx` are still fully static data pages. They do not fetch backend data yet.
+- `Archive.jsx`, `AuditLog.jsx`, and `ExportData.jsx` are still static-data pages.
+- `Expenses`, `Receivables`, `Payables`, `Vendors`, and `Advances` fetch backend data, but many row action buttons still use `alert(...)` or placeholder behavior.
+- `Settings.jsx` has local add/delete modals, but it does not use backend machine pricing endpoints yet. There is also a separate `src/pages/Settings.jsx`, but active `App.jsx` imports root `src/Settings.jsx`, not the `pages` version.
+- `src/pages/*` contains duplicate older page files that are not currently used by `App.jsx`. They should eventually be removed or reconciled to avoid confusion.
+- Previews are formatted as readable JSON, not polished business documents yet. Invoice/document previews should eventually use formatted invoice/proposal layouts.
+- Downloads are mostly JSON/draft downloads on the frontend. Real CSV/PDF/Excel downloads should use backend export/download endpoints.
+
+**Backend Left**
+- Backend has create endpoints for invoices, jobs, expenses, machines, pricing, and exports.
+- Backend does not currently have create endpoints for vendors, advances, proposals, archive restore, receivable payment actions, payable scheduling, or audit mutations.
+- There is no backend proposal model/route yet, so Proposals cannot become truly live until that exists.
+- There are no update/delete endpoints for invoices/jobs/expenses/vendors/machines/pricing yet.
+- Invoice document endpoint returns JSON document data, not a real PDF.
+- Export backend supports real export jobs/downloads, but the active frontend export page is still using static `EXPORTS_DATA`.
+- Search exists through list endpoints, but there is no single global `/search` endpoint yet. Current global search does three frontend requests.

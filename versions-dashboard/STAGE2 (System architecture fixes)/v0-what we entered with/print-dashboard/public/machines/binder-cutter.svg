@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200">
+  <rect width="320" height="200" rx="18" fill="#eef2f7"/>
+  <rect x="60" y="70" width="200" height="82" rx="10" fill="#374f6c"/>
+  <path d="M88 96h144M88 116h144M88 136h144" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+  <path d="M230 64l30 92" stroke="#a06b6b" stroke-width="10" stroke-linecap="round"/>
+  <text x="160" y="38" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#26384a">Binder + Cutter</text>
+</svg>

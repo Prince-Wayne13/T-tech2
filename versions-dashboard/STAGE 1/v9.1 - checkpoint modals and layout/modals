@@ -1,0 +1,635 @@
+// Modals.jsx — PrintOps BMS (All Modals in One File)
+import React, { useState, useEffect, useRef } from 'react';
+import './styles.css';
+
+/* ═══════════════════════════════════════
+   ICON SYSTEM
+═══════════════════════════════════════ */
+function Icon({ d, size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d={d} />
+    </svg>
+  );
+}
+
+const D = {
+  x: 'M18 6L6 18M6 6l12 12',
+  check: 'M20 6L9 17l-5-5',
+  search: 'M21 21l-4.35-4.35 M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z',
+  chevron: 'M6 9l6 6 6-6',
+  download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
+  send: 'M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z',
+  printer: 'M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z',
+  plus: 'M12 5v14M5 12h14',
+  alert: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z M12 9v4 M12 17h.01',
+};
+
+/* ═══════════════════════════════════════
+   BASE MODAL WRAPPER
+   Handles overlay, blur, escape key, backdrop click
+═══════════════════════════════════════ */
+function ModalWrapper({ isOpen, onClose, title, children, footer }) {
+  const modalRef = useRef();
+
+  useEffect(() => {
+    const handleEsc = (e) => e.key === 'Escape' && onClose();
+    if (isOpen) window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div 
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', animation: 'fadeIn 0.15s ease' }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div ref={modalRef} style={{ background: 'var(--bg-card)', borderRadius: 'var(--r-card)', padding: '20px', width: '90%', maxWidth: '480px', boxShadow: '0 12px 32px rgba(43,58,74,0.12)', border: '1px solid var(--border-light)', position: 'relative', animation: 'fadeIn 0.2s ease' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid var(--border-faint)' }}>
+          <h3 className="card-title" style={{ fontSize: '14px', margin: 0 }}>{title}</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', transition: 'all var(--ease)' }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-canvas)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+            <Icon d={D.x} size={16} />
+          </button>
+        </div>
+        
+        {/* Body */}
+        <div style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '4px' }}>
+          {children}
+        </div>
+
+        {/* Footer */}
+        {footer && (
+          <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid var(--border-faint)', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            {footer}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Shared input style */
+const inputStyle = { width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: '#fff', color: 'var(--text-body)', fontSize: '11px', outline: 'none', transition: 'border-color var(--ease)', fontFamily: 'var(--font)', boxSizing: 'border-box' };
+const labelStyle = { display: 'block', fontSize: '10px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '4px' };
+const pillBtnStyle = (active) => ({ padding: '5px 10px', borderRadius: '50px', border: 'none', fontSize: '10px', fontWeight: active ? '600' : '500', background: active ? 'var(--primary)' : 'var(--bg-canvas)', color: active ? '#fff' : 'var(--text-body)', cursor: 'pointer', transition: 'all var(--ease)' });
+
+/* ═══════════════════════════════════════ MODAL: New Invoice ═══════════════════════════════════════ */
+export function NewInvoiceModal({ isOpen, onClose, onSave }) {
+  const [step, setStep] = useState('form'); // 'form' or 'preview'
+  const [form, setForm] = useState({ client: '', items: [], due: '', notes: '' });
+  const [itemInput, setItemInput] = useState('');
+  const addItem = () => { if(itemInput.trim()) setForm(p => ({...p, items: [...p.items, {desc: itemInput.trim(), qty: 1, rate: 0}]})); setItemInput(''); };
+  const updateItem = (i, f, v) => setForm(p => ({...p, items: p.items.map((it, idx) => idx === i ? {...it, [f]: v} : it)}));
+  const removeItem = i => setForm(p => ({...p, items: p.items.filter((_, idx) => idx !== i)}));
+  const total = form.items.reduce((s, it) => s + (Number(it.qty) * Number(it.rate)), 0);
+  
+  const handleClose = () => { setStep('form'); onClose(); };
+  const handleConfirm = () => { onSave(form); setStep('form'); };
+
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={handleClose} title={step === 'preview' ? "Preview Invoice" : "New Invoice"} footer={
+      step === 'form' ? (
+        <>
+          <button onClick={handleClose} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--text-muted)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Cancel</button>
+          <button onClick={() => setStep('preview')} disabled={!form.client || form.items.length === 0} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--primary)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer', opacity: (!form.client || form.items.length === 0) ? 0.6 : 1 }}>Preview Invoice</button>
+        </>
+      ) : (
+        <>
+          <button onClick={() => setStep('form')} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--primary)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Back to Edit</button>
+          <button onClick={handleConfirm} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--teal)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Confirm & Create</button>
+        </>
+      )
+    }>
+      {step === 'form' ? (
+      <div style={{ display: 'grid', gap: '12px' }}>
+        <div><label style={labelStyle}>Client</label><input style={inputStyle} placeholder="Search client..." value={form.client} onChange={e => setForm({...form, client: e.target.value})} /></div>
+        <div><label style={labelStyle}>Line Items</label>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}><input style={{...inputStyle, flex: 1}} placeholder="Add item..." value={itemInput} onChange={e => setItemInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && addItem()} />
+          <button onClick={addItem} style={{ padding: '6px 10px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '10px', cursor: 'pointer' }}><Icon d={D.plus} size={12} /></button></div>
+          {form.items.map((it, i) => (
+            <div key={i} style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px', padding: '6px', background: 'var(--bg-canvas)', borderRadius: '6px' }}>
+              <span style={{ flex: 1, fontSize: '11px' }}>{it.desc}</span>
+              <input type="number" style={{...inputStyle, width: '50px'}} placeholder="Qty" value={it.qty} onChange={e => updateItem(i, 'qty', e.target.value)} />
+              <input type="number" style={{...inputStyle, width: '70px'}} placeholder="Rate" value={it.rate} onChange={e => updateItem(i, 'rate', e.target.value)} />
+              <button onClick={() => removeItem(i)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: '12px' }}>×</button>
+            </div>
+          ))}
+          <div style={{ textAlign: 'right', fontSize: '12px', fontWeight: '700', color: 'var(--text-head)', marginTop: '4px' }}>Total: MK {total.toLocaleString()}</div>
+        </div>
+        <div><label style={labelStyle}>Due Date</label><input type="date" style={inputStyle} value={form.due} onChange={e => setForm({...form, due: e.target.value})} /></div>
+        <div><label style={labelStyle}>Notes</label><textarea style={{...inputStyle, minHeight: '60px', resize: 'vertical'}} value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} /></div>
+      </div>
+      ) : (
+        <div style={{ fontSize: '11px', color: 'var(--text-body)' }}>
+          <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px', border: '1px dashed var(--border-light)' }}>
+            <div style={labelStyle}>BILL TO</div>
+            <div style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-head)' }}>{form.client}</div>
+            <div style={{ marginTop: '4px' }}>Due Date: {form.due || 'Not set'}</div>
+          </div>
+          
+          <div style={labelStyle}>ITEMS</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '12px' }}>
+            <thead>
+              <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border-faint)' }}>
+                <th style={{ padding: '6px 0' }}>Description</th>
+                <th style={{ textAlign: 'right' }}>Qty</th>
+                <th style={{ textAlign: 'right' }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {form.items.map((it, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid var(--border-faint)' }}>
+                  <td style={{ padding: '8px 0' }}>{it.desc}</td>
+                  <td style={{ textAlign: 'right' }}>{it.qty}</td>
+                  <td style={{ textAlign: 'right' }}>MK {(it.qty * it.rate).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          
+          <div style={{ textAlign: 'right', fontSize: '14px', fontWeight: '800', color: 'var(--primary)' }}>
+            TOTAL AMOUNT: MK {total.toLocaleString()}
+          </div>
+          
+          {form.notes && (
+            <div style={{ marginTop: '12px', padding: '8px', background: '#f8f9fa', borderRadius: '4px', fontStyle: 'italic' }}>
+              "{form.notes}"
+            </div>
+          )}
+        </div>
+      )}
+    </ModalWrapper>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: New Job ═══════════════════════════════════════ */
+export function NewJobModal({ isOpen, onClose, onSave }) {
+  const [step, setStep] = useState('form');
+  const [form, setForm] = useState({ client: '', title: '', specs: [], priority: 'medium', due: '', printer: '', notes: '' }); // Added printer
+  const toggleSpec = (s) => setForm(p => ({...p, specs: p.specs.includes(s) ? p.specs.filter(x=>x!==s) : [...p.specs, s]}));
+  
+  const handleClose = () => { setStep('form'); onClose(); };
+  const handleConfirm = () => { onSave(form); setStep('form'); };
+
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={handleClose} title={step === 'preview' ? "Confirm Job Specs" : "New Job"} footer={
+      step === 'form' ? (
+        <>
+          <button onClick={handleClose} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--text-muted)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Cancel</button>
+          <button onClick={() => setStep('preview')} disabled={!form.title} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--primary)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer', opacity: (!form.title) ? 0.6 : 1 }}>Preview Job</button>
+        </>
+      ) : (
+        <>
+          <button onClick={() => setStep('form')} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--primary)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Back to Edit</button>
+          <button onClick={handleConfirm} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--teal)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Send to Queue</button>
+        </>
+      )
+    }>
+      {step === 'form' ? (
+      <div style={{ display: 'grid', gap: '12px' }}>
+        <div><label style={labelStyle}>Client</label><input style={inputStyle} placeholder="Search client..." value={form.client} onChange={e => setForm({...form, client: e.target.value})} /></div>
+        <div><label style={labelStyle}>Job Title</label><input style={inputStyle} placeholder="e.g., Annual Report 500x" value={form.title} onChange={e => setForm({...form, title: e.target.value})} /></div>
+        <div><label style={labelStyle}>Specs (Tap to add)</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+            {['A4 B&W', 'A4 Color', 'A3 B&W', 'A3 Color', 'Lamination', 'Binding', 'Delivery', 'Glossy'].map(s => (
+              <button key={s} onClick={() => toggleSpec(s)} style={pillBtnStyle(form.specs.includes(s))}>{s}</button>
+            ))}
+          </div>
+          {form.specs.length > 0 && <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Selected: {form.specs.join(', ')}</div>}
+        </div>
+        <div><label style={labelStyle}>Priority</label>
+          <div style={{ display: 'flex', gap: '6px' }}>{['low', 'medium', 'high'].map(p => <button key={p} onClick={() => setForm({...form, priority: p})} style={pillBtnStyle(form.priority === p)}>{p.charAt(0).toUpperCase() + p.slice(1)}</button>)}</div>
+        </div>
+        <div><label style={labelStyle}>Due Date</label><input type="date" style={inputStyle} value={form.due} onChange={e => setForm({...form, due: e.target.value})} /></div>
+        <div><label style={labelStyle}>Assigned Printer</label><input style={inputStyle} placeholder="e.g., HP Latex 315" value={form.printer} onChange={e => setForm({...form, printer: e.target.value})} /></div>
+        <div><label style={labelStyle}>Notes</label><textarea style={{...inputStyle, minHeight: '60px', resize: 'vertical'}} value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} /></div>
+      </div>
+      ) : (
+        <div style={{ fontSize: '11px' }}>
+           <div style={{ marginBottom: '12px' }}>
+            <div style={labelStyle}>JOB TITLE</div>
+            <div style={{ fontWeight: '700', fontSize: '14px' }}>{form.title}</div>
+            <div style={{ color: 'var(--text-muted)' }}>Client: {form.client || 'Internal'}</div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '20px', marginBottom: '12px' }}>
+            <div><div style={labelStyle}>PRIORITY</div><span className={`status-badge ${form.priority}`}>{form.priority.toUpperCase()}</span></div>
+            <div><div style={labelStyle}>DUE DATE</div><b>{form.due || 'ASAP'}</b></div>
+          </div>
+
+          <div style={labelStyle}>TECHNICAL SPECS</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '12px' }}>
+            {form.specs.map(s => <span key={s} style={{ background: 'var(--bg-canvas)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border-faint)' }}>{s}</span>)}
+            {form.specs.length === 0 && <span style={{ color: 'var(--text-muted)' }}>No special specs</span>}
+          </div>
+          
+          <div style={labelStyle}>PRINTER: <b>{form.printer || 'Unassigned'}</b></div>
+        </div>
+      )}
+    </ModalWrapper>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: New Proposal ═══════════════════════════════════════ */
+export function NewProposalModal({ isOpen, onClose, onSave }) {
+  const [step, setStep] = useState('form');
+  const [form, setForm] = useState({ client: '', title: '', items: [], total: '', validUntil: '', contact: '', notes: '' });
+  const addItem = () => setForm(p => ({...p, items: [...p.items, {desc: '', amount: ''}]}));
+  const updateItem = (i, f, v) => setForm(p => ({...p, items: p.items.map((it, idx) => idx === i ? {...it, [f]: v} : it)}));
+  const totalValue = form.items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+  const handleClose = () => { setStep('form'); onClose(); };
+  const handleConfirm = () => { onSave(form); setStep('form'); };
+
+  const isFormValid = form.client.trim() !== '' && form.title.trim() !== '' && form.items.length > 0 && form.items.every(item => item.desc.trim() !== '' && Number(item.amount) > 0);
+
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={handleClose} title={step === 'preview' ? "Preview Proposal" : "New Proposal"} footer={
+      step === 'form' ? (
+        <>
+          <button onClick={handleClose} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--text-muted)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Cancel</button>
+          <button onClick={() => setStep('preview')} disabled={!isFormValid} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--primary)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer', opacity: isFormValid ? 1 : 0.6 }}>Preview Proposal</button>
+        </>
+      ) : (
+        <>
+          <button onClick={() => setStep('form')} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--primary)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Back to Edit</button>
+          <button onClick={handleConfirm} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--teal)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Confirm & Save</button>
+        </>
+      )
+    }>
+      {step === 'form' ? (
+      <div style={{ display: 'grid', gap: '12px' }}>
+        <div><label style={labelStyle}>Client</label><input style={inputStyle} placeholder="Search client..." value={form.client} onChange={e => setForm({...form, client: e.target.value})} /></div>
+        <div><label style={labelStyle}>Proposal Title</label><input style={inputStyle} placeholder="e.g., Q1 Marketing Collateral" value={form.title} onChange={e => setForm({...form, title: e.target.value})} /></div>
+        <div><label style={labelStyle}>Scope & Pricing</label>
+          {form.items.map((it, i) => (
+            <div key={i} style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+              <input style={{...inputStyle, flex: 1}} placeholder="Service/Item" value={it.desc} onChange={e => updateItem(i, 'desc', e.target.value)} required />
+              <input type="number" style={{...inputStyle, width: '80px'}} placeholder="Amount" value={it.amount} onChange={e => updateItem(i, 'amount', e.target.value)} required />
+              <button onClick={() => setForm(p => ({...p, items: p.items.filter((_,idx) => idx !== i)}))} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: '12px' }}>×</button>
+            </div>
+          ))}
+          <button onClick={addItem} style={{ padding: '4px 8px', background: 'var(--bg-canvas)', border: '1px dashed var(--border-light)', borderRadius: '4px', color: 'var(--text-muted)', fontSize: '9px', cursor: 'pointer', width: '100%' }}>+ Add Line</button>
+        </div>
+        <div><label style={labelStyle}>Total Value (MK)</label><input style={inputStyle} placeholder="0" value={form.total} onChange={e => setForm({...form, total: e.target.value})} /></div>
+        <div><label style={labelStyle}>Valid Until</label><input type="date" style={inputStyle} value={form.validUntil} onChange={e => setForm({...form, validUntil: e.target.value})} /></div>
+        <div><label style={labelStyle}>Client Contact Email</label><input style={inputStyle} placeholder="client@email.com" value={form.contact} onChange={e => setForm({...form, contact: e.target.value})} /></div>
+        <div><label style={labelStyle}>Notes</label><textarea style={{...inputStyle, minHeight: '60px', resize: 'vertical'}} value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} /></div>
+      </div>
+      ) : (
+        <div style={{ fontSize: '11px', color: 'var(--text-body)' }}>
+          <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px', border: '1px dashed var(--border-light)' }}>
+            <div style={labelStyle}>PROPOSAL FOR</div>
+            <div style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-head)' }}>{form.client}</div>
+            <div style={{ marginTop: '4px' }}>Title: {form.title}</div>
+            <div style={{ marginTop: '4px' }}>Contact: {form.contact || 'N/A'}</div>
+            <div style={{ marginTop: '4px' }}>Valid Until: {form.validUntil || 'N/A'}</div>
+          </div>
+          
+          <div style={labelStyle}>SCOPE & PRICING</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '12px' }}>
+            <thead>
+              <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border-faint)' }}>
+                <th style={{ padding: '6px 0' }}>Item</th>
+                <th style={{ textAlign: 'right' }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {form.items.map((it, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid var(--border-faint)' }}>
+                  <td style={{ padding: '8px 0' }}>{it.desc}</td>
+                  <td style={{ textAlign: 'right' }}>MK {Number(it.amount).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          
+          <div style={{ textAlign: 'right', fontSize: '14px', fontWeight: '800', color: 'var(--primary)' }}>
+            ESTIMATED TOTAL: MK {totalValue.toLocaleString()}
+          </div>
+          
+          {form.notes && (
+            <div style={{ marginTop: '12px', padding: '8px', background: '#f8f9fa', borderRadius: '4px', fontStyle: 'italic' }}>
+              "{form.notes}"
+            </div>
+          )}
+        </div>
+      )}
+    </ModalWrapper>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: Record Payment ═══════════════════════════════════════ */
+export function RecordPaymentModal({ isOpen, onClose, onSave }) {
+  const [currentStep, setCurrentStep] = useState(1); // 1: search, 2: form, 3: preview
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [form, setForm] = useState({ amount: '', date: new Date().toISOString().split('T')[0], method: 'bank', ref: '', notes: '' });
+  const mockRecords = [{id: 'INV-5041', title: 'Annual Report Printing', client: 'TechCorp Ltd', due: 1200000}, {id: 'JOB-2841', title: 'Product Catalog', client: 'BrandX Agency', due: 850000}];
+  const filtered = mockRecords.filter(r => r.title.toLowerCase().includes(search.toLowerCase()) || r.client.toLowerCase().includes(search.toLowerCase()));
+
+  const handleClose = () => { setCurrentStep(1); setSelected(null); setForm({ amount: '', date: new Date().toISOString().split('T')[0], method: 'bank', ref: '', notes: '' }); onClose(); };
+  const handleConfirm = () => { onSave({ ...form, selectedRecord: selected }); handleClose(); };
+
+  const isPaymentFormValid = Number(form.amount) > 0 && form.date.trim() !== '' && form.method.trim() !== '';
+
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={handleClose} title="Record Payment" footer={
+      currentStep === 1 ? (
+        <>
+          <button onClick={handleClose} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--text-muted)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Cancel</button>
+        </>
+      ) : currentStep === 2 ? (
+        <>
+          <button onClick={() => setCurrentStep(1)} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--text-muted)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Back to Search</button>
+          <button onClick={() => setCurrentStep(3)} disabled={!isPaymentFormValid} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--primary)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer', opacity: isPaymentFormValid ? 1 : 0.6 }}>Preview Payment</button>
+        </>
+      ) : ( // currentStep === 3
+        <>
+          <button onClick={() => setCurrentStep(2)} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--primary)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Back to Edit</button>
+          <button onClick={handleConfirm} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--teal)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Confirm Payment</button>
+        </>
+      )
+    }>
+      {currentStep === 1 ? (
+        <div style={{ display: 'grid', gap: '12px' }}>
+          <div><label style={labelStyle}>Search Invoice/Job/Client</label><input style={inputStyle} placeholder="Type to search..." value={search} onChange={e => setSearch(e.target.value)} /></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {filtered.map(r => ( // Assuming r.id is unique for key
+              <div key={r.id} onClick={() => { setSelected(r); setCurrentStep(2); }} style={{ padding: '10px', background: 'var(--bg-canvas)', borderRadius: '6px', border: '1px solid var(--border-faint)', cursor: 'pointer', transition: 'all var(--ease)' }}
+                onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--primary)'} onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-faint)'}>
+                <div style={{ fontWeight: '600', fontSize: '11px', color: 'var(--text-head)' }}>{r.title}</div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{r.client} • MK {r.due.toLocaleString()}</div>
+              </div>
+            ))}
+            {filtered.length === 0 && <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: '11px' }}>No records found.</div>}
+          </div>
+        </div>
+      ) : currentStep === 2 ? (
+        <div style={{ display: 'grid', gap: '12px' }}>
+          <div style={{ padding: '10px', background: 'var(--bg-canvas)', borderRadius: '6px', border: '1px solid var(--border-faint)' }}>
+            <div style={{ fontWeight: '600', fontSize: '11px' }}>{selected?.title}</div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{selected?.client} • Balance: MK {selected?.due.toLocaleString()}</div>
+          </div>
+          <div><label style={labelStyle}>Amount Paid (MK)</label><input style={inputStyle} type="number" placeholder={selected?.due} value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} required /></div>
+          <div><label style={labelStyle}>Payment Date</label><input type="date" style={inputStyle} value={form.date} onChange={e => setForm({...form, date: e.target.value})} required /></div>
+          <div><label style={labelStyle}>Method</label>
+            <div style={{ display: 'flex', gap: '6px' }}>{['cash', 'bank', 'mobile', 'cheque'].map(m => <button key={m} onClick={() => setForm({...form, method: m})} style={pillBtnStyle(form.method === m)}>{m.charAt(0).toUpperCase() + m.slice(1)}</button>)}</div>
+          </div>
+          <div><label style={labelStyle}>Reference / Receipt #</label><input style={inputStyle} placeholder="e.g., TRX-8892" value={form.ref} onChange={e => setForm({...form, ref: e.target.value})} /></div>
+          <div><label style={labelStyle}>Notes</label><textarea style={{...inputStyle, minHeight: '50px', resize: 'vertical'}} value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} /></div>
+        </div>
+      ) : ( // currentStep === 3: Preview
+        <div style={{ fontSize: '11px', color: 'var(--text-body)' }}>
+          <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px', border: '1px dashed var(--border-light)' }}>
+            <div style={labelStyle}>RECORDING PAYMENT FOR</div>
+            <div style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-head)' }}>{selected?.title}</div>
+            <div style={{ marginTop: '4px' }}>Client: {selected?.client}</div>
+            <div style={{ marginTop: '4px' }}>Original Due: MK {selected?.due.toLocaleString()}</div>
+          </div>
+
+          <div style={{ display: 'grid', gap: '8px', marginBottom: '12px' }}>
+            <div><span style={labelStyle}>AMOUNT PAID:</span> <b style={{ fontSize: '13px', color: 'var(--primary)' }}>MK {Number(form.amount).toLocaleString()}</b></div>
+            <div><span style={labelStyle}>PAYMENT DATE:</span> <b>{form.date}</b></div>
+            <div><span style={labelStyle}>METHOD:</span> <span className={`status-badge ${form.method}`}>{form.method.toUpperCase()}</span></div>
+            {form.ref && <div><span style={labelStyle}>REFERENCE:</span> <b>{form.ref}</b></div>}
+          </div>
+
+          {form.notes && (
+            <div style={{ marginTop: '12px', padding: '8px', background: '#f8f9fa', borderRadius: '4px', fontStyle: 'italic' }}>
+              "{form.notes}"
+            </div>
+          )}
+        </div>
+      )}
+    </ModalWrapper>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: Add Expense ═══════════════════════════════════════ */
+export function AddExpenseModal({ isOpen, onClose, onSave }) {
+  const [step, setStep] = useState('form');
+  const [form, setForm] = useState({ category: '', title: '', amount: '', date: new Date().toISOString().split('T')[0], notes: '' });
+
+  const handleClose = () => { setStep('form'); onClose(); };
+  const handleConfirm = () => { onSave(form); setStep('form'); };
+
+  const isFormValid = form.category.trim() !== '' && form.title.trim() !== '' && Number(form.amount) > 0;
+
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={handleClose} title={step === 'preview' ? "Preview Expense" : "Add Expense"} footer={
+      step === 'form' ? (
+        <>
+          <button onClick={handleClose} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--text-muted)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Cancel</button>
+          <button onClick={() => setStep('preview')} disabled={!isFormValid} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--primary)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer', opacity: isFormValid ? 1 : 0.6 }}>Preview Expense</button>
+        </>
+      ) : (
+        <>
+          <button onClick={() => setStep('form')} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--primary)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Back to Edit</button>
+          <button onClick={handleConfirm} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--teal)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Confirm & Save</button>
+        </>
+      )
+    }>
+      {step === 'form' ? (
+      <div style={{ display: 'grid', gap: '12px' }}>
+        <div><label style={labelStyle}>Category</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>{['Fuel', 'Paper', 'Maintenance', 'Utilities', 'Staff', 'Other'].map(c => <button key={c} onClick={() => setForm({...form, category: c})} style={pillBtnStyle(form.category === c)}>{c}</button>)}</div>
+        </div>
+        <div><label style={labelStyle}>Description</label><input style={inputStyle} placeholder="e.g., Delivery fuel Lilongwe-Blantyre" value={form.title} onChange={e => setForm({...form, title: e.target.value})} /></div>
+        <div><label style={labelStyle}>Amount (MK)</label><input style={inputStyle} type="number" placeholder="0" value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} /></div>
+        <div><label style={labelStyle}>Date</label><input type="date" style={inputStyle} value={form.date} onChange={e => setForm({...form, date: e.target.value})} /></div>
+        <div><label style={labelStyle}>Notes</label><textarea style={{...inputStyle, minHeight: '60px', resize: 'vertical'}} value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} /></div>
+      </div>
+      ) : (
+        <div style={{ fontSize: '11px', color: 'var(--text-body)' }}>
+          <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px', border: '1px dashed var(--border-light)' }}>
+            <div style={labelStyle}>EXPENSE DETAILS</div>
+            <div style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-head)' }}>{form.title}</div>
+            <div style={{ marginTop: '4px' }}>Category: <span className={`status-badge ${form.category.toLowerCase()}`}>{form.category}</span></div>
+            <div style={{ marginTop: '4px' }}>Date: {form.date}</div>
+          </div>
+          
+          <div style={{ display: 'grid', gap: '8px', marginBottom: '12px' }}>
+            <div><span style={labelStyle}>AMOUNT:</span> <b style={{ fontSize: '13px', color: 'var(--red)' }}>MK {Number(form.amount).toLocaleString()}</b></div>
+          </div>
+          
+          {form.notes && (
+            <div style={{ marginTop: '12px', padding: '8px', background: '#f8f9fa', borderRadius: '4px', fontStyle: 'italic' }}>
+              "{form.notes}"
+            </div>
+          )}
+        </div>
+      </div>
+    </ModalWrapper>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: New Vendor ═══════════════════════════════════════ */
+export function NewVendorModal({ isOpen, onClose, onSave }) {
+  const [step, setStep] = useState('form');
+  const [form, setForm] = useState({ name: '', category: 'Paper & Supplies', contact: '', phone: '', email: '', location: '', notes: '' });
+
+  const handleClose = () => { setStep('form'); onClose(); };
+  const handleConfirm = () => { onSave(form); setStep('form'); };
+
+  const isFormValid = form.name.trim() !== '' && form.category.trim() !== '';
+
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={handleClose} title={step === 'preview' ? "Preview Vendor" : "New Vendor"} footer={
+      step === 'form' ? (
+        <>
+          <button onClick={handleClose} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--text-muted)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Cancel</button>
+          <button onClick={() => setStep('preview')} disabled={!isFormValid} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--primary)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer', opacity: isFormValid ? 1 : 0.6 }}>Preview Vendor</button>
+        </>
+      ) : (
+        <>
+          <button onClick={() => setStep('form')} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--primary)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Back to Edit</button>
+          <button onClick={handleConfirm} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--teal)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Confirm & Save</button>
+        </>
+      )
+    }>
+      {step === 'form' ? (
+      <div style={{ display: 'grid', gap: '12px' }}>
+        <div><label style={labelStyle}>Business Name</label><input style={inputStyle} placeholder="e.g., Paper Plus Co." value={form.name} onChange={e => setForm({...form, name: e.target.value})} /></div>
+        <div><label style={labelStyle}>Category</label><input style={inputStyle} value={form.category} onChange={e => setForm({...form, category: e.target.value})} /></div>
+        <div><label style={labelStyle}>Contact Person</label><input style={inputStyle} placeholder="Full name" value={form.contact} onChange={e => setForm({...form, contact: e.target.value})} /></div>
+        <div><label style={labelStyle}>Phone (+265)</label><input style={inputStyle} placeholder="+265 1 234 567" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} /></div>
+        <div><label style={labelStyle}>Email</label><input style={inputStyle} placeholder="vendor@email.mw" value={form.email} onChange={e => setForm({...form, email: e.target.value})} /></div>
+        <div><label style={labelStyle}>Location</label><input style={inputStyle} placeholder="City / Area" value={form.location} onChange={e => setForm({...form, location: e.target.value})} /></div>
+        <div><label style={labelStyle}>Notes</label><textarea style={{...inputStyle, minHeight: '50px', resize: 'vertical'}} value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} /></div>
+      </div>
+      ) : (
+        <div style={{ fontSize: '11px', color: 'var(--text-body)' }}>
+          <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px', border: '1px dashed var(--border-light)' }}>
+            <div style={labelStyle}>VENDOR DETAILS</div>
+            <div style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-head)' }}>{form.name}</div>
+            <div style={{ marginTop: '4px' }}>Category: {form.category}</div>
+            <div style={{ marginTop: '4px' }}>Contact Person: {form.contact || 'N/A'}</div>
+          </div>
+          
+          <div style={{ display: 'grid', gap: '8px', marginBottom: '12px' }}>
+            {form.phone && <div><span style={labelStyle}>PHONE:</span> <b>{form.phone}</b></div>}
+            {form.email && <div><span style={labelStyle}>EMAIL:</span> <b>{form.email}</b></div>}
+            {form.location && <div><span style={labelStyle}>LOCATION:</span> <b>{form.location}</b></div>}
+          </div>
+          
+          {form.notes && (
+            <div style={{ marginTop: '12px', padding: '8px', background: '#f8f9fa', borderRadius: '4px', fontStyle: 'italic' }}>
+              "{form.notes}"
+            </div>
+          )}
+        </div>
+      </div>
+    </ModalWrapper>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: Quick Entry ═══════════════════════════════════════ */
+export function QuickEntryModal({ isOpen, onClose, onSave }) {
+  const [step, setStep] = useState('form');
+  const [form, setForm] = useState({ note: '', amount: '', tags: [] });
+  const toggleTag = t => setForm(p => ({...p, tags: p.tags.includes(t) ? p.tags.filter(x=>x!==t) : [...p.tags, t]}));
+
+  const handleClose = () => { setStep('form'); onClose(); };
+  const handleConfirm = () => { onSave(form); setStep('form'); };
+
+  const isFormValid = form.note.trim() !== '';
+
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={handleClose} title={step === 'preview' ? "Preview Quick Entry" : "Quick Entry"} footer={
+      step === 'form' ? (
+        <>
+          <button onClick={handleClose} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--text-muted)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Cancel</button>
+          <button onClick={() => setStep('preview')} disabled={!isFormValid} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--primary)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer', opacity: isFormValid ? 1 : 0.6 }}>Preview Entry</button>
+        </>
+      ) : (
+        <>
+          <button onClick={() => setStep('form')} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--primary)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Back to Edit</button>
+          <button onClick={handleConfirm} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--teal)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Confirm & Log</button>
+        </>
+      )
+    }>
+      {step === 'form' ? (
+      <div style={{ display: 'grid', gap: '12px' }}>
+        <div><label style={labelStyle}>Quick Note</label><textarea style={{...inputStyle, minHeight: '80px', resize: 'vertical'}} placeholder="What's on your mind?" value={form.note} onChange={e => setForm({...form, note: e.target.value})} /></div>
+        <div><label style={labelStyle}>Amount (MK) - Optional</label><input style={inputStyle} type="number" placeholder="0" value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} /></div>
+        <div><label style={labelStyle}>Tags</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>{['Urgent', 'Follow-up', 'Supplier', 'Personal', 'Admin'].map(t => <button key={t} onClick={() => toggleTag(t)} style={pillBtnStyle(form.tags.includes(t))}>{t}</button>)}</div>
+        </div>
+      </div>
+      ) : (
+        <div style={{ fontSize: '11px', color: 'var(--text-body)' }}>
+          <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px', border: '1px dashed var(--border-light)' }}>
+            <div style={labelStyle}>QUICK NOTE</div>
+            <div style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-head)' }}>{form.note}</div>
+          </div>
+          
+          {Number(form.amount) > 0 && (
+            <div style={{ display: 'grid', gap: '8px', marginBottom: '12px' }}>
+              <div><span style={labelStyle}>AMOUNT:</span> <b style={{ fontSize: '13px', color: 'var(--primary)' }}>MK {Number(form.amount).toLocaleString()}</b></div>
+            </div>
+          )}
+
+          {form.tags.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '12px' }}>
+              {form.tags.map(t => <span key={t} style={{ background: 'var(--bg-canvas)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border-faint)' }}>{t}</span>)}
+            </div>
+          )}
+        </div>
+      )}
+    </ModalWrapper>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: Search Results ═══════════════════════════════════════ */
+export function SearchResultsModal({ isOpen, onClose, results, onSelect }) {
+  if (!isOpen) return null;
+  return (
+    <div style={{ position: 'fixed', top: '60px', left: '50%', transform: 'translateX(-50%)', zIndex: 950, width: '90%', maxWidth: '400px', background: 'var(--bg-card)', borderRadius: 'var(--r-card)', border: '1px solid var(--border-faint)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)', animation: 'fadeIn 0.15s ease' }}>
+      <div style={{ padding: '12px', borderBottom: '1px solid var(--border-faint)', fontSize: '11px', fontWeight: '600', color: 'var(--text-muted)' }}>Search Results</div>
+      <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+        {results.length === 0 ? (
+          <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px' }}>No matches found.</div>
+        ) : results.map((r, i) => (
+          <div key={i} onClick={() => onSelect(r)} style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-faint)', cursor: 'pointer', transition: 'background var(--ease)' }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-canvas)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            <div style={{ fontWeight: '600', fontSize: '11px', color: 'var(--text-head)' }}>{r.title}</div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{r.type} • {r.sub}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ padding: '8px', textAlign: 'center' }}>
+        <button onClick={onClose} style={{ fontSize: '10px', color: 'var(--secondary)', fontWeight: '600', background: 'none', border: 'none', cursor: 'pointer' }}>Close Search</button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: Recent Activity Preview ═══════════════════════════════════════ */
+export function ActivityPreviewModal({ isOpen, onClose, activity }) {
+  if (!isOpen || !activity) return null;
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title="Activity Details" footer={<>
+      <button onClick={onClose} style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--primary)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}>Close</button>
+    </>}>
+      <div style={{ display: 'grid', gap: '10px', fontSize: '11px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontWeight: '600', color: 'var(--text-head)' }}>{activity.type}</span>
+          <span className={`status-badge ${activity.status === 'paid' ? 'paid' : activity.status === 'overdue' ? 'overdue' : 'pending'}`}>{activity.status}</span>
+        </div>
+        <div style={{ color: 'var(--text-muted)' }}>Client: {activity.client}</div>
+        <div style={{ fontWeight: '700', color: 'var(--text-head)', fontSize: '14px' }}>{activity.amount}</div>
+        <div style={{ color: 'var(--text-muted)' }}>{activity.time}</div>
+        <div style={{ padding: '8px', background: 'var(--bg-canvas)', borderRadius: '6px', color: 'var(--text-body)', lineHeight: '1.4' }}>
+          {activity.notes || 'No additional notes.'}
+        </div>
+      </div>
+    </ModalWrapper>
+  );
+}

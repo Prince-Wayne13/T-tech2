@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200">
+  <rect width="320" height="200" rx="18" fill="#f7f3ed"/>
+  <rect x="72" y="50" width="176" height="112" rx="12" fill="#3a506b"/>
+  <rect x="96" y="70" width="128" height="42" rx="6" fill="#fff"/>
+  <rect x="108" y="124" width="104" height="18" rx="4" fill="#a06b6b"/>
+  <circle cx="228" cy="136" r="8" fill="#6b8e7b"/>
+  <text x="160" y="34" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#26384a">Digital Press</text>
+</svg>

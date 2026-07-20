@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200">
+  <rect width="320" height="200" rx="18" fill="#f2f4f8"/>
+  <rect x="34" y="66" width="252" height="54" rx="12" fill="#2f4858"/>
+  <rect x="52" y="84" width="216" height="18" rx="4" fill="#f7fafc"/>
+  <path d="M78 120h164v48H78z" fill="#6b8e7b"/>
+  <path d="M96 136h128" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+  <text x="160" y="38" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#26384a">Large Format</text>
+</svg>

@@ -1,0 +1,5 @@
+amount,client_id,client_name,created_at,currency,discount_amount,due_on,id,invoice_ref,issued_on,notes,paid_on,payment_terms,purchase_order,status,tax_rate,title,updated_at
+842500.0,1,Mwai Events,2026-05-18T20:55:45.991913,MWK,0.0,2026-05-26,1,INV-5001,2026-05-12,Thank you for choosing T-Tech for your print production.,,14 days,ME-APR-221,sent,0.0,Event launch print package,2026-05-18T20:55:45.991917
+804000.0,2,Nyasa Fresh Foods,2026-05-18T20:55:45.991921,MWK,0.0,2026-05-10,2,INV-5002,2026-04-26,Thank you for choosing T-Tech for your print production.,2026-05-12,14 days,,paid,0.0,Sticker and decal rollout,2026-05-18T20:55:45.991923
+1105000.0,3,Thrive Microfinance,2026-05-18T20:55:45.991925,MWK,0.0,2026-05-03,3,INV-5003,2026-04-13,Thank you for choosing T-Tech for your print production.,,14 days,,overdue,0.0,Microloan campaign flyers,2026-05-18T20:55:45.991928
+456000.0,4,Urban Threads Boutique,2026-05-18T20:55:45.991930,MWK,0.0,2026-05-16,4,INV-5004,2026-05-02,Thank you for choosing T-Tech for your print production.,2026-05-17,14 days,,paid,0.0,Boutique window branding,2026-05-18T20:55:45.991932

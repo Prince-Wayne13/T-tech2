@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200">
+  <rect width="320" height="200" rx="18" fill="#f8f2f4"/>
+  <rect x="50" y="72" width="220" height="68" rx="12" fill="#a06b6b"/>
+  <rect x="78" y="91" width="92" height="20" rx="5" fill="#fff"/>
+  <circle cx="204" cy="102" r="16" fill="#3a506b"/>
+  <path d="M110 148h100" stroke="#3a506b" stroke-width="12" stroke-linecap="round"/>
+  <text x="160" y="40" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#26384a">UV DTF</text>
+</svg>

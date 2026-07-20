@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200">
+  <rect width="320" height="200" rx="18" fill="#f6f1ed"/>
+  <path d="M112 64h96l38 38-28 28-18-16v54h-80v-54l-18 16-28-28z" fill="#3a506b"/>
+  <path d="M132 84h56" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
+  <text x="160" y="38" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#26384a">Sweater Soon</text>
+</svg>

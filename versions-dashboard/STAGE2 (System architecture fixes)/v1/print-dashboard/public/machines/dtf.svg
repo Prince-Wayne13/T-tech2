@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200">
+  <rect width="320" height="200" rx="18" fill="#eef5f3"/>
+  <rect x="42" y="62" width="236" height="76" rx="10" fill="#3a506b"/>
+  <rect x="68" y="82" width="120" height="26" rx="5" fill="#f7fafc"/>
+  <rect x="206" y="82" width="45" height="26" rx="5" fill="#6b8e7b"/>
+  <path d="M96 138h128l-16 36H112z" fill="#1f2e3d"/>
+  <text x="160" y="36" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#26384a">DTF + Heat Press</text>
+</svg>

@@ -1,0 +1,198 @@
+// PrintLayouts.jsx — PrintOps BMS (Print-Ready PDF Layouts)
+import React from 'react';
+import './styles.css';
+
+/* ═══════════════════════════════════════
+   ICON SYSTEM
+═══════════════════════════════════════ */
+function Icon({ d, size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d={d} />
+    </svg>
+  );
+}
+
+const D = {
+  printer: 'M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z',
+  check: 'M20 6L9 17l-5-5',
+  alert: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z M12 9v4 M12 17h.01',
+};
+
+/* ═══════════════════════════════════════
+   GLOBAL PRINT STYLES
+   Hides UI chrome, forces light background, optimizes for A4
+═══════════════════════════════════════ */
+const printStyles = `
+  @media print {
+    body * { visibility: hidden; }
+    .print-layout, .print-layout * { visibility: visible; }
+    .print-layout { position: absolute; left: 0; top: 0; width: 100%; background: #fff !important; color: #2D3748 !important; padding: 20px !important; }
+    .no-print { display: none !important; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #E5E8ED; text-align: left; font-size: 11px; }
+    th { font-weight: 600; color: #4A5568; background: #F8F9FB; }
+  }
+`;
+
+/* ═══════════════════════════════════════ PRINT LAYOUT: Invoice ═══════════════════════════════════════ */
+export function InvoicePrintLayout({ data, business }) {
+  if (!data) return null;
+  const total = data.items.reduce((s, i) => s + (i.qty * i.rate), 0);
+  const vat = total * 0.165;
+  return (
+    <>
+      <style dangerouslySetInnerHTML={{ __html: printStyles }} />
+      <div className="print-layout" style={{ fontFamily: 'Inter, sans-serif', maxWidth: '800px', margin: '0 auto', padding: '30px', background: '#fff' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '30px', borderBottom: '2px solid #3A506B', paddingBottom: '16px' }}>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: '700', color: '#3A506B', marginBottom: '4px' }}>{business?.name || 'T-Tech Printing'}</div>
+            <div style={{ fontSize: '10px', color: '#8B9BB0' }}>MRA TIN: {business?.tin || '1002345678'}</div>
+            <div style={{ fontSize: '10px', color: '#8B9BB0' }}>{business?.address || 'Area 47, Lilongwe'}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '16px', fontWeight: '700', color: '#3A506B', marginBottom: '4px' }}>INVOICE</div>
+            <div style={{ fontSize: '11px', color: '#4A5568' }}>#{data.id || 'INV-0000'}</div>
+            <div style={{ fontSize: '10px', color: '#8B9BB0' }}>Date: {data.date || new Date().toLocaleDateString()}</div>
+            <div style={{ fontSize: '10px', color: '#8B9BB0' }}>Due: {data.due || '—'}</div>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ fontSize: '10px', fontWeight: '600', color: '#8B9BB0', textTransform: 'uppercase', marginBottom: '4px' }}>Bill To</div>
+          <div style={{ fontSize: '12px', fontWeight: '600', color: '#2D3748' }}>{data.client || 'Client Name'}</div>
+          <div style={{ fontSize: '10px', color: '#4A5568' }}>{data.address || '—'}</div>
+        </div>
+
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '24px' }}>
+          <thead><tr><th>Description</th><th style={{ textAlign: 'center' }}>Qty</th><th style={{ textAlign: 'right' }}>Rate</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
+          <tbody>
+            {data.items?.map((it, i) => (
+              <tr key={i}><td>{it.desc}</td><td style={{ textAlign: 'center' }}>{it.qty}</td><td style={{ textAlign: 'right' }}>MK {Number(it.rate).toLocaleString()}</td><td style={{ textAlign: 'right' }}>MK {(it.qty * it.rate).toLocaleString()}</td></tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '30px' }}>
+          <div style={{ width: '200px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '11px' }}><span>Subtotal</span><span>MK {total.toLocaleString()}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '11px', color: '#8B9BB0' }}><span>VAT (16.5%)</span><span>MK {vat.toLocaleString()}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', fontWeight: '700', color: '#3A506B', borderTop: '1px solid #E5E8ED', paddingTop: '6px' }}><span>Total</span><span>MK {(total + vat).toLocaleString()}</span></div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: '10px', color: '#8B9BB0', borderTop: '1px solid #E5E8ED', paddingTop: '16px' }}>
+          <div style={{ fontWeight: '600', marginBottom: '4px' }}>Payment Terms & Notes</div>
+          <div>{data.notes || 'Payment due within 14 days. Bank transfers preferred. Thank you for your business!'}</div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ═══════════════════════════════════════ PRINT LAYOUT: Proposal ═══════════════════════════════════════ */
+export function ProposalPrintLayout({ data, business }) {
+  if (!data) return null;
+  return (
+    <>
+      <style dangerouslySetInnerHTML={{ __html: printStyles }} />
+      <div className="print-layout" style={{ fontFamily: 'Inter, sans-serif', maxWidth: '800px', margin: '0 auto', padding: '30px', background: '#fff' }}>
+        <div style={{ textAlign: 'center', marginBottom: '30px', borderBottom: '2px solid #5B7C99', paddingBottom: '16px' }}>
+          <div style={{ fontSize: '18px', fontWeight: '700', color: '#5B7C99' }}>{business?.name || 'T-Tech Printing'}</div>
+          <div style={{ fontSize: '12px', color: '#4A5568', marginTop: '4px' }}>PROJECT PROPOSAL</div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px', fontSize: '11px' }}>
+          <div><strong>Prepared For:</strong> {data.client || '—'}</div>
+          <div><strong>Valid Until:</strong> {data.validUntil || '—'}</div>
+        </div>
+
+        <div style={{ marginBottom: '20px' }}>
+          <div style={{ fontSize: '14px', fontWeight: '700', color: '#2D3748', marginBottom: '8px' }}>{data.title || 'Proposal Title'}</div>
+          <div style={{ fontSize: '11px', color: '#4A5568', lineHeight: '1.5' }}>{data.notes || 'Scope of work and pricing breakdown as discussed.'}</div>
+        </div>
+
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '24px' }}>
+          <thead><tr><th>Service / Item</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
+          <tbody>
+            {data.items?.map((it, i) => (
+              <tr key={i}><td>{it.desc}</td><td style={{ textAlign: 'right' }}>MK {Number(it.amount).toLocaleString()}</td></tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div style={{ textAlign: 'right', fontSize: '16px', fontWeight: '700', color: '#5B7C99', marginBottom: '30px' }}>
+          Total Estimate: MK {Number(data.total || 0).toLocaleString()}
+        </div>
+
+        <div style={{ fontSize: '10px', color: '#8B9BB0', borderTop: '1px solid #E5E8ED', paddingTop: '16px' }}>
+          <div style={{ fontWeight: '600', marginBottom: '4px' }}>Terms</div>
+          <div>50% deposit required to commence work. Balance due upon delivery. Prices valid for 30 days.</div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ═══════════════════════════════════════ PRINT LAYOUT: Job Ticket ═══════════════════════════════════════ */
+export function JobTicketPrintLayout({ data }) {
+  if (!data) return null;
+  return (
+    <>
+      <style dangerouslySetInnerHTML={{ __html: printStyles }} />
+      <div className="print-layout" style={{ fontFamily: 'Inter, sans-serif', maxWidth: '400px', margin: '0 auto', padding: '20px', background: '#fff', border: '2px dashed #6B8E7B' }}>
+        <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+          <div style={{ fontSize: '16px', fontWeight: '700', color: '#6B8E7B' }}>PRODUCTION TICKET</div>
+          <div style={{ fontSize: '12px', color: '#4A5568' }}>#{data.id || 'JOB-0000'}</div>
+        </div>
+        
+        <div style={{ marginBottom: '12px', padding: '10px', background: '#F1F4F8', borderRadius: '6px' }}>
+          <div style={{ fontSize: '11px', fontWeight: '600', color: '#2D3748', marginBottom: '2px' }}>{data.client || '—'}</div>
+          <div style={{ fontSize: '12px', color: '#4A5568' }}>{data.title || 'Job Title'}</div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '10px', marginBottom: '16px' }}>
+          <div><strong>Due:</strong> {data.due || '—'}</div>
+          <div><strong>Priority:</strong> <span style={{ textTransform: 'capitalize' }}>{data.priority || 'medium'}</span></div>
+          <div><strong>Printer:</strong> {data.printer || '—'}</div>
+          <div><strong>Status:</strong> {data.status || 'Queued'}</div>
+        </div>
+
+        <div style={{ fontSize: '10px', marginBottom: '8px' }}><strong>Specs:</strong> {data.specs?.join(', ') || '—'}</div>
+        <div style={{ fontSize: '10px', padding: '8px', border: '1px solid #E5E8ED', borderRadius: '4px', minHeight: '40px' }}>
+          <strong>Notes:</strong> {data.notes || 'None'}
+        </div>
+        
+        <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '9px', color: '#8B9BB0' }}>
+          T-Tech Printing Solutions • Area 47, Lilongwe • +265 1 234 567
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ═══════════════════════════════════════ PRINT LAYOUT: Report Summary ═══════════════════════════════════════ */
+export function ReportPrintLayout({ title, rows, footer }) {
+  return (
+    <>
+      <style dangerouslySetInnerHTML={{ __html: printStyles }} />
+      <div className="print-layout" style={{ fontFamily: 'Inter, sans-serif', maxWidth: '800px', margin: '0 auto', padding: '30px', background: '#fff' }}>
+        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+          <div style={{ fontSize: '18px', fontWeight: '700', color: '#3A506B' }}>{title || 'Report'}</div>
+          <div style={{ fontSize: '10px', color: '#8B9BB0' }}>Generated on {new Date().toLocaleDateString()}</div>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr><th style={{ textAlign: 'left' }}>Item</th><th style={{ textAlign: 'left' }}>Category</th><th style={{ textAlign: 'right' }}>Amount</th><th style={{ textAlign: 'center' }}>Status</th></tr></thead>
+          <tbody>
+            {rows?.map((r, i) => (
+              <tr key={i}><td>{r.name}</td><td>{r.cat}</td><td style={{ textAlign: 'right' }}>MK {Number(r.amount).toLocaleString()}</td><td style={{ textAlign: 'center' }}>{r.status}</td></tr>
+            ))}
+          </tbody>
+        </table>
+        {footer && <div style={{ marginTop: '24px', fontSize: '10px', color: '#8B9BB0', borderTop: '1px solid #E5E8ED', paddingTop: '12px' }}>{footer}</div>}
+      </div>
+    </>
+  );
+}
