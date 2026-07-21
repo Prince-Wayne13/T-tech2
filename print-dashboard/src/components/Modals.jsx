@@ -1,3 +1,5 @@
+// path: src/components/Modals.jsx
+
 // Modals.jsx — PrintOps BMS (Mobile Toggle + Full-Size Preview)
 import React, { useEffect, useState, useLayoutEffect, useRef } from 'react';
 import { calculateTotal } from '../utils/calculateTotal';

@@ -1,3 +1,5 @@
+# path: backend/app/models.py
+
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -181,18 +183,60 @@ class Payment(TimestampMixin, SerializableMixin, db.Model):
     invoice = db.relationship("Invoice", back_populates="payments")
 
 
+class Proposal(TimestampMixin, SerializableMixin, db.Model):
+    __tablename__ = "proposals"
+
+    id = db.Column(db.Integer, primary_key=True)
+    proposal_ref = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("clients.id"))
+    client_name = db.Column(db.String(160), nullable=False)
+    title = db.Column(db.String(180), nullable=False)
+    status = db.Column(db.String(30), default="draft", index=True)
+    discount_amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+    currency = db.Column(db.String(10), default="MWK", nullable=False)
+    valid_until = db.Column(db.Date)
+    contact = db.Column(db.String(160))
+    notes = db.Column(db.Text)
+    converted_invoice_id = db.Column(db.Integer, db.ForeignKey("invoices.id"), nullable=True)
+
+    client = db.relationship("Client", backref="proposals")
+    converted_invoice = db.relationship("Invoice", backref="source_proposal", uselist=False)
+    line_items = db.relationship(
+        "ProposalLineItem",
+        back_populates="proposal",
+        cascade="all, delete-orphan",
+        order_by="ProposalLineItem.position.asc()",
+    )
+
+
+class ProposalLineItem(TimestampMixin, SerializableMixin, db.Model):
+    __tablename__ = "proposal_line_items"
+
+    id = db.Column(db.Integer, primary_key=True)
+    proposal_id = db.Column(db.Integer, db.ForeignKey("proposals.id"), nullable=False, index=True)
+    position = db.Column(db.Integer, default=1, nullable=False)
+    description = db.Column(db.String(255), nullable=False)
+    amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+
+    proposal = db.relationship("Proposal", back_populates="line_items")
+
+
 class Expense(TimestampMixin, SerializableMixin, db.Model):
     __tablename__ = "expenses"
 
     id = db.Column(db.Integer, primary_key=True)
     expense_ref = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=True, index=True)
     category = db.Column(db.String(100), nullable=False, index=True)
     title = db.Column(db.String(180), nullable=False)
     amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     expense_date = db.Column(db.Date, nullable=False)
+    paid_on = db.Column(db.Date, nullable=True)
     status = db.Column(db.String(30), default="pending", index=True)
     submitted_by = db.Column(db.String(120))
     notes = db.Column(db.Text)
+
+    vendor = db.relationship("Vendor", backref="expenses")
 
 
 class Advance(TimestampMixin, SerializableMixin, db.Model):

@@ -14,7 +14,19 @@ const D = {
   download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
 };
 
-const EXPENSE_STATUSES = ['All', 'Pending', 'Approved', 'Rejected', 'Reimbursed'];
+// ── Merge note (T-Tech2 Merge 2) ──────────────────────────────────────────
+// Payables.jsx has been deleted. Its filter set is reproduced exactly:
+// "Outstanding" = expense.status in ['pending', 'approved', 'scheduled']
+// (Payables.jsx's original three unpaid-lens statuses), with 'pending'
+// relabeled "Scheduled" in the UI — preserved below, gated on active tab.
+const TABS = ['Outstanding', 'All', 'Paid', 'Reimbursed'];
+
+const TAB_STATUS_SETS = {
+  Outstanding: ['pending', 'approved', 'scheduled'],
+  All: null,
+  Paid: ['paid'],
+  Reimbursed: ['reimbursed'],
+};
 
 const mapExpense = expense => ({
   id: expense.expense_ref || `EXP-${expense.id}`,
@@ -25,17 +37,27 @@ const mapExpense = expense => ({
   amountValue: Number(expense.amount || 0),
   date: compactDate(expense.expense_date),
   expense_date: expense.expense_date,
+  paid_on: expense.paid_on,
   status: expense.status || 'pending',
   submittedBy: expense.submitted_by || 'Team',
+  // Known gap (unfixed, flagged per dev-log.md 2026-07-20/21 entries):
+  // Expense.to_dict() does not serialize a joined vendor_name — the backend
+  // has no join for it yet. Falling back to submitted_by/'Internal' exactly
+  // as Payables.jsx did, pending a future backend fix.
+  vendorName: expense.vendor_name || expense.submitted_by || 'Internal',
   notes: expense.notes || 'Backend expense record',
 });
 
-function ExpenseRow({ exp, onPreview, onStatus }) {
+// Shared row renderer. `onOutstandingTab` gates the Payables-style
+// relabeling (pending -> "Scheduled") and the days-overdue display that
+// only made sense in the money-owed framing.
+function ExpenseRow({ exp, onPreview, onStatus, onOutstandingTab }) {
   const statusConfig = {
-    pending: { label: 'Pending', cls: 'pending', accent: 'var(--warning)' },
+    pending: { label: onOutstandingTab ? 'Scheduled' : 'Pending', cls: onOutstandingTab ? 'pending' : 'pending', accent: 'var(--warning)' },
     approved: { label: 'Approved', cls: 'active', accent: 'var(--primary)' },
     rejected: { label: 'Rejected', cls: 'overdue', accent: 'var(--red)' },
     reimbursed: { label: 'Reimbursed', cls: 'paid', accent: 'var(--teal)' },
+    paid: { label: 'Paid', cls: 'paid', accent: 'var(--teal)' },
   };
   const cfg = statusConfig[exp.status] || statusConfig.pending;
 
@@ -47,7 +69,7 @@ function ExpenseRow({ exp, onPreview, onStatus }) {
       </div>
       <div className="vendor-info">
         <div className="vendor-name">{exp.title}</div>
-        <div className="vendor-cat">{exp.category} - {exp.date}</div>
+        <div className="vendor-cat">{onOutstandingTab ? exp.vendorName : exp.category} - {exp.date}</div>
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '100px' }}>
         <div className="activity-amount">{exp.amount}</div>
@@ -82,9 +104,12 @@ function ExpenseRow({ exp, onPreview, onStatus }) {
 }
 
 export default function Expenses() {
-  const [filter, setFilter] = useState('All');
+  // Default tab is "Outstanding" (Option C) — matches the owner's daily
+  // use pattern: checking what's owed, not browsing full expense history.
+  const [tab, setTab] = useState('Outstanding');
   const [search, setSearch] = useState('');
   const [expenses, setExpenses] = useState([]);
+  const [paidThisMonthExpenses, setPaidThisMonthExpenses] = useState([]);
   const [showEntry, setShowEntry] = useState(false);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -98,31 +123,77 @@ export default function Expenses() {
       .then(data => setExpenses((data.items || []).map(mapExpense)))
       .catch(() => setError('Could not load expenses. Check the backend connection and try again.'))
       .finally(() => setLoading(false));
+
+    // Separate call carried over from Payables.jsx for the "Paid This Month"
+    // stat — deliberately unfiltered by the tab/search toolbar since it's a
+    // fixed calendar-month figure, not a view of the currently filtered list.
+    api.expenses('?per_page=500&status=paid')
+      .then(response => setPaidThisMonthExpenses(response.items || []))
+      .catch(() => {});
   };
 
   useEffect(() => {
     loadExpenses();
   }, []);
 
+  const statusSet = TAB_STATUS_SETS[tab];
   const filtered = expenses.filter(expense => {
     const query = search.toLowerCase();
-    const matchesStatus = filter === 'All' || expense.status === filter.toLowerCase();
+    const matchesTab = !statusSet || statusSet.includes(expense.status);
     const matchesSearch = `${expense.category} ${expense.title} ${expense.id}`.toLowerCase().includes(query);
-    return matchesStatus && matchesSearch;
+    return matchesTab && matchesSearch;
   });
 
-  const total = filtered.reduce((sum, expense) => sum + expense.amountValue, 0);
-  const pendingTotal = filtered.filter(expense => expense.status === 'pending').reduce((sum, expense) => sum + expense.amountValue, 0);
-  const reimbursedTotal = filtered.filter(expense => expense.status === 'reimbursed').reduce((sum, expense) => sum + expense.amountValue, 0);
+  const onOutstandingTab = tab === 'Outstanding';
+
+  const now = new Date();
+  const paidThisMonthTotal = paidThisMonthExpenses
+    .filter(expense => {
+      if (!expense.paid_on) return false;
+      const paidDate = new Date(expense.paid_on);
+      return paidDate.getMonth() === now.getMonth() && paidDate.getFullYear() === now.getFullYear();
+    })
+    .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+
+  const outstandingList = expenses.filter(e => ['pending', 'approved', 'scheduled'].includes(e.status));
+  const outstandingTotal = outstandingList.reduce((sum, e) => sum + e.amountValue, 0);
+  const pendingTotal = expenses.filter(e => e.status === 'pending').reduce((sum, e) => sum + e.amountValue, 0);
+  const reimbursedTotal = expenses.filter(e => e.status === 'reimbursed').reduce((sum, e) => sum + e.amountValue, 0);
+  const paidTotal = expenses.filter(e => e.status === 'paid').reduce((sum, e) => sum + e.amountValue, 0);
+  const allTotal = expenses.reduce((sum, e) => sum + e.amountValue, 0);
   const categoryTotals = filtered.reduce((acc, expense) => ({ ...acc, [expense.category]: (acc[expense.category] || 0) + expense.amountValue }), {});
   const topCategory = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1])[0];
 
-  const stats = [
-    { label: 'Total This Month', value: money(total), sub: 'All categories', icon: D.expenses, color: 'primary' },
-    { label: 'Pending Approval', value: money(pendingTotal), sub: `${filtered.filter(expense => expense.status === 'pending').length} requests`, icon: D.clock, color: 'warning' },
-    { label: 'Top Category', value: topCategory?.[0] || '-', sub: topCategory ? money(topCategory[1]) : 'No spend', icon: D.alert, color: 'secondary' },
-    { label: 'Reimbursed', value: money(reimbursedTotal), sub: 'Paid back', icon: D.check, color: 'teal' },
-  ];
+  // Stats reflect the ACTIVE tab. "Paid This Month" only shows prominently
+  // on Outstanding/Paid tabs (per spec) — it isn't relevant framing on
+  // Reimbursed (a different money flow) or All (mixed statuses).
+  const statsByTab = {
+    Outstanding: [
+      { label: 'Total Outstanding', value: money(outstandingTotal), sub: 'Unpaid bills', icon: D.expenses, color: 'warning' },
+      { label: 'Pending Approval', value: money(pendingTotal), sub: `${expenses.filter(e => e.status === 'pending').length} requests`, icon: D.clock, color: 'secondary' },
+      { label: 'Outstanding Count', value: String(outstandingList.length), sub: 'Awaiting payment', icon: D.alert, color: 'red' },
+      { label: 'Paid This Month', value: money(paidThisMonthTotal), sub: `${paidThisMonthExpenses.length} expenses paid`, icon: D.check, color: 'teal' },
+    ],
+    All: [
+      { label: 'Total This Month', value: money(allTotal), sub: 'All categories', icon: D.expenses, color: 'primary' },
+      { label: 'Outstanding', value: money(outstandingTotal), sub: 'Unpaid bills', icon: D.clock, color: 'warning' },
+      { label: 'Top Category', value: topCategory?.[0] || '-', sub: topCategory ? money(topCategory[1]) : 'No spend', icon: D.alert, color: 'secondary' },
+      { label: 'Expense Count', value: String(expenses.length), sub: 'All records', icon: D.expenses, color: 'teal' },
+    ],
+    Paid: [
+      { label: 'Total Paid', value: money(paidTotal), sub: 'Marked paid', icon: D.check, color: 'teal' },
+      { label: 'Paid This Month', value: money(paidThisMonthTotal), sub: `${paidThisMonthExpenses.length} expenses paid`, icon: D.check, color: 'teal' },
+      { label: 'Paid Count', value: String(filtered.length), sub: 'Settled expenses', icon: D.expenses, color: 'primary' },
+      { label: 'Top Category', value: topCategory?.[0] || '-', sub: topCategory ? money(topCategory[1]) : 'No spend', icon: D.alert, color: 'secondary' },
+    ],
+    Reimbursed: [
+      { label: 'Total Reimbursed', value: money(reimbursedTotal), sub: 'Paid back to staff', icon: D.check, color: 'teal' },
+      { label: 'Reimbursed Count', value: String(filtered.length), sub: 'Settled reimbursements', icon: D.expenses, color: 'primary' },
+      { label: 'Top Category', value: topCategory?.[0] || '-', sub: topCategory ? money(topCategory[1]) : 'No spend', icon: D.alert, color: 'secondary' },
+      { label: 'Total This Month', value: money(allTotal), sub: 'All categories', icon: D.expenses, color: 'warning' },
+    ],
+  };
+  const stats = statsByTab[tab];
 
   const handleSave = async form => {
     try {
@@ -159,9 +230,9 @@ export default function Expenses() {
     <main className="main-canvas" style={{ display: 'block' }}>
       <ModuleHeader title="Expenses" subtitle="Track operational costs & approvals" actionLabel="New Expense" onAction={() => setShowEntry(true)} />
       <StatsGrid stats={stats} />
-      <ModuleToolbar filters={EXPENSE_STATUSES} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search category, title, or ID..." />
+      <ModuleToolbar filters={TABS} filter={tab} setFilter={setTab} search={search} setSearch={setSearch} placeholder="Search category, title, or ID..." />
       <RegisterCard title="Expense Log" countLabel={`${filtered.length} expense${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="EXP" emptyMessage="No expenses match your filters.">
-        {filtered.map(exp => <ExpenseRow key={exp.id} exp={exp} onPreview={setPreview} onStatus={handleStatus} />)}
+        {filtered.map(exp => <ExpenseRow key={exp.id} exp={exp} onPreview={setPreview} onStatus={handleStatus} onOutstandingTab={onOutstandingTab} />)}
       </RegisterCard>
       <AddExpenseModal isOpen={showEntry} onClose={() => setShowEntry(false)} onSave={handleSave} />
       <PreviewModal title={preview ? `Expense Preview: ${preview.expense_ref || preview.id || 'Draft'}` : ''} data={preview} onClose={() => setPreview(null)} />

@@ -25,7 +25,20 @@ const D = {
   send: 'M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z',
 };
 
-const INVOICE_STATUSES = ['All', 'Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled'];
+// ── Merge note (T-Tech2 Merge 1) ──────────────────────────────────────────
+// Receivables.jsx has been deleted. Its filter set is reproduced exactly:
+// "Outstanding" = invoice.status in ['sent', 'overdue'] (Receivables.jsx's
+// original filter was ['sent', 'overdue', 'paid'] for its full list, with
+// 'sent' relabeled "Due" in the UI — that relabel is preserved below, gated
+// on which tab is active rather than which file it lives in).
+const TABS = ['Outstanding', 'All', 'Paid', 'Drafts'];
+
+const TAB_STATUS_SETS = {
+  Outstanding: ['sent', 'overdue'],
+  All: null, // no filter
+  Paid: ['paid'],
+  Drafts: ['draft'],
+};
 
 function mapInvoice(invoice) {
   const lineItems = invoice.line_items || [];
@@ -48,10 +61,14 @@ function mapInvoice(invoice) {
   };
 }
 
-function InvoiceRow({ inv, onPreview, onEdit }) {
+// Shared row renderer. `onOutstandingTab` gates the Receivables-style
+// relabeling (sent -> "Due") so it only applies where that framing made
+// sense — it stays off on the "All" tab where showing the true status
+// ("Sent") is more accurate for a full-history view.
+function InvoiceRow({ inv, onPreview, onEdit, onOutstandingTab }) {
   const statusConfig = {
     draft: { label: 'Draft', cls: 'pending', accent: 'var(--warning)' },
-    sent: { label: 'Sent', cls: 'current', accent: 'var(--secondary)' },
+    sent: { label: onOutstandingTab ? 'Due' : 'Sent', cls: onOutstandingTab ? 'current' : 'current', accent: 'var(--secondary)' },
     paid: { label: 'Paid', cls: 'paid', accent: 'var(--teal)' },
     overdue: { label: 'Overdue', cls: 'overdue', accent: 'var(--red)' },
     cancelled: { label: 'Cancelled', cls: 'overdue', accent: 'var(--text-muted)' },
@@ -112,7 +129,9 @@ function invoicePayload(form, fallback = {}) {
 }
 
 export default function Invoices() {
-  const [filter, setFilter] = useState('All');
+  // Default tab is "Outstanding" (Option C) — matches the owner's daily
+  // use pattern of checking what's unpaid, not browsing full history.
+  const [tab, setTab] = useState('Outstanding');
   const [search, setSearch] = useState('');
   const [invoices, setInvoices] = useState([]);
   const [invoiceStats, setInvoiceStats] = useState(null);
@@ -139,19 +158,51 @@ export default function Invoices() {
     loadInvoices();
   }, []);
 
+  const statusSet = TAB_STATUS_SETS[tab];
   const filtered = invoices.filter(invoice => {
     const query = search.toLowerCase();
-    const matchesStatus = filter === 'All' || invoice.status === filter.toLowerCase();
+    const matchesTab = !statusSet || statusSet.includes(invoice.status);
     const matchesSearch = `${invoice.client} ${invoice.title} ${invoice.id}`.toLowerCase().includes(query);
-    return matchesStatus && matchesSearch;
+    return matchesTab && matchesSearch;
   });
 
-  const stats = [
-    { label: 'Outstanding', value: money(invoiceStats?.outstanding), sub: 'Unpaid invoices', icon: D.invoices, color: 'warning' },
-    { label: 'Overdue', value: String(invoiceStats?.overdue_count || 0), sub: 'Past due invoices', icon: D.alert, color: 'red' },
-    { label: 'Paid This Month', value: money(invoiceStats?.paid), sub: 'Cash collected', icon: D.check, color: 'teal' },
-    { label: 'Draft Value', value: money(invoiceStats?.draft), sub: `${invoiceStats?.invoice_count || filtered.length} invoices`, icon: D.clock, color: 'secondary' },
-  ];
+  const onOutstandingTab = tab === 'Outstanding';
+
+  // Stats reflect the ACTIVE tab, not always the full unfiltered total.
+  // On "Outstanding" the headline is "Total Outstanding," not "Total (All)."
+  const outstandingTotal = invoices.filter(i => ['sent', 'overdue'].includes(i.status)).reduce((sum, i) => sum + i.amountValue, 0);
+  const overdueList = invoices.filter(i => i.status === 'overdue');
+  const paidTotal = invoices.filter(i => i.status === 'paid').reduce((sum, i) => sum + i.amountValue, 0);
+  const draftTotal = invoices.filter(i => i.status === 'draft').reduce((sum, i) => sum + i.amountValue, 0);
+  const allTotal = invoices.reduce((sum, i) => sum + i.amountValue, 0);
+
+  const statsByTab = {
+    Outstanding: [
+      { label: 'Total Outstanding', value: money(invoiceStats?.outstanding ?? outstandingTotal), sub: 'Unpaid invoices', icon: D.invoices, color: 'warning' },
+      { label: 'Overdue', value: String(invoiceStats?.overdue_count ?? overdueList.length), sub: 'Past due invoices', icon: D.alert, color: 'red' },
+      { label: 'Due Amount', value: money(outstandingTotal), sub: `${filtered.length} invoices`, icon: D.clock, color: 'secondary' },
+      { label: 'Paid This Month', value: money(invoiceStats?.paid), sub: 'Cash collected', icon: D.check, color: 'teal' },
+    ],
+    All: [
+      { label: 'Total Invoiced', value: money(allTotal), sub: 'All statuses', icon: D.invoices, color: 'primary' },
+      { label: 'Outstanding', value: money(outstandingTotal), sub: 'Unpaid invoices', icon: D.clock, color: 'warning' },
+      { label: 'Overdue', value: String(overdueList.length), sub: 'Past due invoices', icon: D.alert, color: 'red' },
+      { label: 'Invoice Count', value: String(invoices.length), sub: 'All records', icon: D.invoices, color: 'secondary' },
+    ],
+    Paid: [
+      { label: 'Total Paid', value: money(paidTotal), sub: 'Collected', icon: D.check, color: 'teal' },
+      { label: 'Paid This Month', value: money(invoiceStats?.paid), sub: 'Cash collected', icon: D.check, color: 'teal' },
+      { label: 'Paid Count', value: String(filtered.length), sub: 'Invoices settled', icon: D.invoices, color: 'primary' },
+      { label: 'Avg. Value', value: money(filtered.length ? paidTotal / filtered.length : 0), sub: 'Per paid invoice', icon: D.invoices, color: 'secondary' },
+    ],
+    Drafts: [
+      { label: 'Draft Value', value: money(draftTotal), sub: `${filtered.length} invoices`, icon: D.clock, color: 'secondary' },
+      { label: 'Draft Count', value: String(filtered.length), sub: 'Awaiting send', icon: D.invoices, color: 'warning' },
+      { label: 'Total Invoiced', value: money(allTotal), sub: 'All statuses', icon: D.invoices, color: 'primary' },
+      { label: 'Overdue', value: String(overdueList.length), sub: 'Past due invoices', icon: D.alert, color: 'red' },
+    ],
+  };
+  const stats = statsByTab[tab];
 
   const handleSave = async form => {
     try {
@@ -173,9 +224,9 @@ export default function Invoices() {
     <main className="main-canvas" style={{ display: 'block' }}>
       <ModuleHeader title="Invoices" subtitle="Track billing & payments" actionLabel="New Invoice" onAction={() => setShowEntry(true)} />
       <StatsGrid stats={stats} />
-      <ModuleToolbar filters={INVOICE_STATUSES} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search client, title, or ID..." />
+      <ModuleToolbar filters={TABS} filter={tab} setFilter={setTab} search={search} setSearch={setSearch} placeholder="Search client, title, or ID..." />
       <RegisterCard title="Invoice Register" countLabel={`${filtered.length} invoice${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="INV" emptyMessage="No invoices match your filters.">
-        {filtered.map(inv => <InvoiceRow key={inv.id} inv={inv} onPreview={setPreview} onEdit={setEditRecord} />)}
+        {filtered.map(inv => <InvoiceRow key={inv.id} inv={inv} onPreview={setPreview} onEdit={setEditRecord} onOutstandingTab={onOutstandingTab} />)}
       </RegisterCard>
       <NewInvoiceModal
         isOpen={showEntry || Boolean(editRecord)}

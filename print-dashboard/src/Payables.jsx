@@ -1,3 +1,5 @@
+// path: src/Payables.jsx
+
 import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
@@ -58,6 +60,7 @@ export default function Payables() {
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [payables, setPayables] = useState([]);
+  const [paidThisMonth, setPaidThisMonth] = useState([]);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -65,26 +68,16 @@ export default function Payables() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    Promise.all([api.vendors('?per_page=200'), api.expenses('?per_page=200')])
-      .then(([vendorResponse, expenseResponse]) => {
-        const vendorRows = (vendorResponse.items || [])
-          .filter(vendor => Number(vendor.balance || 0) > 0)
-          .map(vendor => ({
-            id: `VEN-${vendor.id}`,
-            vendor: vendor.name,
-            title: vendor.category || 'Vendor balance',
-            amount: money(vendor.balance),
-            due: compactDate(vendor.updated_at),
-            days: 0,
-            status: vendor.status === 'current' ? 'due' : 'overdue',
-            contact: vendor.email || vendor.phone || vendor.name,
-            notes: 'Backend vendor balance',
-          }));
+    // Single source of truth: unpaid Expense rows linked to a Vendor via vendor_id.
+    // Vendor.balance is deprecated as of this change — it was a manually-typed field
+    // with no link to Expense and risked double-counting the same debt. Not reading it here.
+    api.expenses('?per_page=200')
+      .then(expenseResponse => {
         const expenseRows = (expenseResponse.items || [])
-          .filter(expense => ['pending', 'approved'].includes(expense.status))
+          .filter(expense => ['pending', 'approved', 'scheduled'].includes(expense.status))
           .map(expense => ({
             id: expense.expense_ref,
-            vendor: expense.submitted_by || 'Internal',
+            vendor: expense.vendor_name || expense.submitted_by || 'Internal',
             title: expense.title,
             amount: money(expense.amount),
             due: compactDate(expense.expense_date),
@@ -93,10 +86,16 @@ export default function Payables() {
             contact: expense.category,
             notes: expense.notes || 'Backend expense payable',
           }));
-        setPayables([...vendorRows, ...expenseRows]);
+        setPayables(expenseRows);
       })
       .catch(() => setError('Could not load payables. Check the backend connection and try again.'))
       .finally(() => setLoading(false));
+
+    // Separate call for "Paid This Month" — deliberately unfiltered by the search/status
+    // toolbar, since it's a fixed calendar-month stat, not a view of the filtered list.
+    api.expenses('?per_page=500&status=paid')
+      .then(response => setPaidThisMonth(response.items || []))
+      .catch(() => {});
   }, []);
 
   const filtered = payables.filter(payable => {
@@ -109,11 +108,21 @@ export default function Payables() {
   const total = filtered.reduce((sum, payable) => sum + amountNumber(payable.amount), 0);
   const overdue = filtered.filter(payable => payable.status === 'overdue');
   const due = filtered.filter(payable => payable.status === 'due');
+
+  const now = new Date();
+  const paidThisMonthTotal = paidThisMonth
+    .filter(expense => {
+      if (!expense.paid_on) return false;
+      const paidDate = new Date(expense.paid_on);
+      return paidDate.getMonth() === now.getMonth() && paidDate.getFullYear() === now.getFullYear();
+    })
+    .reduce((sum, expense) => sum + amountNumber(expense.amount), 0);
+
   const stats = [
     { label: 'Total Payable', value: money(total), sub: 'Unpaid bills', icon: D.ap, color: 'warning' },
     { label: 'Overdue Amount', value: money(overdue.reduce((sum, payable) => sum + amountNumber(payable.amount), 0)), sub: `${overdue.length} past due`, icon: D.alert, color: 'red' },
     { label: 'Due This Week', value: money(due.reduce((sum, payable) => sum + amountNumber(payable.amount), 0)), sub: `${due.length} bills`, icon: D.clock, color: 'secondary' },
-    { label: 'Paid This Month', value: money(0), sub: 'No backend payment table', icon: D.check, color: 'teal' },
+    { label: 'Paid This Month', value: money(paidThisMonthTotal), sub: `${paidThisMonth.length} expenses paid`, icon: D.check, color: 'teal' },
   ];
 
   return (

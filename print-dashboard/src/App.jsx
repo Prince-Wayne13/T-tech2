@@ -4,8 +4,6 @@ import './styles.css';
 import Jobs from './Jobs';
 import Proposals from './Proposals';
 import Invoices from './Invoices';
-import Receivables from './Receivables';
-import Payables from './Payables';
 import Expenses from './Expenses';
 import Vendors from './Vendors';
 import Advances from './Advances';
@@ -92,8 +90,6 @@ const NAV_GROUPS = [
   {
     label: 'Financials',
     items: [
-      { id: 'Receivables', icon: 'ar'         },
-      { id: 'Payables',    icon: 'ap'         },
       { id: 'Expenses',    icon: 'expenses'   },
       { id: 'Vendors',     icon: 'vendors'    },
       { id: 'Advances',    icon: 'advances'   },
@@ -718,8 +714,6 @@ export default function App() {
       case 'Jobs': return <Jobs />;
       case 'Proposals': return <Proposals />;
       case 'Invoices': return <Invoices />;
-      case 'Receivables': return <Receivables />;
-      case 'Payables': return <Payables />;
       case 'Expenses': return <Expenses />;
       case 'Vendors': return <Vendors />;
       case 'Advances': return <Advances />;

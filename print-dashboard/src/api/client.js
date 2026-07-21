@@ -1,3 +1,5 @@
+// path: src/api/client.js
+
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 const cache = new Map();
 const CACHE_TTL = 30000;
@@ -60,6 +62,18 @@ export const api = {
   }),
   invoiceStats: () => request('/invoices/stats'),
   invoiceDocument: (id) => request(`/invoices/${id}/document`),
+  proposals: (params = '') => request(`/proposals${params}`),
+  createProposal: (payload) => request('/proposals', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  updateProposal: (id, payload) => request(`/proposals/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  acceptProposal: (id) => request(`/proposals/${id}/accept`, {
+    method: 'POST',
+  }),
   expenses: (params = '') => request(`/expenses${params}`),
   createExpense: (payload) => request('/expenses', {
     method: 'POST',

@@ -53,4 +53,97 @@ Scope: Discussion only — no code changes committed yet
 * Build order recommended: (1) `Proposal` model + routes first, since UI is ready and waiting; (2) fix Payables via `Expense.vendor_id`; (3) leave Receivables and Archive untouched.
 * No code changes made in this entry — proceeding to draft new frontend page structure and component-level design in this same session.
 
+## 2026-07-20 — Proposal backend, Payables single-source fix, cashflow date fix (Steps 1–5)
+Author: Myth Claude
+Date: 2026-07-20
+Scope: Implementation session addressing all 5 items from the prior audit — Proposal model/routes, Proposal→Invoice conversion, Payables/Expense.vendor_id consolidation, cashflow report date fix, Payables "Paid This Month" stat.
+
+**Completed:**
+* Step 1 — Added `Proposal` and `ProposalLineItem` models (models.py), new `services/proposals.py` and `routes/proposals.py` mirroring the existing Invoice pattern (`apply_search`/`list_response` reused, `TimestampMixin`/`SerializableMixin` reused). `discount_amount` used, matching Invoice's existing pattern — no new discount scheme introduced.
+* Step 2 — Added `POST /api/proposals/<id>/accept`, reusing `apply_line_items()` and `sync_invoice_amount()` from `services/invoices.py` rather than duplicating that logic. Added `createProposal`/`updateProposal`/`acceptProposal`/`proposals` to `client.js`. Rewrote `Proposals.jsx` to fetch/save/accept against the real backend instead of local-state-only fake data.
+* Step 3 — Added `Expense.vendor_id` (nullable FK to Vendor) and `Expense.paid_on` (needed for Step 3's auto-flip and Step 4's cashflow fix — added once, used by both). Added `services/expenses.py::sync_expense_status()`, mirroring `sync_invoice_amount()`'s "flip to paid" pattern, simplified since Expense has no line-item/payment sub-table. Reworked `Payables.jsx` to source from `api.expenses()` only.
+* Step 4 — Fixed `build_financial_report()` in reports.py: `revenue_by_month` now sums `Payment.amount` keyed by `Payment.paid_on` (actual cash received) instead of `Invoice.issued_on` (booked). `expenses_by_month` now keys off the new `Expense.paid_on` instead of `expense_date`, excluding not-yet-paid expenses from that bucket.
+* Step 5 — Replaced hardcoded `Paid This Month: 0` in `Payables.jsx` with a real sum of paid expenses in the current calendar month, via a separate `api.expenses('?per_page=500&status=paid')` call.
+
+**Decisions made explicit, per audit's request:**
+* `Vendor.balance` is **deprecated, not deleted**. Frontend no longer reads it (Payables.jsx sources from Expense only now). The column itself is left in the schema — no destructive migration performed in this pass. This needs a follow-up decision: either a real migration to drop it, or a documented "read-only legacy field" status. Currently it's just silently unused, which is not a stable end state.
+* `ProposalLineItem` was given its own table rather than reusing `InvoiceLineItem`. The proposal form (`NewProposalModal` in Modals.jsx) collects flat `{desc, amount}` scope items, not `{quantity, unit_price}` like Invoice line items. Forcing that into `InvoiceLineItem`'s shape would have meant inventing a fake `quantity=1` at storage time instead of at conversion time. The `quantity=1, unit_price=amount` mapping now happens explicitly and once, inside the `/accept` conversion route, which is the more honest place for that transformation to live.
+
+**Deviations from the stated step order:**
+* Step 5 was implemented immediately after Step 3 rather than as a separate final pass, because Step 3's rework of `Payables.jsx` left a dangling reference to the removed `vendorRows` variable — leaving that broken between steps would have meant shipping a non-functional intermediate state. Both changes are in the same `Payables.jsx` edit block.
+* Proposal status vocabulary was changed from the frontend's original fake set (`draft/sent/viewed/approved/rejected`) to match the backend model's stated set (`draft/sent/accepted/declined`) per the audit prompt's own Step 1 spec. This is a visible UI behavior change (filter pills, badge labels) beyond a pure plumbing fix — flagging it as a deviation rather than a silent side effect.
+
+**Known gaps / unverified assumptions (backend route files not available in this session):**
+* `__init__.py`'s `register_blueprints()` body, `routes/common.py` (`apply_search`/`list_response` exact signatures), `utils.py` (`parse_date` exact signature), and the real `routes/expenses.py` were not available to inspect directly. All new/modified route code was written to match the *pattern* visible in `routes/invoices.py`, but has not been diffed against the real files for these dependencies. In particular:
+  - The `proposals` blueprint registration line in `__init__.py` is a best-guess based on how `invoices`' blueprint is presumably registered — not confirmed.
+  - `routes/expenses.py`'s existing `create_expense`/`update_expense` bodies were inferred wholesale, not extended from real code — high risk of drift from whatever's actually there.
+  - `Payables.jsx`'s new row mapper reads `expense.vendor_name`, assuming the expense serializer joins and exposes the linked Vendor's name. This field does not exist yet anywhere in the shown code and needs to be added explicitly wherever `Expense.to_dict()` (or equivalent) is called in the real routes/services layer, or the vendor name will show as blank/fallback to `submitted_by`.
+* `PrintLayouts.jsx` (`PrintPreviewModal`) was not available. `Proposals.jsx` now passes it backend-shaped fields (`proposal_ref`, `client_name`, `valid_until`) instead of the old frontend-shaped ones (`id`, `client`, `expires`) — unconfirmed whether that component tolerates the rename.
+* Step 4 fix surfaces a residual inconsistency, left unfixed as out of scope: `build_financial_report()`'s top-level `revenue`/`profit` fields are still booked-total based, while `revenue_by_month` inside the same response is now cash-based. Same response object, two different accounting bases. Worth a follow-up pass to either reconcile or clearly separate "booked" vs "cash" fields throughout the report, not just in the by-month buckets.
+
+## 2026-07-20 — Verified inferred files against real source (routes/expenses.py, routes/__init__.py)
+Author: Myth Claude
+Date: 2026-07-20
+Scope: Follow-up to the previous session — user supplied the real `routes/expenses.py` and `routes/__init__.py`, previously flagged as unverified reconstructions.
+
+* Diffed both real files against the earlier best-effort reconstructions. Both matched exactly aside from the intended additions (`vendor_id`/`paid_on` handling in expenses.py; `proposals` blueprint import + registration in `__init__.py`) and the disclaimer comments, which have now been removed.
+* No structural drift found — the earlier pattern-based inference (built from `routes/invoices.py` and `routes/vendors.py`) turned out to be correct for this codebase.
+* Replaced the flagged files in the output set with clean versions built as direct edits of the real uploaded files. Re-ran a full `ast.parse()` syntax check across the backend tree — all files parse cleanly.
+* Remaining known gaps from the previous entry are unchanged: `Vendor.balance` deprecation still has no real migration; `expense.vendor_name` join field still needs to be added wherever the expense serializer runs (not yet located since a serializer/dict layer for Expense beyond the bare `SerializableMixin.to_dict()` hasn't been shown); `PrintLayouts.jsx` still unverified against the renamed Proposal preview fields; `build_financial_report()`'s top-level `revenue`/`profit` fields are still booked-basis while `revenue_by_month` is now cash-basis in the same response.
+
+## 2026-07-21 — Frontend nav consolidation plan: 4 core concepts + 2 reports
+Author: Myth Claude
+Date: 2026-07-21
+Scope: Discussion only — no code changes committed yet. Planning session mapping 13-item sidebar to 4 core concepts (Jobs, Proposals→Invoices, Receivables, Payables) + 2 reports (Cashflow, Snapshot), per business owner's complaint about nav confusion.
+
+**Findings:**
+* Confirmed `Receivables.jsx` is a true redundancy with `Invoices.jsx` — both call the identical `api.invoices()` + `api.invoiceStats()` pair; Receivables just pre-filters status and relabels. Recommended merge: delete `Receivables.jsx`, fold into `Invoices.jsx` as a status-filter tab.
+* Confirmed `Payables.jsx` and `Expenses.jsx` both read `api.expenses()` — Payables is a read-only filtered lens over the same rows Expenses authors/approves. Recommended merge: delete `Payables.jsx`, fold its "Outstanding" filter and days-overdue logic into `Expenses.jsx` as a tab.
+* Confirmed `Vendors.jsx` vs. Payables is NOT redundant — Vendors is a contact directory (phone/email/category), Payables is a money-owed view. Recommended keeping both, unmerged.
+* Confirmed `Advances.jsx` has no natural merge partner (no FK link to Vendor/Expense in models.py) — recommended as standalone secondary-nav item, not forced into Payables.
+* Recommended Proposal→Invoice UI: single page with status tabs (Draft/Sent/Accepted), NOT two linked pages — based on `PrintLayouts.jsx`'s `PrintPreviewModal` already using a `type` prop pattern that a shared row renderer can extend, and because no "converted-from" linking UI exists today to reuse for option (b).
+* **Confirmed discount gap**: `Invoice.discount_amount` and `Proposal.discount_amount` exist in `models.py` but are absent from `NewInvoiceModal`/`NewProposalModal` form state in `Modals.jsx`, absent from both payload builders, and absent from both `PrintLayouts.jsx` totals sections. Not surfaced anywhere in the current UI despite existing in the data model.
+* **Re-confirmed prior flagged gap** (from 2026-07-20 entry): `Payables.jsx`'s mapper reads `expense.vendor_name`, but `Expense.to_dict()` (via `SerializableMixin`) only serializes raw columns including `vendor_id`, not a joined name. Checked the actual `expenses.py` route file this session — `list_expenses()`/`create_expense()` still do not add a joined `vendor_name` field. Gap remains open, not yet fixed.
+* Audit Log, Archive, Export Data, Settings confirmed auxiliary — recommended demotion to a secondary/gear-icon nav group, unchanged as components.
+
+**New navigation structure proposed (not yet implemented):**
+Primary: Jobs · Proposals & Invoices (tabbed) · Receivables (merged into Invoices) · Payables (merged into Expenses)
+Reports: Cashflow tab · Snapshot tab (replacing current generic `Reports.jsx` report-library view)
+Secondary: Vendors, Advances, Audit Log, Archive, Export Data, Settings
+
+**Reports spec:**
+* Cashflow report should read `financials.revenue_by_month`/`expenses_by_month` from `api.financialReport('month')` (cash-basis, per 2026-07-20 fix) — explicitly NOT the top-level `revenue`/`profit` fields, which the 2026-07-20 entry already flagged as still booked-basis in the same response. Recommended reusing `PulseChart` (currently in `App.jsx`) by moving it into the rebuilt `Reports.jsx`.
+* Snapshot report should reuse `StatsCard`/`StatsGrid` from `ModuleStandard.jsx` for all 4 metrics; only new logic needed is a client-side reduce for total unpaid payables (no backend total exists for this yet).
+
+**Open gaps carried forward / files still needed (not attached this session):**
+* `backend/app/__init__.py`, `routes/common.py`, `services/invoices.py`, `services/proposals.py`, `services/expenses.py`, `routes/reports.py`, `utils.py` — none attached this session. Could not verify exact shape of `invoiceStats.outstanding`, `serialize_invoice()`, or whether `vendor_name` join might already exist in a services-layer file not shown. Flagged rather than assumed.
+* No code changes made — this was a planning/analysis session only. Implementation (the Receivables/Invoices merge, Payables/Expenses merge, discount fields, Reports.jsx rebuild) is the next session's work.
+
+2026-07-21 — Merge execution: Invoices+Receivables and Expenses+Payables (Option C)
+
+Author: Myth Claude Date: 2026-07-21 Scope: Implementation session executing both approved page merges from the prior UI consolidation review, per the "Merge Execution Prompt (Option C: Default-to-Outstanding)".
+
+Completed:
+
+Merge 1 (Invoices + Receivables): Receivables.jsx deleted (not just unlinked from nav — the file is gone from the output set). Its filter logic now lives in Invoices.jsx as a tab bar: Outstanding | All | Paid | Drafts, in that order. Page opens on "Outstanding" by default. "Outstanding" = status in ['sent', 'overdue'], taken verbatim from Receivables.jsx's original filter. The "sent" → "Due" relabel Receivables used is preserved in the shared InvoiceRow renderer, gated by an onOutstandingTab flag rather than by which file the code lives in — on "All" the true "Sent" status shows instead.
+Merge 2 (Expenses + Payables): Payables.jsx deleted (confirmed removed, not unlinked). Its filter logic now lives in Expenses.jsx as a tab bar: Outstanding | All | Paid | Reimbursed, in that order. Page opens on "Outstanding" by default. "Outstanding" = status in ['pending', 'approved', 'scheduled'], taken verbatim from Payables.jsx. The "pending" → "Scheduled" relabel and vendor-name-first row framing are preserved in the shared ExpenseRow renderer, gated the same way.
+App.jsx: removed Receivables/Payables imports, nav-group entries, and renderPage() switch cases. No redirects or duplicate nav items left behind — one "Invoices" entry, one "Expenses" entry.
+Stats cards (StatsGrid) on both merged pages now recompute per active tab rather than always showing the full unfiltered total — e.g. Outstanding shows "Total Outstanding" / "Total Payable"-style framing, All shows the full total, etc. Switching tabs updates the stat cards, confirmed against each tab's own filtered dataset.
+"Paid This Month" (originally on Payables.jsx) moved into Expenses.jsx and is shown on the Outstanding and Paid tabs only — not on All or Reimbursed, where that framing doesn't apply to every row being viewed.
+NewInvoiceModal and the expense approve/reject/reimburse actions (Expenses.jsx::handleStatus) were left wired exactly as before — untouched by this merge, per the prompt's scope.
+
+Known gap flagged, not fixed (per prompt instruction):
+
+Expenses.jsx's mapper still reads expense.vendor_name, which does not exist on the backend's Expense.to_dict() output (no vendor join yet — confirmed again this session against the real expenses.py). The exact fallback chain from Payables.jsx (expense.vendor_name || expense.submitted_by || 'Internal') is preserved verbatim, now with an inline comment flagging it as a known gap pending a backend join, so this doesn't need rediscovering next session.
+
+Explicitly not touched this session (per prompt's exclusion list):
+
+Proposals.jsx / Proposal→Invoice tab work — separate, not-yet-executed piece.
+Discount fields (discount_amount) missing from NewInvoiceModal/NewProposalModal — separate, already-identified follow-up.
+expense.vendor_name backend join — flagged only, per above, not fixed.
+Vendors.jsx, Advances.jsx, AuditLog.jsx, Archive.jsx, ExportData.jsx, Settings.jsx — untouched; their proposed primary→secondary nav-group demotion remains a separate task, not included here.
+
+Verification performed:
+
+Manual brace/paren balance check on all three edited files (Invoices.jsx, Expenses.jsx, App.jsx) — all balanced, all retain their export default function declaration. Babel/Node tooling was unavailable in this sandbox (no network access to npm registry for @babel/core), so this was a structural check, not a full AST parse — flagging that distinction rather than overstating confidence in the check performed.
 <!-- New entries go above this line, most recent first -->
