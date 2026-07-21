@@ -1,3 +1,5 @@
+# path: backend/app/seed.py
+
 from datetime import date, datetime, time, timedelta
 import random
 
@@ -69,13 +71,17 @@ def seed_mock_data(reset=False):
     db.session.add_all(clients)
     db.session.flush()
 
+    # Vendor.balance was removed (see dev-log.md) — unpaid amounts are sourced
+    # entirely from Expense rows via Expense.vendor_id in Payables/Expenses.
     vendors = [
-        Vendor(name="Paperline Supplies", category="Paper & card stock", phone="+265 999 300 410", balance=825000, status="current"),
-        Vendor(name="InkPro Malawi", category="Large format ink", phone="+265 888 900 111", balance=315000, status="current"),
-        Vendor(name="FlexMaster Media", category="Banner vinyl", phone="+265 999 502 878", balance=0, status="current"),
-        Vendor(name="SignFit Installations", category="Mounting & installation", phone="+265 888 141 511", balance=185000, status="watch"),
+        Vendor(name="Paperline Supplies", category="Paper & card stock", phone="+265 999 300 410", status="current"),
+        Vendor(name="InkPro Malawi", category="Large format ink", phone="+265 888 900 111", status="current"),
+        Vendor(name="FlexMaster Media", category="Banner vinyl", phone="+265 999 502 878", status="current"),
+        Vendor(name="SignFit Installations", category="Mounting & installation", phone="+265 888 141 511", status="watch"),
     ]
     db.session.add_all(vendors)
+    db.session.flush()
+    vendor_by_name = {vendor.name: vendor for vendor in vendors}
 
     machines = [
         ProductionMachine(machine_ref="MCH-DTF-01", name="DTF Print & Heat Press Line", category="DTF Apparel", capability="T-shirts, hoodies, caps, diaries and fabric transfers", image_path="/machines/dtf.svg", notes="Includes DTF printer, powdering/curing workflow and heat pressing machines."),
@@ -311,19 +317,24 @@ def seed_mock_data(reset=False):
     db.session.add_all(invoices)
 
     # ── EXPENSES: ~3–5 per month Jan 2025 → today ──────────────────────────
+    # vendor_name maps each template to one of the 4 seeded Vendor rows by category fit
+    # (Paperline Supplies = paper/card stock; InkPro Malawi = ink/consumables; FlexMaster
+    # Media = banner vinyl; SignFit Installations = mounting/installation labour). Templates
+    # with no natural vendor fit (utilities, fuel reimbursement, in-house maintenance/technician
+    # work) legitimately omit vendor_name — not every expense should be forced onto a vendor.
     expense_templates = [
-        {"category": "Materials", "title": "SRA3 card stock and matte laminate", "amount_range": (280000, 450000), "submitted_by": "Production"},
-        {"category": "Ink & Consumables", "title": "CMYK large-format ink set", "amount_range": (500000, 750000), "submitted_by": "Print Room"},
-        {"category": "Installation", "title": "Window branding installation labour", "amount_range": (70000, 130000), "submitted_by": "Field Team"},
+        {"category": "Materials", "title": "SRA3 card stock and matte laminate", "amount_range": (280000, 450000), "submitted_by": "Production", "vendor_name": "Paperline Supplies"},
+        {"category": "Ink & Consumables", "title": "CMYK large-format ink set", "amount_range": (500000, 750000), "submitted_by": "Print Room", "vendor_name": "InkPro Malawi"},
+        {"category": "Installation", "title": "Window branding installation labour", "amount_range": (70000, 130000), "submitted_by": "Field Team", "vendor_name": "SignFit Installations"},
         {"category": "Maintenance", "title": "Plotter blade and service kit", "amount_range": (120000, 220000), "submitted_by": "Technician"},
-        {"category": "Materials", "title": "PVC banner vinyl roll", "amount_range": (300000, 600000), "submitted_by": "Production"},
-        {"category": "Ink & Consumables", "title": "DTF powder and transfer film", "amount_range": (180000, 350000), "submitted_by": "Print Room"},
+        {"category": "Materials", "title": "PVC banner vinyl roll", "amount_range": (300000, 600000), "submitted_by": "Production", "vendor_name": "FlexMaster Media"},
+        {"category": "Ink & Consumables", "title": "DTF powder and transfer film", "amount_range": (180000, 350000), "submitted_by": "Print Room", "vendor_name": "InkPro Malawi"},
         {"category": "Utilities", "title": "Electricity prepaid token", "amount_range": (80000, 160000), "submitted_by": "Accounts"},
         {"category": "Transport", "title": "Delivery fuel reimbursement", "amount_range": (40000, 90000), "submitted_by": "Field Team"},
-        {"category": "Materials", "title": "Sublimation mugs and blanks", "amount_range": (200000, 400000), "submitted_by": "Production"},
+        {"category": "Materials", "title": "Sublimation mugs and blanks", "amount_range": (200000, 400000), "submitted_by": "Production", "vendor_name": "Paperline Supplies"},
         {"category": "Maintenance", "title": "Digital press drum unit replacement", "amount_range": (350000, 700000), "submitted_by": "Technician"},
-        {"category": "Ink & Consumables", "title": "UV DTF ink and adhesive laminate", "amount_range": (250000, 500000), "submitted_by": "Print Room"},
-        {"category": "Transport", "title": "Site installation vehicle hire", "amount_range": (60000, 120000), "submitted_by": "Field Team"},
+        {"category": "Ink & Consumables", "title": "UV DTF ink and adhesive laminate", "amount_range": (250000, 500000), "submitted_by": "Print Room", "vendor_name": "InkPro Malawi"},
+        {"category": "Transport", "title": "Site installation vehicle hire", "amount_range": (60000, 120000), "submitted_by": "Field Team", "vendor_name": "SignFit Installations"},
     ]
     expense_statuses = ["approved", "approved", "approved", "reimbursed", "pending"]
 
@@ -344,6 +355,7 @@ def seed_mock_data(reset=False):
             amount = round(amount / 1000) * 1000
             expense = Expense(
                 expense_ref=f"EXP-{exp_counter}",
+                vendor_id=vendor_by_name[tmpl["vendor_name"]].id if tmpl.get("vendor_name") else None,
                 category=tmpl["category"],
                 title=tmpl["title"],
                 amount=amount,

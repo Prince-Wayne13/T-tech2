@@ -24,7 +24,7 @@ def proposal_totals(proposal):
     }
 
 
-def serialize_proposal(proposal):
+def serialize_proposal(proposal, include_document=False):
     data = proposal.to_dict()
     data["line_items"] = [item.to_dict() for item in proposal.line_items]
     data["totals"] = proposal_totals(proposal)
@@ -33,6 +33,10 @@ def serialize_proposal(proposal):
         and proposal.valid_until < date.today()
         and proposal.status not in {"accepted", "declined"}
     )
+
+    if include_document:
+        data["document"] = build_proposal_document(proposal)
+
     return data
 
 
@@ -50,3 +54,31 @@ def apply_proposal_line_items(proposal, line_items):
                 amount=decimal_money(item.get("amount", 0)),
             )
         )
+
+
+def build_proposal_document(proposal):
+    totals = proposal_totals(proposal)
+    return {
+        "title": f"Proposal {proposal.proposal_ref}",
+        "header": {
+            "proposal_ref": proposal.proposal_ref,
+            "status": proposal.status,
+            "currency": proposal.currency,
+        },
+        "billing": {
+            "client_name": proposal.client_name,
+            "contact": proposal.contact,
+            "valid_until": proposal.valid_until.isoformat() if proposal.valid_until else None,
+        },
+        "line_items": [
+            {
+                "description": item.description,
+                "amount": float(item.amount),
+            }
+            for item in proposal.line_items
+        ],
+        "totals": totals,
+        "footer": {
+            "notes": proposal.notes,
+        },
+    }

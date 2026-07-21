@@ -40,10 +40,9 @@ const mapExpense = expense => ({
   paid_on: expense.paid_on,
   status: expense.status || 'pending',
   submittedBy: expense.submitted_by || 'Team',
-  // Known gap (unfixed, flagged per dev-log.md 2026-07-20/21 entries):
-  // Expense.to_dict() does not serialize a joined vendor_name — the backend
-  // has no join for it yet. Falling back to submitted_by/'Internal' exactly
-  // as Payables.jsx did, pending a future backend fix.
+  // routes/expenses.py::serialize_expense() now joins vendor_name for
+  // linked expenses. Fallback chain stays in place for legitimately
+  // vendor-less expenses (utilities, fuel, in-house technician work).
   vendorName: expense.vendor_name || expense.submitted_by || 'Internal',
   notes: expense.notes || 'Backend expense record',
 });

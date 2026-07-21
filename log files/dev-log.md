@@ -119,31 +119,73 @@ Secondary: Vendors, Advances, Audit Log, Archive, Export Data, Settings
 * `backend/app/__init__.py`, `routes/common.py`, `services/invoices.py`, `services/proposals.py`, `services/expenses.py`, `routes/reports.py`, `utils.py` — none attached this session. Could not verify exact shape of `invoiceStats.outstanding`, `serialize_invoice()`, or whether `vendor_name` join might already exist in a services-layer file not shown. Flagged rather than assumed.
 * No code changes made — this was a planning/analysis session only. Implementation (the Receivables/Invoices merge, Payables/Expenses merge, discount fields, Reports.jsx rebuild) is the next session's work.
 
-2026-07-21 — Merge execution: Invoices+Receivables and Expenses+Payables (Option C)
+## 2026-07-21 — Merge execution: Invoices+Receivables and Expenses+Payables (Option C)
+Author: Myth Claude
+Date: 2026-07-21
+Scope: Implementation session executing both approved page merges from the prior UI consolidation review, per the "Merge Execution Prompt (Option C: Default-to-Outstanding)".
 
-Author: Myth Claude Date: 2026-07-21 Scope: Implementation session executing both approved page merges from the prior UI consolidation review, per the "Merge Execution Prompt (Option C: Default-to-Outstanding)".
+**Completed:**
+* Merge 1 (Invoices + Receivables): `Receivables.jsx` deleted (not just unlinked from nav — the file is gone from the output set). Its filter logic now lives in `Invoices.jsx` as a tab bar: Outstanding | All | Paid | Drafts, in that order. Page opens on "Outstanding" by default. "Outstanding" = status in `['sent', 'overdue']`, taken verbatim from Receivables.jsx's original filter. The "sent" → "Due" relabel Receivables used is preserved in the shared `InvoiceRow` renderer, gated by an `onOutstandingTab` flag rather than by which file the code lives in — on "All" the true "Sent" status shows instead.
+* Merge 2 (Expenses + Payables): `Payables.jsx` deleted (confirmed removed, not unlinked). Its filter logic now lives in `Expenses.jsx` as a tab bar: Outstanding | All | Paid | Reimbursed, in that order. Page opens on "Outstanding" by default. "Outstanding" = status in `['pending', 'approved', 'scheduled']`, taken verbatim from Payables.jsx. The "pending" → "Scheduled" relabel and vendor-name-first row framing are preserved in the shared `ExpenseRow` renderer, gated the same way.
+* `App.jsx`: removed Receivables/Payables imports, nav-group entries, and `renderPage()` switch cases. No redirects or duplicate nav items left behind — one "Invoices" entry, one "Expenses" entry.
+* Stats cards (`StatsGrid`) on both merged pages now recompute per active tab rather than always showing the full unfiltered total — e.g. Outstanding shows "Total Outstanding" / "Total Payable"-style framing, All shows the full total, etc. Switching tabs updates the stat cards, confirmed against each tab's own filtered dataset.
+* "Paid This Month" (originally on Payables.jsx) moved into `Expenses.jsx` and is shown on the Outstanding and Paid tabs only — not on All or Reimbursed, where that framing doesn't apply to every row being viewed.
+* `NewInvoiceModal` and the expense approve/reject/reimburse actions (`Expenses.jsx::handleStatus`) were left wired exactly as before — untouched by this merge, per the prompt's scope.
 
-Completed:
+**Known gap flagged, not fixed (per prompt instruction):**
+* `Expenses.jsx`'s mapper still reads `expense.vendor_name`, which does not exist on the backend's `Expense.to_dict()` output (no vendor join yet — confirmed again this session against the real `expenses.py`). The exact fallback chain from Payables.jsx (`expense.vendor_name || expense.submitted_by || 'Internal'`) is preserved verbatim, now with an inline comment flagging it as a known gap pending a backend join, so this doesn't need rediscovering next session.
 
-Merge 1 (Invoices + Receivables): Receivables.jsx deleted (not just unlinked from nav — the file is gone from the output set). Its filter logic now lives in Invoices.jsx as a tab bar: Outstanding | All | Paid | Drafts, in that order. Page opens on "Outstanding" by default. "Outstanding" = status in ['sent', 'overdue'], taken verbatim from Receivables.jsx's original filter. The "sent" → "Due" relabel Receivables used is preserved in the shared InvoiceRow renderer, gated by an onOutstandingTab flag rather than by which file the code lives in — on "All" the true "Sent" status shows instead.
-Merge 2 (Expenses + Payables): Payables.jsx deleted (confirmed removed, not unlinked). Its filter logic now lives in Expenses.jsx as a tab bar: Outstanding | All | Paid | Reimbursed, in that order. Page opens on "Outstanding" by default. "Outstanding" = status in ['pending', 'approved', 'scheduled'], taken verbatim from Payables.jsx. The "pending" → "Scheduled" relabel and vendor-name-first row framing are preserved in the shared ExpenseRow renderer, gated the same way.
-App.jsx: removed Receivables/Payables imports, nav-group entries, and renderPage() switch cases. No redirects or duplicate nav items left behind — one "Invoices" entry, one "Expenses" entry.
-Stats cards (StatsGrid) on both merged pages now recompute per active tab rather than always showing the full unfiltered total — e.g. Outstanding shows "Total Outstanding" / "Total Payable"-style framing, All shows the full total, etc. Switching tabs updates the stat cards, confirmed against each tab's own filtered dataset.
-"Paid This Month" (originally on Payables.jsx) moved into Expenses.jsx and is shown on the Outstanding and Paid tabs only — not on All or Reimbursed, where that framing doesn't apply to every row being viewed.
-NewInvoiceModal and the expense approve/reject/reimburse actions (Expenses.jsx::handleStatus) were left wired exactly as before — untouched by this merge, per the prompt's scope.
+**Explicitly not touched this session (per prompt's exclusion list):**
+* Proposals.jsx / Proposal→Invoice tab work — separate, not-yet-executed piece.
+* Discount fields (`discount_amount`) missing from `NewInvoiceModal`/`NewProposalModal` — separate, already-identified follow-up.
+* `expense.vendor_name` backend join — flagged only, per above, not fixed.
+* Vendors.jsx, Advances.jsx, AuditLog.jsx, Archive.jsx, ExportData.jsx, Settings.jsx — untouched; their proposed primary→secondary nav-group demotion remains a separate task, not included here.
 
-Known gap flagged, not fixed (per prompt instruction):
+**Verification performed:**
+* Manual brace/paren balance check on all three edited files (`Invoices.jsx`, `Expenses.jsx`, `App.jsx`) — all balanced, all retain their `export default function` declaration. Babel/Node tooling was unavailable in this sandbox (no network access to npm registry for `@babel/core`), so this was a structural check, not a full AST parse — flagging that distinction rather than overstating confidence in the check performed.
 
-Expenses.jsx's mapper still reads expense.vendor_name, which does not exist on the backend's Expense.to_dict() output (no vendor join yet — confirmed again this session against the real expenses.py). The exact fallback chain from Payables.jsx (expense.vendor_name || expense.submitted_by || 'Internal') is preserved verbatim, now with an inline comment flagging it as a known gap pending a backend join, so this doesn't need rediscovering next session.
+## 2026-07-21 07:11 UTC — Vendor name join fix: real serializer + seed data linkage
+Author: Sam Claude
+Date: 2026-07-21
+Scope: Implementation session closing the `expense.vendor_name` gap flagged across the two prior sessions (2026-07-20 Payables consolidation entry and 2026-07-21 merge-execution entry), per the "Vendor Name Join Fix Prompt". Files attached: `models.py`, `routes/expenses.py`, `seed.py`, `Expenses.jsx`.
 
-Explicitly not touched this session (per prompt's exclusion list):
+**Step 1 — Current-state confirmation:**
+* Confirmed `Expense.vendor_id` (nullable FK to `Vendor.id`, `db.ForeignKey("vendors.id")`) already exists on the model, added in the 2026-07-20 Payables single-source-fix session. Not re-added.
+* Confirmed `Expense.vendor = db.relationship("Vendor", backref="expenses")` already exists on the model — usable directly for the join, no new relationship needed.
+* Confirmed `routes/expenses.py`'s `list_expenses()`, `create_expense()`, and `update_expense()` all called raw `expense.to_dict()` / bare `list_response(query...)` with no serializer wrapper — `vendor_name` was genuinely absent from every Expense endpoint response, not just unused by the frontend.
 
-Proposals.jsx / Proposal→Invoice tab work — separate, not-yet-executed piece.
-Discount fields (discount_amount) missing from NewInvoiceModal/NewProposalModal — separate, already-identified follow-up.
-expense.vendor_name backend join — flagged only, per above, not fixed.
-Vendors.jsx, Advances.jsx, AuditLog.jsx, Archive.jsx, ExportData.jsx, Settings.jsx — untouched; their proposed primary→secondary nav-group demotion remains a separate task, not included here.
+**Step 2 — Serializer join added (`backend/app/routes/expenses.py`):**
+* Added `serialize_expense(expense)`, mirroring `routes/jobs.py::serialize_job()`'s exact pattern (`expense.to_dict() | {"vendor_name": expense.vendor.name if expense.vendor else None}`) — same `.to_dict() | {...}` merge style, same null-safe conditional shape. `SerializableMixin.to_dict()` itself was left untouched, matching the prompt's instruction to keep the base mixin generic.
+* Wired `serialize_expense` into all three Expense endpoints: `list_expenses()` now passes it as the `serializer` arg to `list_response(...)` (same pattern `jobs.py` and `invoices.py` already use for their own serializers); `create_expense()` and `update_expense()` now `return jsonify(serialize_expense(expense))` instead of `expense.to_dict()`.
+* Vendor-less expenses (`vendor_id` is `None`) resolve to `"vendor_name": null` in the JSON response rather than a fabricated placeholder string — left for the frontend's existing fallback chain to handle, per the prompt.
 
-Verification performed:
+**Step 3 — seed.py vendor linkage:**
+* Added a `vendor_by_name = {vendor.name: vendor for vendor in vendors}` lookup dict immediately after `db.session.add_all(vendors)` + `db.session.flush()`, directly mirroring the existing `machine_by_ref = {machine.machine_ref: machine for machine in machines}` pattern already used later in the same file for jobs/pricing items.
+* Added a `vendor_name` key to 8 of the 12 `expense_templates` entries, mapped by category fit to the 4 seeded vendors:
+  - Paperline Supplies (paper/card stock) → "SRA3 card stock and matte laminate", "Sublimation mugs and blanks"
+  - InkPro Malawi (ink/consumables) → "CMYK large-format ink set", "DTF powder and transfer film", "UV DTF ink and adhesive laminate"
+  - FlexMaster Media (banner vinyl) → "PVC banner vinyl roll"
+  - SignFit Installations (mounting/installation) → "Window branding installation labour", "Site installation vehicle hire"
+  - Left unmapped (no natural vendor fit, `vendor_name` key omitted entirely): "Plotter blade and service kit" (in-house technician work), "Electricity prepaid token" (utility), "Delivery fuel reimbursement" (transport/reimbursement), "Digital press drum unit replacement" (in-house technician work).
+* Updated the Expense-creation loop inside the seeding `while` block: `vendor_id=vendor_by_name[tmpl["vendor_name"]].id if tmpl.get("vendor_name") else None`, added as a new field on the `Expense(...)` constructor call, following the exact `machine_by_ref[tmpl["machine_ref"]].id` lookup style already used for Jobs in the same file.
+* Added a comment block above the `Vendor.balance` seed values (825000/315000/0/185000) stating they are legacy/unused figures per the 2026-07-20 deprecation decision, and explicitly noting they are NOT reconciled against the sum of each vendor's linked expenses — deliberately not solving a data-integrity problem for a field being phased out. No migration to drop the column was performed, per the prompt's explicit exclusion.
 
-Manual brace/paren balance check on all three edited files (Invoices.jsx, Expenses.jsx, App.jsx) — all balanced, all retain their export default function declaration. Babel/Node tooling was unavailable in this sandbox (no network access to npm registry for @babel/core), so this was a structural check, not a full AST parse — flagging that distinction rather than overstating confidence in the check performed.
+**Step 4 — Verification:**
+* Removed the stale "Known gap (unfixed, flagged per dev-log.md 2026-07-20/21 entries)" comment block from `Expenses.jsx`'s `mapExpense()` function and replaced it with a short note pointing at `serialize_expense()` as the resolution, keeping the `expense.vendor_name || expense.submitted_by || 'Internal'` fallback chain itself unchanged (still needed for the 4 templates with no vendor mapping).
+* Ran `ast.parse()` against `models.py`, `expenses.py`, `seed.py`, and `jobs.py` (the reference pattern file) — all four parse cleanly with no syntax errors. `models.py` and `jobs.py` required no edits (both already correct per Step 1), included in the check only as confirmation.
+* Traced through `serialize_expense()` logic in isolation (no live DB) against two representative rows: a linked expense (vendor_id set, e.g. Paperline Supplies) and an unlinked expense (vendor_id null, e.g. Electricity prepaid token). Confirmed the linked case returns a real `"vendor_name": "Paperline Supplies"` string and the unlinked case returns `"vendor_name": null`, with the JSON shape otherwise matching the existing raw-column `to_dict()` output plus the one added key — no other response fields altered.
+
+**Explicitly not touched this session (per prompt's exclusion list):**
+* `Vendor.balance` deprecation status — no migration to drop the column; comment-only per Step 3, as instructed.
+* Discount fields (`discount_amount`), Proposal→Invoice tab work, auxiliary nav demotion (Vendors/Advances/AuditLog/Archive/ExportData/Settings) — all remain separate, already-identified follow-ups, unchanged this session.
+
+**Files changed this session:** `backend/app/routes/expenses.py`, `backend/app/seed.py`, `src/Expenses.jsx`. (`models.py` and `jobs.py` inspected only, not modified — both already had the needed pieces from prior sessions.)
+
+**Still-open items carried forward (unchanged from prior entries):**
+* `Vendor.balance` migration decision (drop column vs. formalize as read-only legacy field) — still undecided, comment-only status maintained.
+* Discount fields (`Invoice.discount_amount` / `Proposal.discount_amount`) still absent from `NewInvoiceModal`/`NewProposalModal` form state, payload builders, and `PrintLayouts.jsx` totals sections.
+* Proposal→Invoice tabbed UI (single page, Draft/Sent/Accepted tabs) — still not implemented; `Proposals.jsx` remains its own standalone page.
+* Primary→secondary nav-group demotion for Vendors, Advances, Audit Log, Archive, Export Data, Settings — still proposed only, not executed.
+* `build_financial_report()`'s top-level `revenue`/`profit` fields are still booked-basis while `revenue_by_month`/`expenses_by_month` are cash-basis in the same response object — flagged in a 2026-07-20 entry, still unreconciled.
+
 <!-- New entries go above this line, most recent first -->

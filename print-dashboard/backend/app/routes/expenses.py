@@ -16,6 +16,17 @@ def next_expense_ref():
     return f"EXP-{((last.id if last else 0) + 1):04d}"
 
 
+def serialize_expense(expense):
+    # Mirrors routes/jobs.py::serialize_job()'s machine_name join pattern —
+    # keeps Expense.to_dict() (SerializableMixin) generic and adds the joined
+    # field at the route/serializer layer instead. vendor_id is nullable, so
+    # vendor-less expenses (utilities, fuel, etc.) return vendor_name: null
+    # and the frontend's existing fallback chain handles that case.
+    return expense.to_dict() | {
+        "vendor_name": expense.vendor.name if expense.vendor else None,
+    }
+
+
 @bp.get("")
 def list_expenses():
     query = Expense.query
@@ -23,7 +34,7 @@ def list_expenses():
     if status and status.lower() != "all":
         query = query.filter(Expense.status == status.lower())
     query = apply_search(query, Expense, ["expense_ref", "category", "title", "submitted_by"])
-    return jsonify(list_response(query.order_by(Expense.expense_date.desc())))
+    return jsonify(list_response(query.order_by(Expense.expense_date.desc()), serialize_expense))
 
 
 @bp.post("")
@@ -47,7 +58,7 @@ def create_expense():
     db.session.flush()
     db.session.add(AuditLog(action=f"Created expense {expense.expense_ref}", entity_type="expense", entity_id=expense.id))
     db.session.commit()
-    return jsonify(expense.to_dict()), 201
+    return jsonify(serialize_expense(expense)), 201
 
 
 @bp.put("/<int:expense_id>")
@@ -64,4 +75,4 @@ def update_expense(expense_id):
         sync_expense_status(expense)
     db.session.add(AuditLog(action=f"Updated expense {expense.expense_ref}", entity_type="expense", entity_id=expense.id))
     db.session.commit()
-    return jsonify(expense.to_dict())
+    return jsonify(serialize_expense(expense))

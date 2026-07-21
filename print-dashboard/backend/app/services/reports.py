@@ -1,3 +1,5 @@
+# path: backend/app/services/reports.py
+
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
@@ -87,14 +89,23 @@ def build_financial_report(period="month"):
     for invoice in invoices:
         totals = invoice_totals(invoice)
         by_status[invoice.status] += totals["total"]
-        by_month[month_key(invoice.issued_on)] += totals["total"]
+        # FIX (2026-07-20): revenue_by_month is keyed off actual cash received
+        # (Payment.paid_on), not Invoice.issued_on (booked revenue). This is what
+        # makes it a true cashflow figure rather than a booked-revenue figure.
+        for payment in invoice.payments:
+            by_month[month_key(payment.paid_on)] += money(payment.amount)
         client_revenue[invoice.client_name] += totals["total"]
         for item in invoice.line_items:
             product_mix[item.product_type or "General Print"] += float(item.line_total())
 
     for expense in expenses:
         expense_categories[expense.category] += money(expense.amount)
-        expenses_by_month[month_key(expense.expense_date)] += money(expense.amount)
+        # FIX (2026-07-20): key off paid_on (actual cash paid out), not expense_date
+        # (booked/submitted date). Unpaid expenses (paid_on is None) are excluded from
+        # this bucket until a paid_on is recorded, rather than being silently miskeyed
+        # or crashing month_key() on a None date.
+        if expense.paid_on:
+            expenses_by_month[month_key(expense.paid_on)] += money(expense.amount)
 
     month_keys = trailing_month_keys()
 

@@ -1,3 +1,5 @@
+# path: backend/app/routes/vendors.py
+
 from flask import Blueprint, jsonify, request
 
 from ..extensions import db
@@ -25,7 +27,6 @@ def create_vendor():
         category=data.get("category"),
         phone=data.get("phone") or data.get("contact"),
         email=data.get("email"),
-        balance=data.get("balance", 0),
         status=data.get("status", "current"),
     )
     db.session.add(vendor)
@@ -39,7 +40,7 @@ def create_vendor():
 def update_vendor(vendor_id):
     vendor = Vendor.query.get_or_404(vendor_id)
     data = request.get_json() or {}
-    for field in ["name", "category", "phone", "email", "balance", "status"]:
+    for field in ["name", "category", "phone", "email", "status"]:
         if field in data:
             setattr(vendor, field, data[field])
     db.session.add(AuditLog(action=f"Updated vendor {vendor.name}", entity_type="vendor", entity_id=vendor.id))
