@@ -94,8 +94,10 @@ export function InvoicePrintLayout({ data, business = businessDefault }) {
   if (!data) return null;
   const items = normaliseItems(data);
   const subtotal = calculateTotal(items);
-  const vat = Number(data.vat ?? data.tax ?? subtotal * 0.165);
-  const total = subtotal + vat;
+  const discount = Number(data.discount_amount || 0);
+  const taxable = Math.max(subtotal - discount, 0);
+  const vat = Number(data.vat ?? data.tax ?? taxable * 0.165);
+  const total = taxable + vat;
 
   return (
     <>
@@ -134,6 +136,9 @@ export function InvoicePrintLayout({ data, business = businessDefault }) {
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '30px' }}>
           <div style={{ width: '220px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '11px' }}><span>Subtotal</span><span>{asMoney(subtotal)}</span></div>
+            {discount > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '11px', color: '#8B9BB0' }}><span>Discount</span><span>-{asMoney(discount)}</span></div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '11px', color: '#8B9BB0' }}><span>VAT</span><span>{asMoney(vat)}</span></div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', fontWeight: 700, color: '#3A506B', borderTop: '1px solid #E5E8ED', paddingTop: '6px' }}><span>Total</span><span>{asMoney(total)}</span></div>
           </div>
@@ -150,8 +155,10 @@ export function InvoicePrintLayout({ data, business = businessDefault }) {
 
 export function ProposalPrintLayout({ data, business = businessDefault }) {
   if (!data) return null;
-  const items = data.items?.length ? data.items : [{ desc: data.title || 'Proposal item', amount: 0 }];
-  const total = calculateTotal(items);
+  const items = data.items?.length ? data.items : (data.line_items?.length ? data.line_items.map(li => ({ desc: li.description, amount: li.amount })) : [{ desc: data.title || 'Proposal item', amount: 0 }]);
+  const subtotal = calculateTotal(items);
+  const discount = Number(data.discount ?? data.discount_amount ?? 0);
+  const total = Math.max(subtotal - discount, 0);
 
   return (
     <>
@@ -173,7 +180,15 @@ export function ProposalPrintLayout({ data, business = businessDefault }) {
           <thead><tr><th>Service / Item</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
           <tbody>{items.map((item, index) => <tr key={index}><td>{item.desc}</td><td style={{ textAlign: 'right' }}>{asMoney(item.amount)}</td></tr>)}</tbody>
         </table>
-        <div style={{ textAlign: 'right', fontSize: '16px', fontWeight: 700, color: '#5B7C99', marginBottom: '30px' }}>Total Estimate: {asMoney(total)}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', marginBottom: '30px' }}>
+          {discount > 0 && (
+            <>
+              <div style={{ fontSize: '11px', color: '#8B9BB0' }}>Subtotal: {asMoney(subtotal)}</div>
+              <div style={{ fontSize: '11px', color: '#8B9BB0' }}>Discount: -{asMoney(discount)}</div>
+            </>
+          )}
+          <div style={{ fontSize: '16px', fontWeight: 700, color: '#5B7C99' }}>Total Estimate: {asMoney(total)}</div>
+        </div>
         <div style={{ fontSize: '10px', color: '#8B9BB0', borderTop: '1px solid #E5E8ED', paddingTop: '16px' }}>
           <div style={{ fontWeight: 600, marginBottom: '4px' }}>Terms</div>
           <div>50% deposit required to commence work. Balance due upon delivery. Prices valid for 30 days.</div>

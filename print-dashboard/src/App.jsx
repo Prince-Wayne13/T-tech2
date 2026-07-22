@@ -79,30 +79,29 @@ const D = {
 ═══════════════════════════════════════ */
 const NAV_GROUPS = [
   {
-    label: 'Operations',
+    label: 'Primary',
     items: [
-      { id: 'Dashboard',   icon: 'dashboard'  },
+      { id: 'Jobs',        icon: 'jobs'       },
       { id: 'Proposals',   icon: 'proposals'  },
       { id: 'Invoices',    icon: 'invoices'   },
-      { id: 'Jobs',        icon: 'jobs'       },
-    ],
-  },
-  {
-    label: 'Financials',
-    items: [
       { id: 'Expenses',    icon: 'expenses'   },
-      { id: 'Vendors',     icon: 'vendors'    },
-      { id: 'Advances',    icon: 'advances'   },
     ],
   },
   {
-    label: 'Records',
+    label: 'Reports',
     items: [
       { id: 'Reports', icon: 'reports' },
-      { id: 'Audit Log', icon: 'reports' },
-      { id: 'Archive', icon: 'reports' },
-      { id: 'Export Data', icon: 'reports' },
-      { id: 'Settings', icon: 'settings' },
+    ],
+  },
+  {
+    label: 'More',
+    items: [
+      { id: 'Vendors',     icon: 'vendors'    },
+      { id: 'Advances',    icon: 'advances'   },
+      { id: 'Audit Log',   icon: 'reports'    },
+      { id: 'Archive',     icon: 'reports'    },
+      { id: 'Export Data', icon: 'reports'    },
+      { id: 'Settings',    icon: 'settings'   },
     ],
   },
 ];

@@ -2,117 +2,263 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
 import { money } from './utils/format';
-import { PrintPreviewModal } from './components/PrintLayouts';
-import { downloadInvoicePDF } from './components/InvoicePDF';
-import { Icon, ModuleHeader, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid } from './components/ModuleStandard';
-import UnifiedPreviewModal from './components/UnifiedPreviewModal';
+import { ModuleHeader, StatsGrid } from './components/ModuleStandard';
 
+// ── Reports rebuild (nav/reports consolidation session) ──────────────────
+// Replaces the previous generic report-library list with two tabs:
+// Cashflow (money in/out by month, cash-basis) and Snapshot (at-a-glance
+// operational + financial totals). The old report-library cards
+// (RPT-FIN-MONTH etc. from services/reports.py::build_report_library())
+// are no longer surfaced here — this page now reads financialReport(),
+// invoiceStats(), jobs(), and expenses() directly instead.
 
-const D = {
-  ...STANDARD_ICONS,
-  reports: 'M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7',
-  eye: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
-  download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
-};
+const TABS = ['Cashflow', 'Snapshot'];
 
-const REPORT_TYPES = ['All', 'Monthly', 'Quarterly', 'Annual', 'Operational', 'Custom'];
+// ── PulseChart ─────────────────────────────────────────────────────────
+// Moved from App.jsx verbatim (dataset construction + SVG rendering logic
+// unchanged) so Reports.jsx owns the chart it's meant to house, rather than
+// App.jsx importing report data just to feed a chart that lives elsewhere.
+const MONTHS = ['Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr'];
+const EMPTY_DATASETS = [
+  { title: 'Revenue vs Expenses', a: MONTHS.map(() => 0), b: MONTHS.map(() => 0), months: MONTHS },
+  { title: 'Profit', a: MONTHS.map(() => 0), b: MONTHS.map(() => 0), months: MONTHS },
+  { title: 'Cash Flow', a: MONTHS.map(() => 0), b: MONTHS.map(() => 0), months: MONTHS },
+];
 
-function ReportRow({ rpt, onPreview }) {
-  const statusConfig = {
-    ready: { label: 'Ready', cls: 'paid', accent: 'var(--teal)' },
-    pending: { label: 'Pending', cls: 'pending', accent: 'var(--warning)' },
-    failed: { label: 'Failed', cls: 'overdue', accent: 'var(--red)' },
+function smoothPath(pts) {
+  if (pts.length < 2) return '';
+  let d = `M ${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 1; i < pts.length; i++) {
+    const [px, py] = pts[i - 1];
+    const [cx, cy] = pts[i];
+    const mx = (px + cx) / 2;
+    d += ` C ${mx} ${py}, ${mx} ${cy}, ${cx} ${cy}`;
+  }
+  return d;
+}
+
+function PulseChart({ financials }) {
+  const [slide, setSlide] = useState(0);
+  const liveDatasets = financials?.revenue_by_month ? (() => {
+    const months = Object.keys(financials.revenue_by_month);
+    const revenue = months.map(month => Number(financials.revenue_by_month[month] || 0));
+    const expenses = months.map(month => Number(financials.expenses_by_month?.[month] || 0));
+    return [
+      { title: 'Revenue vs Expenses', a: revenue, b: expenses, months },
+      { title: 'Profit', a: revenue.map((value, index) => value - expenses[index]), b: revenue.map(() => 0), months },
+      { title: 'Cash Flow', a: revenue, b: expenses.map(value => -value), months },
+    ];
+  })() : EMPTY_DATASETS;
+
+  useEffect(() => {
+    const i = setInterval(() => setSlide(s => (s + 1) % liveDatasets.length), 10000);
+    return () => clearInterval(i);
+  }, [liveDatasets.length]);
+
+  const [filter, setFilter] = useState('3M');
+  const FILTERS = ['1W', '1M', '3M', 'YTD'];
+  const currentRaw = liveDatasets[slide] || liveDatasets[0];
+  const sliceCount = filter === '1W' ? 1 : filter === '1M' ? 2 : filter === '3M' ? 3 : currentRaw.a.length;
+  const current = {
+    ...currentRaw,
+    a: currentRaw.a.slice(-sliceCount),
+    b: currentRaw.b.slice(-sliceCount),
+    months: currentRaw.months?.slice(-sliceCount),
   };
-  const cfg = statusConfig[rpt.status] || statusConfig.pending;
-  const metricCount = Object.keys(rpt.metrics || {}).length;
+  const W = 600, H = 190;
+  const PAD = { t: 18, r: 20, b: 30, l: 46 };
+  const pw = W - PAD.l - PAD.r;
+  const ph = H - PAD.t - PAD.b;
+
+  const dataA = current.a;
+  const dataB = current.b;
+  const all = [...dataA, ...dataB];
+  const minV = Math.min(...all);
+  const maxV = Math.max(...all);
+  const range = maxV - minV || 1;
+
+  const toX = i => PAD.l + (i / Math.max(dataA.length - 1, 1)) * pw;
+  const toY = v => PAD.t + ph - ((v - minV) / range) * ph;
+
+  const revPts = dataA.map((v, i) => [toX(i), toY(v)]);
+  const expPts = dataB.map((v, i) => [toX(i), toY(v)]);
+  const revLine = smoothPath(revPts);
+  const expLine = smoothPath(expPts);
+  const baseY = PAD.t + ph;
+  const revArea = `${revLine} L ${toX(dataA.length - 1)} ${baseY} L ${toX(0)} ${baseY} Z`;
+  const expArea = `${expLine} L ${toX(dataB.length - 1)} ${baseY} L ${toX(0)} ${baseY} Z`;
+
+  const yTicks = [minV, minV + range / 3, minV + (2 * range) / 3, maxV].map(v => ({
+    label: v >= 1000000 ? `MK ${(v / 1000000).toFixed(1)}m` : v >= 1000 ? `MK ${(v / 1000).toFixed(0)}k` : `MK ${v}`,
+    y: toY(v),
+  }));
+
+  const lastRevY = toY(dataA[dataA.length - 1]);
+  const lastExpY = toY(dataB[dataB.length - 1]);
+  const lastX = toX(dataA.length - 1) + 6;
+  const monthLabels = current.months
+    ? current.months.map(month => new Date(`${month}-01`).toLocaleDateString('en-GB', { month: 'short' }))
+    : MONTHS;
+  const lastRevenue = dataA[dataA.length - 1] || 0;
+  const lastExpense = dataB[dataB.length - 1] || 0;
+  const netProfit = lastRevenue - lastExpense;
 
   return (
-    <div className="vendor-item" style={{ position: 'relative', paddingLeft: '14px' }}>
-      <div style={{ position: 'absolute', left: 0, top: '10px', bottom: '10px', width: '2px', background: cfg.accent, borderRadius: '2px' }} />
-      <div className="vendor-avatar" style={{ background: 'var(--secondary-dim)', color: 'var(--secondary)' }}>{String(rpt.id).split('-')[1] || 'RPT'}</div>
-      <div className="vendor-info">
-        <div className="vendor-name">{rpt.name}</div>
-        <div className="vendor-cat">{rpt.type} - Generated: {rpt.generated}</div>
+    <div className="card pulse-chart" style={{ gridColumn: '1 / -1' }}>
+      <div className="card-header">
+        <div>
+          <h2 className="card-title">Business Pulse</h2>
+          <p className="card-sub">{current.title} - live backend values</p>
+        </div>
+        <div className="chart-filters">
+          {FILTERS.map(f => (
+            <button key={f} className={`filter-btn ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}>{f}</button>
+          ))}
+        </div>
       </div>
-      <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '100px' }}>
-        <div className="activity-amount" style={{ fontSize: '11px', fontWeight: 600 }}>By: {rpt.generatedBy}</div>
-        <div className="activity-time">{metricCount} metric{metricCount !== 1 ? 's' : ''}</div>
+      <div className="chart-area fade">
+        <svg viewBox={`0 0 ${W} ${H}`} className="chart-svg" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <linearGradient id="gRev" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#3A506B" stopOpacity="0.3" />
+              <stop offset="100%" stopColor="#3A506B" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient id="gExp" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#A06B6B" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="#A06B6B" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {yTicks.map((tick, i) => (
+            <g key={i}>
+              <line x1={PAD.l} y1={tick.y} x2={W - PAD.r} y2={tick.y} stroke="rgba(255,255,255,0.06)" strokeWidth="1" strokeDasharray="4 4" />
+              <text x={PAD.l - 7} y={tick.y + 4} textAnchor="end" fontSize="8.5" fill="rgba(255,255,255,0.28)">{tick.label}</text>
+            </g>
+          ))}
+          {monthLabels.map((m, i) => (
+            <g key={m}>
+              <line x1={toX(i)} y1={PAD.t + ph} x2={toX(i)} y2={PAD.t + ph + 5} stroke="rgba(58,80,107,0.6)" strokeWidth="1" />
+              <text x={toX(i)} y={H - 8} textAnchor="middle" fontSize="8.5" fill="rgba(58,80,107,0.9)">{m}</text>
+            </g>
+          ))}
+          <path d={revArea} fill="url(#gRev)" />
+          <path d={expArea} fill="url(#gExp)" />
+          <path d={revLine} fill="none" stroke="#3A506B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d={expLine} fill="none" stroke="#A06B6B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          {revPts.map(([x, y], i) => (
+            <circle key={i} cx={x} cy={y} r={i === revPts.length - 1 ? 4.5 : 2.5} fill={i === revPts.length - 1 ? '#3A506B' : '#0B1E1A'} stroke="#3A506B" strokeWidth={i === revPts.length - 1 ? 0 : 1.5} />
+          ))}
+          {expPts.map(([x, y], i) => (
+            <circle key={i} cx={x} cy={y} r={i === expPts.length - 1 ? 4 : 2} fill={i === expPts.length - 1 ? '#A06B6B' : '#0B1E1A'} stroke="#A06B6B" strokeWidth={i === expPts.length - 1 ? 0 : 1.5} />
+          ))}
+          <text x={lastX} y={lastRevY + 4} fontSize="9" fontWeight="700" fill="#3A506B">{money(lastRevenue).replace('MWK', 'MK')}</text>
+          <text x={lastX} y={lastExpY + 4} fontSize="9" fontWeight="700" fill="#A06B6B">{money(Math.abs(lastExpense)).replace('MWK', 'MK')}</text>
+        </svg>
       </div>
-      <span className={`status-badge ${cfg.cls}`} style={{ marginLeft: '12px' }}>{cfg.label}</span>
-      <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
-        <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Download" onClick={() => downloadInvoicePDF({ id: rpt.id, client_name: rpt.type, title: rpt.name, items: [{ description: rpt.name, quantity: 1, unit_price: 0 }] })}>
-          <Icon d={D.download} size={11} />
-        </button>
-        <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Preview" onClick={() => onPreview(rpt)}>
-          <Icon d={D.eye} size={11} />
-        </button>
+      <div className="chart-legend">
+        <div className="legend-item"><span className="legend-dot" style={{ background: '#3A506B' }} /> Revenue</div>
+        <div className="legend-item"><span className="legend-dot" style={{ background: '#A06B6B' }} /> Expenses</div>
+        <div className="legend-net">Net Profit <strong>{money(netProfit)}</strong><span className="trend-badge">Live</span></div>
       </div>
     </div>
   );
 }
 
+const D_JOBS = 'M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0';
+const D_INVOICES = 'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 0 2-2h2a2 2 0 0 0 2 2M12 12v4M10 14h4';
+const D_EXPENSES = 'M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 4l-5 5-4-4-5 6';
+const D_CASH = 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6';
+
+// Outstanding-payables status set — must stay identical to Expenses.jsx's
+// TAB_STATUS_SETS.Outstanding, since that's the definition of "unpaid" this
+// app already uses elsewhere. No backend total exists for this yet, so it's
+// computed client-side from api.expenses() with the same filter Expenses.jsx
+// applies, rather than inventing a different definition of "outstanding."
+const OUTSTANDING_EXPENSE_STATUSES = ['pending', 'approved', 'scheduled'];
+// Active-jobs status set — identical to Jobs.jsx's "Active Jobs" stat filter.
+const ACTIVE_JOB_STATUSES = ['printing', 'queued'];
+
 export default function Reports() {
-  const [filter, setFilter] = useState('All');
-  const [search, setSearch] = useState('');
-  const [reports, setReports] = useState([]);
+  const [tab, setTab] = useState('Cashflow');
   const [financials, setFinancials] = useState(null);
-  const [machineRevenue, setMachineRevenue] = useState([]);
-  const [preview, setPreview] = useState(null);
+  const [invoiceStats, setInvoiceStats] = useState(null);
+  const [jobs, setJobs] = useState([]);
+  const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
-    Promise.all([api.reports(), api.financialReport('month'), api.machineRevenue()])
-      .then(([reportResponse, financialReport, machineResponse]) => {
-        setReports((reportResponse.items || []).map(report => ({
-          id: report.id,
-          name: report.name,
-          type: report.type,
-          generated: 'Live',
-          status: report.status,
-          generatedBy: report.generated_by || 'System',
-          notes: report.notes,
-          metrics: report.metrics || {},
-        })));
+    Promise.all([
+      api.financialReport('month'),
+      api.invoiceStats(),
+      api.jobs('?per_page=500'),
+      api.expenses('?per_page=500'),
+    ])
+      .then(([financialReport, stats, jobResponse, expenseResponse]) => {
         setFinancials(financialReport);
-        setMachineRevenue(machineResponse.items || []);
+        setInvoiceStats(stats);
+        setJobs(jobResponse.items || []);
+        setExpenses(expenseResponse.items || []);
       })
       .catch(() => setError('Could not load reports. Check the backend connection and try again.'))
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = reports.filter(report => {
-    const query = search.toLowerCase();
-    const matchesType = filter === 'All' || report.type === filter;
-    const matchesSearch = `${report.name} ${report.id} ${report.notes}`.toLowerCase().includes(query);
-    return matchesType && matchesSearch;
-  });
-  const readyCount = reports.filter(report => report.status === 'ready').length;
-  const pendingCount = reports.filter(report => report.status === 'pending').length;
-  const topMachine = machineRevenue.find(machine => Number(machine.revenue) > 0);
-  const stats = [
-    { label: 'Reports Generated', value: reports.length, sub: 'Live library', icon: D.reports, color: 'primary' },
-    { label: 'Pending Review', value: pendingCount, sub: 'Awaiting approval', icon: D.clock, color: 'warning' },
-    { label: 'Ready to Download', value: readyCount, sub: 'Available now', icon: D.check, color: 'teal' },
-    { label: 'Top Machine', value: topMachine ? money(topMachine.revenue) : money(financials?.profit || 0), sub: topMachine ? topMachine.name : 'Profit this period', icon: D.reports, color: 'secondary' },
+  // Cash-basis by-month figures only (revenue_by_month / expenses_by_month).
+  // Deliberately NOT using financials.revenue / financials.profit here — those
+  // top-level fields are booked-basis (a known, separate reconciliation issue
+  // documented in reports.py) and would be inconsistent with this tab if mixed in.
+  const monthKeys = financials?.revenue_by_month ? Object.keys(financials.revenue_by_month) : [];
+  const latestMonth = monthKeys[monthKeys.length - 1];
+  const moneyIn = latestMonth ? Number(financials.revenue_by_month[latestMonth] || 0) : 0;
+  const moneyOut = latestMonth ? Number(financials.expenses_by_month?.[latestMonth] || 0) : 0;
+  const netCashflow = moneyIn - moneyOut;
+
+  const cashflowStats = [
+    { label: 'Money In This Month', value: money(moneyIn), sub: 'Cash received', icon: D_CASH, color: 'teal' },
+    { label: 'Money Out This Month', value: money(moneyOut), sub: 'Cash paid out', icon: D_EXPENSES, color: 'warning' },
+    { label: 'Net Cashflow', value: money(netCashflow), sub: netCashflow >= 0 ? 'Positive this month' : 'Negative this month', icon: D_CASH, color: netCashflow >= 0 ? 'teal' : 'red' },
+    { label: 'Months Tracked', value: String(monthKeys.length), sub: 'Trailing window', icon: D_INVOICES, color: 'secondary' },
+  ];
+
+  const activeJobsCount = jobs.filter(job => ACTIVE_JOB_STATUSES.includes(job.status)).length;
+  const outstandingPayablesTotal = expenses
+    .filter(expense => OUTSTANDING_EXPENSE_STATUSES.includes(expense.status))
+    .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+
+  const snapshotStats = [
+    { label: 'Jobs In Progress', value: String(activeJobsCount), sub: 'Queued or printing', icon: D_JOBS, color: 'primary' },
+    { label: 'Unpaid Receivables', value: money(invoiceStats?.outstanding || 0), sub: 'Owed to the business', icon: D_INVOICES, color: 'warning' },
+    { label: 'Unpaid Payables', value: money(outstandingPayablesTotal), sub: 'Owed by the business', icon: D_EXPENSES, color: 'red' },
+    { label: "This Month's Net Cashflow", value: money(netCashflow), sub: netCashflow >= 0 ? 'Positive' : 'Negative', icon: D_CASH, color: netCashflow >= 0 ? 'teal' : 'red' },
   ];
 
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
-      <ModuleHeader title="Reports" subtitle="Financial & operational summaries" actionLabel={null} />
-      <StatsGrid stats={stats} />
-      <ModuleToolbar filters={REPORT_TYPES} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search reports..." />
-      <RegisterCard title="Report Library" countLabel={`${filtered.length} report${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="RPT" emptyMessage="No reports match your filters.">
-        {filtered.map(rpt => <ReportRow key={rpt.id} rpt={rpt} onPreview={setPreview} />)}
-      </RegisterCard>
-    <UnifiedPreviewModal 
-  isOpen={!!preview} 
-  onClose={() => setPreview(null)} 
-  title={preview?.name} 
-  data={preview} 
-/>
+      <ModuleHeader title="Reports" subtitle="Cashflow and at-a-glance financial snapshot" actionLabel={null} />
+
+      <div className="chart-filters" style={{ marginBottom: '14px', width: 'fit-content' }}>
+        {TABS.map(t => (
+          <button key={t} className={`filter-btn ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</button>
+        ))}
+      </div>
+
+      {loading && <div className="card" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading reports...</div>}
+      {!loading && error && <div className="card" style={{ padding: '24px', textAlign: 'center', color: 'var(--red)' }}>{error}</div>}
+
+      {!loading && !error && tab === 'Cashflow' && (
+        <>
+          <StatsGrid stats={cashflowStats} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
+            <PulseChart financials={financials} />
+          </div>
+        </>
+      )}
+
+      {!loading && !error && tab === 'Snapshot' && (
+        <StatsGrid stats={snapshotStats} />
+      )}
     </main>
   );
 }

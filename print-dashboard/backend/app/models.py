@@ -197,10 +197,27 @@ class Proposal(TimestampMixin, SerializableMixin, db.Model):
     valid_until = db.Column(db.Date)
     contact = db.Column(db.String(160))
     notes = db.Column(db.Text)
-    converted_invoice_id = db.Column(db.Integer, db.ForeignKey("invoices.id"), nullable=True)
+    converted_invoice_id = db.Column(
+        db.Integer,
+        db.ForeignKey("invoices.id"),
+        nullable=True,
+        unique=True,
+    )
 
     client = db.relationship("Client", backref="proposals")
-    converted_invoice = db.relationship("Invoice", backref="source_proposal", uselist=False)
+    # backref=backref(...) with uselist=False on BOTH sides: the plain string-form
+    # backref used previously only sets uselist=False on the forward accessor
+    # (Proposal.converted_invoice); the reverse accessor (Invoice.source_proposal)
+    # defaults to a list unless uselist=False is passed explicitly for that side too.
+    # That mismatch is what caused `invoice.source_proposal.proposal_ref` to fail
+    # with "'InstrumentedList' object has no attribute 'proposal_ref'" in production —
+    # source_proposal was actually a list, never a scalar, despite the relationship
+    # looking like a working one-to-one on a read-through of the code.
+    converted_invoice = db.relationship(
+        "Invoice",
+        backref=db.backref("source_proposal", uselist=False),
+        uselist=False,
+    )
     line_items = db.relationship(
         "ProposalLineItem",
         back_populates="proposal",

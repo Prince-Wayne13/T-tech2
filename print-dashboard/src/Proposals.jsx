@@ -21,7 +21,7 @@ const D = {
 // this is a visible UI behavior change (filter pills, badge labels), not a pure plumbing fix.
 const PROPOSAL_STATUSES = ['All', 'Draft', 'Sent', 'Accepted', 'Declined'];
 
-function ProposalRow({ prop, onPreview, onAccept }) {
+function ProposalRow({ prop, onPreview, onAccept, onSend, onDecline }) {
   const statusConfig = {
     draft: { label: 'Draft', cls: 'pending', accent: 'var(--warning)' },
     sent: { label: 'Sent', cls: 'current', accent: 'var(--secondary)' },
@@ -44,10 +44,20 @@ function ProposalRow({ prop, onPreview, onAccept }) {
       </div>
       <span className={`status-badge ${cfg.cls}`} style={{ marginLeft: '12px' }}>{cfg.label}</span>
       <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
-        {prop.status === 'sent' && (
-          <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Accept & Convert to Invoice" onClick={() => onAccept(prop)}>
-            <Icon d={D.check} size={11} />
+        {prop.status === 'draft' && (
+          <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Mark as Sent to Client" onClick={() => onSend(prop)}>
+            Send
           </button>
+        )}
+        {prop.status === 'sent' && (
+          <>
+            <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Accept & Convert to Invoice" onClick={() => onAccept(prop)}>
+              <Icon d={D.check} size={11} />
+            </button>
+            <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Mark as Declined" onClick={() => onDecline(prop)}>
+              Decline
+            </button>
+          </>
         )}
         <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Preview" onClick={() => onPreview(prop)}><Icon d={D.eye} size={11} /></button>
         <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Download PDF" onClick={() => downloadProposalPDF(prop)}><Icon d={D.download} size={11} /></button>
@@ -102,6 +112,7 @@ export default function Proposals() {
       contact: form.contact,
       notes: form.notes,
       status: 'draft',
+      discount_amount: Number(form.discount || 0),
     };
     api.createProposal(payload)
       .then(created => {
@@ -122,13 +133,31 @@ export default function Proposals() {
       .catch(() => notify('Could not accept proposal. Check the backend connection.'));
   };
 
+  const handleSend = prop => {
+    api.updateProposal(prop.id, { status: 'sent' })
+      .then(() => {
+        notify(`Proposal ${prop.proposal_ref} marked as sent`);
+        loadProposals();
+      })
+      .catch(() => notify('Could not mark proposal as sent. Check the backend connection.'));
+  };
+
+  const handleDecline = prop => {
+    api.updateProposal(prop.id, { status: 'declined' })
+      .then(() => {
+        notify(`Proposal ${prop.proposal_ref} marked as declined`);
+        loadProposals();
+      })
+      .catch(() => notify('Could not mark proposal as declined. Check the backend connection.'));
+  };
+
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
       <ModuleHeader title="Proposals" subtitle="Quotes and project proposals" actionLabel="New Proposal" onAction={() => setShowEntry(true)} />
       <StatsGrid stats={stats} />
       <ModuleToolbar filters={PROPOSAL_STATUSES} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search client, title, or ID..." />
       <RegisterCard title="Proposal Pipeline" countLabel={`${filtered.length} proposal${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="PROP" emptyMessage="No proposals match your filters.">
-        {filtered.map(prop => <ProposalRow key={prop.id} prop={prop} onPreview={setPreview} onAccept={handleAccept} />)}
+        {filtered.map(prop => <ProposalRow key={prop.id} prop={prop} onPreview={setPreview} onAccept={handleAccept} onSend={handleSend} onDecline={handleDecline} />)}
       </RegisterCard>
       <NewProposalModal isOpen={showEntry} onClose={() => setShowEntry(false)} onSave={handleSave} />
       <PrintPreviewModal type="proposal" title={preview ? `Proposal Preview: ${preview.proposal_ref}` : ''} data={preview} onClose={() => setPreview(null)} />

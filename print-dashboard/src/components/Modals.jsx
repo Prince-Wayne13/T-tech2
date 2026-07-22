@@ -2,7 +2,7 @@
 
 // Modals.jsx — PrintOps BMS (Mobile Toggle + Full-Size Preview)
 import React, { useEffect, useState, useLayoutEffect, useRef } from 'react';
-import { calculateTotal } from '../utils/calculateTotal';
+import { calculateTotal, calculateDiscountedTotal } from '../utils/calculateTotal';
 
 /* ═══════════════════════════════════════
    ICON SYSTEM
@@ -258,6 +258,8 @@ function PaperPreview({ children, accentColor }) {
 }
 
 function InvoicePreviewFrame({ data, total }) {
+  const subtotal = calculateTotal(data.items || []);
+  const discount = Number(data.discount || 0);
   return (
     <PaperPreview accentColor="#3A506B">
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
@@ -279,12 +281,22 @@ function InvoicePreviewFrame({ data, total }) {
           </tr>
         ))}</tbody>
       </table>
-      <div style={{ textAlign: 'right', fontWeight: 700, fontSize: '14px', color: '#3A506B' }}>Total: MK {total.toLocaleString()}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-end' }}>
+        {discount > 0 && (
+          <>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Subtotal: MK {subtotal.toLocaleString()}</div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Discount: -MK {discount.toLocaleString()}</div>
+          </>
+        )}
+        <div style={{ fontWeight: 700, fontSize: '14px', color: '#3A506B' }}>Total: MK {total.toLocaleString()}</div>
+      </div>
     </PaperPreview>
   );
 }
 
 function ProposalPreviewFrame({ data, total }) {
+  const subtotal = data.items?.reduce((s, it) => s + Number(it.amount || 0), 0) || 0;
+  const discount = Number(data.discount || 0);
   return (
     <PaperPreview accentColor="#5B7C99">
       <div style={{ textAlign: 'center', marginBottom: '16px', borderBottom: '2px solid #5B7C99', paddingBottom: '10px' }}>
@@ -304,7 +316,19 @@ function ProposalPreviewFrame({ data, total }) {
           </tr>
         ))}</tbody>
       </table>
-      <div style={{ textAlign: 'right', fontWeight: 700, fontSize: '14px', color: '#5B7C99' }}>Total: MK {total.toLocaleString()}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-end', marginBottom: '16px' }}>
+        {discount > 0 && (
+          <>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Subtotal: MK {subtotal.toLocaleString()}</div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Discount: -MK {discount.toLocaleString()}</div>
+          </>
+        )}
+        <div style={{ fontWeight: 700, fontSize: '14px', color: '#5B7C99' }}>Total: MK {total.toLocaleString()}</div>
+      </div>
+      <div style={{ fontSize: '10px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-faint)', paddingTop: '16px' }}>
+        <div style={{ fontWeight: 600, marginBottom: '4px' }}>Terms</div>
+        <div>50% deposit required to commence work. Balance due upon delivery. Prices valid for 30 days.</div>
+      </div>
     </PaperPreview>
   );
 }
@@ -350,7 +374,7 @@ function SimpleRecordPreview({ type, data }) {
 
 /* ═══════════════════════════════════════ MODAL: New Invoice ═══════════════════════════════════════ */
 export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ client: '', items: [], due: '', notes: '' });
+  const [form, setForm] = useState({ client: '', items: [], due: '', notes: '', discount: 0 });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
   const [showPreview, setShowPreview] = useState(false);
@@ -362,6 +386,7 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
       items: (initialData?.items || initialData?.line_items || []).map(item => ({ desc: item.desc || item.description || '', qty: item.qty || item.quantity || 1, rate: item.rate || item.unit_price || 0 })),
       due: initialData?.due_on || initialData?.due || '',
       notes: initialData?.notes || '',
+      discount: Number(initialData?.discount_amount || 0),
     });
     setSelectedService(null); setQty('1'); setShowPreview(false);
   }, [isOpen, initialData]);
@@ -373,7 +398,7 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
     }
   };
   const removeItem = i => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }));
-  const total = calculateTotal(form.items);
+  const total = calculateDiscountedTotal(form.items, form.discount);
 
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title={initialData ? 'Edit Invoice' : 'New Invoice'} wide footer={<>
@@ -405,6 +430,21 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
               ))
             }
           </div>
+          <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-faint)', flexShrink: 0 }}>
+            <label style={labelStyle}>Discount (flat amount, MK)</label>
+            <input type="number" min="0" style={inputStyle} placeholder="0" value={form.discount || ''} onChange={e => setForm({ ...form, discount: Number(e.target.value) || 0 })} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '10px', color: 'var(--text-muted)' }}>
+              <span>Subtotal</span><span>MK {calculateTotal(form.items).toLocaleString()}</span>
+            </div>
+            {form.discount > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
+                <span>Discount</span><span>-MK {Number(form.discount).toLocaleString()}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '11px', fontWeight: 700, color: 'var(--text-head)' }}>
+              <span>Total</span><span>MK {total.toLocaleString()}</span>
+            </div>
+          </div>
           <AddItemBar selectedService={selectedService} form={{ qty }} setForm={f => setQty(f.qty)} onAdd={addItem} />
         </>}
         previewContent={<InvoicePreviewFrame data={form} total={total} />}
@@ -415,14 +455,14 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
 
 /* ═══════════════════════════════════════ MODAL: New Proposal ═══════════════════════════════════════ */
 export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', contact: '', notes: '' });
+  const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', contact: '', notes: '', discount: 0 });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
   const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
-    setForm({ client: '', title: '', items: [], validUntil: '', contact: '', notes: '' });
+    setForm({ client: '', title: '', items: [], validUntil: '', contact: '', notes: '', discount: 0 });
     setSelectedService(null); setQty('1'); setShowPreview(false);
   }, [isOpen]);
 
@@ -432,7 +472,8 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
       setQty('1'); setSelectedService(null);
     }
   };
-  const total = form.items.reduce((s, it) => s + Number(it.amount || 0), 0);
+  const subtotal = form.items.reduce((s, it) => s + Number(it.amount || 0), 0);
+  const total = Math.max(subtotal - Number(form.discount || 0), 0);
 
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="New Proposal" wide footer={<>
@@ -461,6 +502,21 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
                 </div>
               ))
             }
+          </div>
+          <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-faint)', flexShrink: 0 }}>
+            <label style={labelStyle}>Discount (flat amount, MK)</label>
+            <input type="number" min="0" style={inputStyle} placeholder="0" value={form.discount || ''} onChange={e => setForm({ ...form, discount: Number(e.target.value) || 0 })} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '10px', color: 'var(--text-muted)' }}>
+              <span>Subtotal</span><span>MK {subtotal.toLocaleString()}</span>
+            </div>
+            {form.discount > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
+                <span>Discount</span><span>-MK {Number(form.discount).toLocaleString()}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '11px', fontWeight: 700, color: 'var(--text-head)' }}>
+              <span>Total</span><span>MK {total.toLocaleString()}</span>
+            </div>
           </div>
           <AddItemBar selectedService={selectedService} form={{ qty }} setForm={f => setQty(f.qty)} onAdd={addItem} />
         </>}

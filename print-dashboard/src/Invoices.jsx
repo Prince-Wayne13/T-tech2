@@ -58,6 +58,8 @@ function mapInvoice(invoice) {
     paid: compactDate(invoice.paid_on),
     line_items: lineItems,
     notes: invoice.notes,
+    sourceProposalRef: invoice.source_proposal_ref || null,
+    discount_amount: Number(invoice.discount_amount || 0),
   };
 }
 
@@ -84,6 +86,9 @@ function InvoiceRow({ inv, onPreview, onEdit, onOutstandingTab }) {
       <div className="vendor-info">
         <div className="vendor-name">{inv.title}</div>
         <div className="vendor-cat">{inv.client} - Due: {inv.due || '-'}</div>
+        {inv.sourceProposalRef && (
+          <div className="activity-time" style={{ marginTop: '2px' }}>Converted from {inv.sourceProposalRef}</div>
+        )}
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '90px' }}>
         <div className="activity-amount">{inv.amount}</div>
@@ -124,6 +129,7 @@ function invoicePayload(form, fallback = {}) {
     due_on: form.due || null,
     notes: form.notes,
     status: fallback.status || 'draft',
+    discount_amount: Number(form.discount || 0),
     line_items: lineItems.length ? lineItems : [{ description: 'Print service', quantity: 1, unit_price: 0, unit: 'item' }],
   };
 }
