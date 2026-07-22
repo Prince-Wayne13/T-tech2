@@ -1,12 +1,9 @@
-# path: backend/app/routes/proposals.py
-
-from datetime import date
-
 from flask import Blueprint, jsonify, request
 
 from ..extensions import db
-from ..models import AuditLog, Invoice, Proposal
-from ..services.invoices import apply_line_items, serialize_invoice, sync_invoice_amount
+from ..models import AuditLog, Invoice, Job, Proposal
+from ..services.jobs import ACTIVE_STATUS, create_invoice_for_job, serialize_job
+from ..services.invoices import serialize_invoice
 from ..services.proposals import apply_proposal_line_items, serialize_proposal
 from ..utils import parse_date
 from .common import apply_search, list_response
@@ -22,6 +19,11 @@ def next_proposal_ref():
 def next_invoice_ref():
     last = Invoice.query.order_by(Invoice.id.desc()).first()
     return f"INV-{((last.id if last else 0) + 1):04d}"
+
+
+def next_job_ref():
+    last = Job.query.order_by(Job.id.desc()).first()
+    return f"JOB-{((last.id if last else 0) + 1):04d}"
 
 
 @bp.get("")
@@ -84,38 +86,37 @@ def accept_proposal(proposal_id):
     if proposal.status == "accepted" and proposal.converted_invoice_id:
         return jsonify({"error": "Proposal already converted"}), 400
 
-    invoice = Invoice(
-        invoice_ref=next_invoice_ref(),
+    job = Job(
+        job_ref=next_job_ref(),
         client_id=proposal.client_id,
         client_name=proposal.client_name,
         title=proposal.title,
-        status="draft",
-        discount_amount=proposal.discount_amount,
-        tax_rate=0,
-        currency=proposal.currency,
-        issued_on=date.today(),
+        status=ACTIVE_STATUS,
+        progress=10,
         notes=proposal.notes,
     )
-    # Map ProposalLineItem {description, amount} -> InvoiceLineItem {description, quantity=1, unit_price=amount}.
-    # This is a deliberate one-time transformation at conversion time, not a stored
-    # mismatch — see dev-log.md for why Proposal uses its own line item shape.
-    apply_line_items(invoice, [
-        {"description": item.description, "quantity": 1, "unit_price": float(item.amount)}
-        for item in proposal.line_items
-    ])
-    sync_invoice_amount(invoice)
-
+    invoice = create_invoice_for_job(
+        job,
+        next_invoice_ref(),
+        [
+            {"description": item.description, "quantity": 1, "unit_price": float(item.amount)}
+            for item in proposal.line_items
+        ],
+        discount_amount=proposal.discount_amount,
+        currency=proposal.currency,
+        notes=proposal.notes,
+    )
+    db.session.add(job)
     db.session.add(invoice)
     db.session.flush()
 
     proposal.status = "accepted"
     proposal.converted_invoice_id = invoice.id
-
     db.session.add(AuditLog(
-        action=f"Converted proposal {proposal.proposal_ref} to invoice {invoice.invoice_ref}",
+        action=f"Converted proposal {proposal.proposal_ref} to job {job.job_ref} and invoice {invoice.invoice_ref}",
         entity_type="proposal",
         entity_id=proposal.id,
     ))
     db.session.commit()
 
-    return jsonify(serialize_invoice(invoice, include_document=True)), 201
+    return jsonify({"job": serialize_job(job), "invoice": serialize_invoice(invoice, include_document=True)}), 201

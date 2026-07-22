@@ -14,18 +14,15 @@ import ExportData from './ExportData';
 import Settings from './Settings';
 import { api } from './api/client';
 import { compactDate, money } from './utils/format';
-import { calculateTotal } from './utils/calculateTotal';
 import PreviewModal from './components/PreviewModal';
 import { downloadPreviewPdf, recordToPdfHtml, shareText } from './utils/downloads';
 import {
   AddExpenseModal,
   ActivityPreviewModal,
-  NewInvoiceModal,
   NewJobModal,
   NewProposalModal,
   NewVendorModal,
   QuickEntryModal,
-  RecordPaymentModal,
   SearchResultsModal,
 } from './components/Modals';
 import { PrintPreviewModal } from './components/PrintLayouts';
@@ -81,6 +78,7 @@ const NAV_GROUPS = [
   {
     label: 'Primary',
     items: [
+      { id: 'Dashboard',   icon: 'dashboard'  },
       { id: 'Jobs',        icon: 'jobs'       },
       { id: 'Proposals',   icon: 'proposals'  },
       { id: 'Invoices',    icon: 'invoices'   },
@@ -114,32 +112,19 @@ const FIN_CARDS = [
 ];
 
 const QUICK_ACTIONS = [
-  { label: 'New Invoice',    color: 'secondary', icon: 'invoices'  },
   { label: 'New Job',        color: 'teal',      icon: 'jobs'      },
   { label: 'New Proposal',   color: 'purple',    icon: 'proposals' },
-  { label: 'Record Payment', color: 'primary',   icon: 'payment'   },
   { label: 'Add Expense',    color: 'warning',   icon: 'expenses'  },
   { label: 'New Vendor',     color: 'red',       icon: 'vendors'   },
 ];
 
 const ACTION_FIELDS = {
-  'New Invoice': ['Client name', 'Invoice title', 'Amount'],
   'New Job': ['Client name', 'Job title', 'Due date'],
   'New Proposal': ['Client name', 'Proposal title', 'Estimated value'],
-  'Record Payment': ['Client name', 'Invoice ref', 'Amount paid'],
   'Add Expense': ['Expense title', 'Category', 'Amount'],
   'New Vendor': ['Vendor name', 'Category', 'Contact'],
   'Quick Entry': ['Type', 'Name', 'Amount'],
 };
-
-const ACTIVITY = [
-  { id: 1, type: 'Invoice',  client: 'TechCorp Ltd',   amount: '$1,200', status: 'paid',     time: '2h ago', icon: 'invoices'  },
-  { id: 2, type: 'Job',      client: 'BrandX Agency',  amount: '$850',   status: 'active',   time: '4h ago', icon: 'printer'   },
-  { id: 3, type: 'Proposal', client: 'City Council',   amount: '$3,400', status: 'pending',  time: '6h ago', icon: 'proposals' },
-  { id: 4, type: 'Payment',  client: 'MediaGroup',     amount: '$560',   status: 'paid',     time: '1d ago', icon: 'check'     },
-  { id: 5, type: 'Expense',  client: 'Paper Supplies', amount: '$240',   status: 'approved', time: '1d ago', icon: 'expenses'  },
-  { id: 6, type: 'Invoice',  client: 'StartupHub',     amount: '$2,100', status: 'overdue',  time: '2d ago', icon: 'alert'     },
-];
 
 const VENDORS = [
   { name: 'Paper Plus Co.',   cat: 'Supplies',    balance: '$340',   status: 'current' },
@@ -437,7 +422,7 @@ function QuickActions({ onAction }) {
   );
 }
 
-function ActivityFeed({ items = ACTIVITY, onSeeAll }) {
+function ActivityFeed({ items = [], onSeeAll }) {
   return (
     <div className="card activity-feed">
       <div className="card-header">
@@ -445,14 +430,21 @@ function ActivityFeed({ items = ACTIVITY, onSeeAll }) {
         <button className="see-all-btn" onClick={onSeeAll}>See all</button>
       </div>
       <div className="activity-list">
-        {items.map(item => (
+        {items.length === 0 ? (
+          <div className="activity-item">
+            <div className="activity-info">
+              <div className="activity-client">No recent activity</div>
+              <div className="activity-type">Backend audit log has no entries yet</div>
+            </div>
+          </div>
+        ) : items.map(item => (
           <div key={item.id} className="activity-item">
             <div className={`activity-icon ${item.icon}`}><Icon d={D[item.icon]} size={13} /></div>
             <div className="activity-info">
               <div className="activity-client">{item.client}</div>
               <div className="activity-type">{item.type}</div>
             </div>
-            <span className={`status-badge ${item.status}`}>{item.status}</span>
+            <span className={`status-badge ${item.status}`}>{item.statusLabel || item.status}</span>
             <div className="activity-right">
               <div className="activity-amount">{item.amount}</div>
               <div className="activity-time">{item.time}</div>
@@ -462,6 +454,41 @@ function ActivityFeed({ items = ACTIVITY, onSeeAll }) {
       </div>
     </div>
   );
+}
+
+function mapRecentActivity(entry) {
+  const entity = entry.entity_type || 'system';
+  const iconByEntity = {
+    invoice: 'invoices',
+    job: 'printer',
+    proposal: 'proposals',
+    expense: 'expenses',
+    vendor: 'vendors',
+    advance: 'advances',
+    export: 'reports',
+    system: 'reports',
+  };
+  const badgeByEntity = {
+    invoice: 'current',
+    job: 'active',
+    proposal: 'pending',
+    expense: 'overdue',
+    vendor: 'paid',
+    advance: 'pending',
+    export: 'current',
+    system: 'paid',
+  };
+  return {
+    id: `audit-${entry.id}`,
+    type: entity === 'system' ? 'System' : `${entity.charAt(0).toUpperCase()}${entity.slice(1)} #${entry.entity_id || '-'}`,
+    client: entry.action || 'Recorded activity',
+    amount: entry.actor || 'System',
+    status: badgeByEntity[entity] || 'current',
+    statusLabel: entity,
+    time: compactDate(entry.created_at),
+    icon: iconByEntity[entity] || 'reports',
+    raw: entry,
+  };
 }
 
 function VendorList({ vendors = VENDORS, expenses = [] }) {
@@ -538,7 +565,7 @@ function ActionModal({ action, onClose, onSubmit }) {
 function MainCanvas({ onAction, onPreview }) {
   const [summary, setSummary] = useState(null);
   const [financials, setFinancials] = useState(null);
-  const [activity, setActivity] = useState(ACTIVITY);
+  const [activity, setActivity] = useState([]);
   const [vendors, setVendors] = useState(VENDORS);
   const [expenses, setExpenses] = useState([]);
 
@@ -547,44 +574,15 @@ function MainCanvas({ onAction, onPreview }) {
     Promise.all([
       api.dashboardReport(),
       api.financialReport('month'),
-      api.invoices('?per_page=3'),
-      api.jobs('?per_page=2'),
+      api.audit('?per_page=6'),
       api.expenses('?per_page=3'),
       api.vendors('?per_page=5'),
     ])
-      .then(([dashboard, financialReport, invoiceResponse, jobResponse, expenseResponse, vendorResponse]) => {
+      .then(([dashboard, financialReport, auditResponse, expenseResponse, vendorResponse]) => {
         if (!active) return;
         setSummary(dashboard);
         setFinancials(financialReport);
-        setActivity([
-          ...(invoiceResponse.items || []).map(invoice => ({
-            id: `invoice-${invoice.id}`,
-            type: 'Invoice',
-            client: invoice.client_name,
-            amount: money(calculateTotal(invoice.line_items || []), invoice.currency || 'MWK'),
-            status: invoice.status,
-            time: compactDate(invoice.issued_on || invoice.created_at),
-            icon: invoice.status === 'overdue' ? 'alert' : 'invoices',
-          })),
-          ...(jobResponse.items || []).map(job => ({
-            id: `job-${job.id}`,
-            type: 'Job',
-            client: job.client_name,
-            amount: `${job.progress || 0}%`,
-            status: job.status,
-            time: compactDate(job.due_date || job.created_at),
-            icon: 'printer',
-          })),
-          ...(expenseResponse.items || []).map(expense => ({
-            id: `expense-${expense.id}`,
-            type: 'Expense',
-            client: expense.title,
-            amount: money(expense.amount),
-            status: expense.status,
-            time: compactDate(expense.expense_date),
-            icon: 'expenses',
-          })),
-        ].slice(0, 6));
+        setActivity((auditResponse.items || []).map(mapRecentActivity));
         setVendors((vendorResponse.items || []).map(vendor => ({
           name: vendor.name,
           cat: vendor.category || 'Supplier',
@@ -648,23 +646,7 @@ export default function App() {
 
   const submitAction = async (action, values) => {
     try {
-      if (action === 'New Invoice') {
-        const lineItems = (values.items || []).map((item) => ({
-          description: item.desc || item.description || values.title || 'Invoice item',
-          quantity: Number(item.qty || item.quantity || 1),
-          unit_price: Number(item.rate || item.unit_price || 0),
-          unit: 'item',
-        }));
-        const created = await api.createInvoice({
-          client_name: values.client || values.client_name || 'Walk-in Client',
-          title: values.title || values.items?.[0]?.desc || 'Print invoice',
-          due_on: values.due || values.due_on || null,
-          notes: values.notes,
-          status: 'sent',
-          line_items: lineItems.length ? lineItems : [{ description: 'Print service', quantity: 1, unit_price: Number(values.amount || 0), unit: 'item' }],
-        });
-        setPrintPreview({ type: 'invoice', title: `Invoice Added: ${created.invoice_ref}`, data: created });
-      } else if (action === 'New Job') {
+      if (action === 'New Job') {
         const created = await api.createJob({
           client_name: values.client || values.client_name || 'Walk-in Client',
           title: values.title || 'New print job',
@@ -736,10 +718,8 @@ export default function App() {
         onClose={() => setSidebarOpen(false)} 
       />
       {renderPage()}
-      <NewInvoiceModal isOpen={actionModal === 'New Invoice'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('New Invoice', values)} />
       <NewJobModal isOpen={actionModal === 'New Job'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('New Job', values)} />
       <NewProposalModal isOpen={actionModal === 'New Proposal'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('New Proposal', values)} />
-      <RecordPaymentModal isOpen={actionModal === 'Record Payment'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('Record Payment', values)} />
       <AddExpenseModal isOpen={actionModal === 'Add Expense'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('Add Expense', values)} />
       <NewVendorModal isOpen={actionModal === 'New Vendor'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('New Vendor', values)} />
       <QuickEntryModal isOpen={actionModal === 'Quick Entry'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('Quick Entry', values)} />

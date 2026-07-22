@@ -3,6 +3,7 @@ import './styles.css';
 import { api } from './api/client';
 import { Icon, ModuleHeader, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid } from './components/ModuleStandard';
 import { calculateTotal } from './utils/calculateTotal';
+import { shortDate } from './utils/format';
 import UnifiedPreviewModal from './components/UnifiedPreviewModal';
 
 
@@ -63,7 +64,7 @@ export default function Archive() {
             title: invoice.title,
             party: invoice.client_name,
             amount: `MK ${calculateTotal(invoice.line_items || []).toLocaleString()}`,
-            archived: new Date(invoice.updated_at || invoice.paid_on || invoice.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+            archived: shortDate(invoice.updated_at || invoice.paid_on || invoice.created_at),
             notes: invoice.notes || 'Paid invoice retained in archive',
           })),
           ...(jobData.items || []).map(job => ({
@@ -72,7 +73,7 @@ export default function Archive() {
             title: job.title,
             party: job.client_name,
             amount: `${job.progress || 100}% complete`,
-            archived: new Date(job.updated_at || job.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+            archived: shortDate(job.updated_at || job.created_at),
             notes: job.notes || 'Completed production job',
           })),
         ]);
@@ -96,7 +97,7 @@ export default function Archive() {
   ];
 
   const downloadArchive = () => {
-    const htmlContent = `<div class="top"><div><h1>T-Tech Archive</h1><div>${filtered.length} records</div></div><div>${new Date().toLocaleDateString()}</div></div><table><thead><tr><th>ID</th><th>Type</th><th>Title</th><th>Party</th><th>Archived</th></tr></thead><tbody>${filtered.map(row => `<tr><td>${row.id}</td><td>${row.type}</td><td>${row.title}</td><td>${row.party}</td><td>${row.archived}</td></tr>`).join('')}</tbody></table>`;
+    const htmlContent = `<div class="top"><div><h1>T-Tech Archive</h1><div>${filtered.length} records</div></div><div>${shortDate(new Date())}</div></div><table><thead><tr><th>ID</th><th>Type</th><th>Title</th><th>Party</th><th>Archived</th></tr></thead><tbody>${filtered.map(row => `<tr><td>${row.id}</td><td>${row.type}</td><td>${row.title}</td><td>${row.party}</td><td>${row.archived}</td></tr>`).join('')}</tbody></table>`;
     const blob = new Blob([`<!doctype html><html><head><title>Archive Directory</title><style>body { margin: 0; padding: 28px; font-family: Arial, sans-serif; color: #1f2937; background: #fff; } table { width: 100%; border-collapse: collapse; } th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 12px; } th { background: #f8fafc; color: #475569; }</style></head><body>${htmlContent}</body></html>`], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');

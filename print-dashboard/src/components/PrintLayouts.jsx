@@ -1,6 +1,6 @@
 import React from 'react';
-import { downloadInvoicePDF } from './InvoicePDF';
 import { calculateTotal } from '../utils/calculateTotal';
+import { shortDate } from '../utils/format';
 
 const businessDefault = {
   name: 'T-Tech Printing',
@@ -35,47 +35,6 @@ const printStyles = `
 `;
 
 const asMoney = value => `MK ${Number(value || 0).toLocaleString()}`;
-
-function layoutToHtml(type, title, data) {
-  const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-  if (type === 'job') {
-    return `<div class="top"><div><h1>T-Tech Printing</h1><div>Production Ticket</div></div><div><strong>${escape(data.job_ref || data.id || 'JOB')}</strong></div></div>
-      <div class="kv"><div class="label">Client</div><div>${escape(data.client_name || data.client || '-')}</div></div>
-      <div class="kv"><div class="label">Title</div><div>${escape(data.title)}</div></div>
-      <div class="kv"><div class="label">Machine</div><div>${escape(data.machine_name || data.printer || data.service_category || '-')}</div></div>
-      <div class="kv"><div class="label">Due</div><div>${escape(data.due_date || data.due || '-')}</div></div>
-      <div class="kv"><div class="label">Status</div><div>${escape(data.status || 'queued')}</div></div>
-      <h2>Notes</h2><p>${escape(data.notes || 'None')}</p>`;
-  }
-  const items = normaliseItems(data);
-  const rows = items.map(item => `<tr><td>${escape(item.desc)}</td><td>${escape(item.qty || 1)}</td><td>${asMoney(item.rate)}</td><td>${asMoney(item.amount ?? Number(item.qty || 1) * Number(item.rate || 0))}</td></tr>`).join('');
-  return `<div class="top"><div><h1>T-Tech Printing</h1><div>Area 47, Lilongwe</div></div><div><strong>${escape(title || type || 'Document')}</strong><br/>${escape(data.invoice_ref || data.id || '')}</div></div>
-    <div class="kv"><div class="label">Client</div><div>${escape(data.client_name || data.client || '-')}</div></div>
-    <div class="kv"><div class="label">Title</div><div>${escape(data.title || '-')}</div></div>
-    <table><thead><tr><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="amount">${asMoney(calculateTotal(items))}</div>
-    <h2>Notes</h2><p>${escape(data.notes || 'Thank you for your business.')}</p>`;
-}
-
-function openPdfWindow(type, title, data) {
-  const popup = window.open('', '_blank', 'noopener,noreferrer,width=900,height=1100');
-  if (!popup) return;
-  popup.document.write(`<!doctype html><html><head><title>${title || 'T-Tech document'}</title><style>
-    body { margin: 0; padding: 28px; font-family: Arial, sans-serif; color: #1f2937; background: #fff; }
-    .doc { max-width: 820px; margin: 0 auto; }
-    .top { display: flex; justify-content: space-between; border-bottom: 2px solid #3A506B; padding-bottom: 14px; margin-bottom: 22px; }
-    h1 { color: #3A506B; font-size: 20px; margin: 0 0 4px; }
-    h2 { color: #3A506B; font-size: 15px; margin: 18px 0 8px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 14px; }
-    th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; font-size: 12px; text-align: left; }
-    th { background: #f8fafc; color: #475569; }
-    .kv { display: grid; grid-template-columns: 150px 1fr; gap: 8px; font-size: 12px; margin: 6px 0; }
-    .label { color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 10px; }
-    .amount { font-size: 18px; font-weight: 800; color: #3A506B; text-align: right; margin-top: 16px; }
-    @media print { body { padding: 0; } }
-  </style></head><body><div class="doc">${layoutToHtml(type, title, data)}</div><script>window.onload = () => window.print();</script></body></html>`);
-  popup.document.close();
-}
 
 const normaliseItems = data => {
   if (Array.isArray(data?.items) && data.items.length) return data.items;
@@ -169,8 +128,8 @@ export function ProposalPrintLayout({ data, business = businessDefault }) {
           <div style={{ fontSize: '12px', color: '#4A5568', marginTop: '4px' }}>PROJECT PROPOSAL</div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px', fontSize: '11px' }}>
-          <div><strong>Prepared For:</strong> {data.client || '-'}</div>
-          <div><strong>Valid Until:</strong> {data.validUntil || data.expires || '-'}</div>
+          <div><strong>Prepared For:</strong> {data.client || data.client_name || '-'}</div>
+          <div><strong>Valid Until:</strong> {data.validUntil || data.valid_until || data.expires || '-'}</div>
         </div>
         <div style={{ marginBottom: '20px' }}>
           <div style={{ fontSize: '14px', fontWeight: 700, color: '#2D3748', marginBottom: '8px' }}>{data.title || 'Proposal Title'}</div>
@@ -233,7 +192,7 @@ export function ReportPrintLayout({ title, rows = [], footer }) {
       <div className="print-layout" style={{ fontFamily: 'Inter, sans-serif', maxWidth: '800px', margin: '0 auto', padding: '30px', background: '#fff' }}>
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
           <div style={{ fontSize: '18px', fontWeight: 700, color: '#3A506B' }}>{title || 'Report'}</div>
-          <div style={{ fontSize: '10px', color: '#8B9BB0' }}>Generated on {new Date().toLocaleDateString()}</div>
+          <div style={{ fontSize: '10px', color: '#8B9BB0' }}>Generated on {shortDate(new Date())}</div>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr><th>Item</th><th>Category</th><th style={{ textAlign: 'right' }}>Amount</th><th style={{ textAlign: 'center' }}>Status</th></tr></thead>
@@ -256,8 +215,6 @@ export function PrintPreviewModal({ type, title, data, onClose }) {
         <div className="card-header" style={{ marginBottom: '12px' }}>
           <h3 className="card-title">{title || 'Preview'}</h3>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button className="filter-btn" onClick={() => type === 'invoice' ? downloadInvoicePDF(data) : openPdfWindow(type, title, data)}>Download PDF</button>
-            <button className="filter-btn" onClick={() => window.print()}>Print</button>
             <button className="filter-btn active" onClick={onClose}>Close</button>
           </div>
         </div>

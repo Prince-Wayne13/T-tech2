@@ -12,8 +12,11 @@ from .models import (
     ExportJob,
     Invoice,
     Job,
+    Payment,
     PricingItem,
     ProductionMachine,
+    Proposal,
+    ProposalLineItem,
     Vendor,
 )
 from .services.invoices import apply_line_items, apply_payments, sync_invoice_amount
@@ -36,7 +39,7 @@ def spread_days(month_start, month_end, count, force_first=False):
 def seed_mock_data(reset=False):
     random.seed(20250101)
     if reset:
-        for model in [ExportJob, AuditLog, Advance, Expense, Invoice, Job, PricingItem, ProductionMachine, Vendor, Client]:
+        for model in [ExportJob, AuditLog, Advance, Expense, Payment, ProposalLineItem, Proposal, Invoice, Job, PricingItem, ProductionMachine, Vendor, Client]:
             db.session.query(model).delete()
         db.session.commit()
 
@@ -300,6 +303,23 @@ def seed_mock_data(reset=False):
             )
             apply_line_items(invoice, line_items)
             apply_payments(invoice, payments)
+            invoice_job = Job(
+                job_ref=f"JOB-INV-{inv_counter}",
+                client_id=client.id,
+                client_name=client.name,
+                title=invoice.title,
+                service_category="Backfilled Invoice Job",
+                status="finished",
+                priority="medium",
+                progress=100,
+                due_date=due_on,
+                notes="Synthetic job created from invoice seed data.",
+            )
+            invoice_job.created_at = as_datetime(issued_on)
+            invoice_job.updated_at = as_datetime(paid_on or min(due_on, today))
+            invoice.job = invoice_job
+            for payment in invoice.payments:
+                payment.job = invoice_job
             sync_invoice_amount(invoice)
             invoice.created_at = as_datetime(issued_on)
             invoice.updated_at = as_datetime(paid_on or min(due_on, today))

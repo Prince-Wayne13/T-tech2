@@ -3,7 +3,6 @@ import './styles.css';
 import { api } from './api/client';
 import { compactDate, money } from './utils/format';
 import { PrintPreviewModal } from './components/PrintLayouts';
-import { NewInvoiceModal } from './components/Modals';
 import { downloadInvoicePDF } from './components/InvoicePDF';
 import { shareText } from './utils/downloads';
 import { calculateTotal } from './utils/calculateTotal';
@@ -23,6 +22,7 @@ const D = {
   search: 'M21 21l-4.35-4.35 M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z',
   download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3',
   send: 'M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z',
+  eye: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
 };
 
 // ── Merge note (T-Tech2 Merge 1) ──────────────────────────────────────────
@@ -31,13 +31,13 @@ const D = {
 // original filter was ['sent', 'overdue', 'paid'] for its full list, with
 // 'sent' relabeled "Due" in the UI — that relabel is preserved below, gated
 // on which tab is active rather than which file it lives in).
-const TABS = ['Outstanding', 'All', 'Paid', 'Drafts'];
+const TABS = ['Outstanding', 'All', 'Paid', 'Partial'];
 
 const TAB_STATUS_SETS = {
-  Outstanding: ['sent', 'overdue'],
+  Outstanding: ['not_paid', 'partial', 'sent', 'overdue'],
   All: null, // no filter
   Paid: ['paid'],
-  Drafts: ['draft'],
+  Partial: ['partial'],
 };
 
 function mapInvoice(invoice) {
@@ -67,9 +67,11 @@ function mapInvoice(invoice) {
 // relabeling (sent -> "Due") so it only applies where that framing made
 // sense — it stays off on the "All" tab where showing the true status
 // ("Sent") is more accurate for a full-history view.
-function InvoiceRow({ inv, onPreview, onEdit, onOutstandingTab }) {
+function InvoiceRow({ inv, onPreview, onOutstandingTab }) {
   const statusConfig = {
     draft: { label: 'Draft', cls: 'pending', accent: 'var(--warning)' },
+    not_paid: { label: onOutstandingTab ? 'Due' : 'Not Paid', cls: 'current', accent: 'var(--secondary)' },
+    partial: { label: 'Partial', cls: 'pending', accent: 'var(--warning)' },
     sent: { label: onOutstandingTab ? 'Due' : 'Sent', cls: onOutstandingTab ? 'current' : 'current', accent: 'var(--secondary)' },
     paid: { label: 'Paid', cls: 'paid', accent: 'var(--teal)' },
     overdue: { label: 'Overdue', cls: 'overdue', accent: 'var(--red)' },
@@ -102,10 +104,7 @@ function InvoiceRow({ inv, onPreview, onEdit, onOutstandingTab }) {
           </button>
         )}
         <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Preview" onClick={() => onPreview(inv)}>
-          <Icon d={D.invoices} size={11} />
-        </button>
-        <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Edit" onClick={() => onEdit(inv)}>
-          Edit
+          <Icon d={D.eye} size={11} />
         </button>
         <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Download PDF" onClick={() => downloadInvoicePDF(inv)}>
           <Icon d={D.download} size={11} />
@@ -113,25 +112,6 @@ function InvoiceRow({ inv, onPreview, onEdit, onOutstandingTab }) {
       </div>
     </div>
   );
-}
-
-function invoicePayload(form, fallback = {}) {
-  const lineItems = (form.items || []).map(item => ({
-    description: item.desc || item.description || 'Print service',
-    quantity: Number(item.qty || item.quantity || 1),
-    unit_price: Number(item.rate || item.unit_price || 0),
-    unit: 'item',
-  }));
-
-  return {
-    client_name: form.client || fallback.client || 'Walk-in Client',
-    title: form.title || fallback.title || form.items?.[0]?.desc || 'Print invoice',
-    due_on: form.due || null,
-    notes: form.notes,
-    status: fallback.status || 'draft',
-    discount_amount: Number(form.discount || 0),
-    line_items: lineItems.length ? lineItems : [{ description: 'Print service', quantity: 1, unit_price: 0, unit: 'item' }],
-  };
 }
 
 export default function Invoices() {
@@ -142,11 +122,9 @@ export default function Invoices() {
   const [invoices, setInvoices] = useState([]);
   const [invoiceStats, setInvoiceStats] = useState(null);
   const [preview, setPreview] = useState(null);
-  const [showEntry, setShowEntry] = useState(false);
-  const [editRecord, setEditRecord] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const { toast, notify } = useModuleToast();
+  const { toast } = useModuleToast();
 
   const loadInvoices = () => {
     setLoading(true);
@@ -176,10 +154,9 @@ export default function Invoices() {
 
   // Stats reflect the ACTIVE tab, not always the full unfiltered total.
   // On "Outstanding" the headline is "Total Outstanding," not "Total (All)."
-  const outstandingTotal = invoices.filter(i => ['sent', 'overdue'].includes(i.status)).reduce((sum, i) => sum + i.amountValue, 0);
+  const outstandingTotal = invoices.filter(i => ['not_paid', 'partial', 'sent', 'overdue'].includes(i.status)).reduce((sum, i) => sum + i.amountValue, 0);
   const overdueList = invoices.filter(i => i.status === 'overdue');
   const paidTotal = invoices.filter(i => i.status === 'paid').reduce((sum, i) => sum + i.amountValue, 0);
-  const draftTotal = invoices.filter(i => i.status === 'draft').reduce((sum, i) => sum + i.amountValue, 0);
   const allTotal = invoices.reduce((sum, i) => sum + i.amountValue, 0);
 
   const statsByTab = {
@@ -201,45 +178,23 @@ export default function Invoices() {
       { label: 'Paid Count', value: String(filtered.length), sub: 'Invoices settled', icon: D.invoices, color: 'primary' },
       { label: 'Avg. Value', value: money(filtered.length ? paidTotal / filtered.length : 0), sub: 'Per paid invoice', icon: D.invoices, color: 'secondary' },
     ],
-    Drafts: [
-      { label: 'Draft Value', value: money(draftTotal), sub: `${filtered.length} invoices`, icon: D.clock, color: 'secondary' },
-      { label: 'Draft Count', value: String(filtered.length), sub: 'Awaiting send', icon: D.invoices, color: 'warning' },
+    Partial: [
+      { label: 'Partial Value', value: money(filtered.reduce((sum, i) => sum + i.amountValue, 0)), sub: `${filtered.length} invoices`, icon: D.clock, color: 'secondary' },
+      { label: 'Partial Count', value: String(filtered.length), sub: 'Installments started', icon: D.invoices, color: 'warning' },
       { label: 'Total Invoiced', value: money(allTotal), sub: 'All statuses', icon: D.invoices, color: 'primary' },
       { label: 'Overdue', value: String(overdueList.length), sub: 'Past due invoices', icon: D.alert, color: 'red' },
     ],
   };
   const stats = statsByTab[tab];
 
-  const handleSave = async form => {
-    try {
-      const saved = editRecord?.backendId
-        ? await api.updateInvoice(editRecord.backendId, invoicePayload(form, editRecord))
-        : await api.createInvoice(invoicePayload(form));
-
-      setShowEntry(false);
-      setEditRecord(null);
-      setPreview(mapInvoice(saved));
-      notify(editRecord ? 'Invoice updated' : 'Invoice created');
-      loadInvoices();
-    } catch (saveError) {
-      notify(saveError.message || 'Could not save invoice', 'error');
-    }
-  };
-
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
-      <ModuleHeader title="Invoices" subtitle="Track billing & payments" actionLabel="New Invoice" onAction={() => setShowEntry(true)} />
+      <ModuleHeader title="Invoices" subtitle="Derived from jobs and payment history" />
       <StatsGrid stats={stats} />
       <ModuleToolbar filters={TABS} filter={tab} setFilter={setTab} search={search} setSearch={setSearch} placeholder="Search client, title, or ID..." />
       <RegisterCard title="Invoice Register" countLabel={`${filtered.length} invoice${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="INV" emptyMessage="No invoices match your filters.">
-        {filtered.map(inv => <InvoiceRow key={inv.id} inv={inv} onPreview={setPreview} onEdit={setEditRecord} onOutstandingTab={onOutstandingTab} />)}
+        {filtered.map(inv => <InvoiceRow key={inv.id} inv={inv} onPreview={setPreview} onOutstandingTab={onOutstandingTab} />)}
       </RegisterCard>
-      <NewInvoiceModal
-        isOpen={showEntry || Boolean(editRecord)}
-        initialData={editRecord}
-        onClose={() => { setShowEntry(false); setEditRecord(null); }}
-        onSave={handleSave}
-      />
       <PrintPreviewModal type="invoice" title={preview ? `Invoice Preview: ${preview.id}` : ''} data={preview} onClose={() => setPreview(null)} />
       <ModuleToast toast={toast} />
     </main>

@@ -103,6 +103,18 @@ class Job(TimestampMixin, SerializableMixin, db.Model):
 
     client = db.relationship("Client", backref="jobs")
     machine = db.relationship("ProductionMachine", backref="jobs")
+    invoice = db.relationship(
+        "Invoice",
+        back_populates="job",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    payments = db.relationship(
+        "Payment",
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="Payment.paid_on.asc()",
+    )
 
 
 class Invoice(TimestampMixin, SerializableMixin, db.Model):
@@ -110,6 +122,7 @@ class Invoice(TimestampMixin, SerializableMixin, db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     invoice_ref = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    job_id = db.Column(db.Integer, db.ForeignKey("jobs.id"), nullable=True, unique=True, index=True)
     client_id = db.Column(db.Integer, db.ForeignKey("clients.id"))
     client_name = db.Column(db.String(160), nullable=False)
     title = db.Column(db.String(180), nullable=False)
@@ -126,6 +139,7 @@ class Invoice(TimestampMixin, SerializableMixin, db.Model):
     notes = db.Column(db.Text)
 
     client = db.relationship("Client", backref="invoices")
+    job = db.relationship("Job", back_populates="invoice")
     line_items = db.relationship(
         "InvoiceLineItem",
         back_populates="invoice",
@@ -172,7 +186,8 @@ class Payment(TimestampMixin, SerializableMixin, db.Model):
     __tablename__ = "payments"
 
     id = db.Column(db.Integer, primary_key=True)
-    invoice_id = db.Column(db.Integer, db.ForeignKey("invoices.id"), nullable=False, index=True)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoices.id"), nullable=True, index=True)
+    job_id = db.Column(db.Integer, db.ForeignKey("jobs.id"), nullable=True, index=True)
     payment_ref = db.Column(db.String(40), unique=True, nullable=False, index=True)
     amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     method = db.Column(db.String(60), default="bank_transfer")
@@ -181,6 +196,7 @@ class Payment(TimestampMixin, SerializableMixin, db.Model):
     notes = db.Column(db.Text)
 
     invoice = db.relationship("Invoice", back_populates="payments")
+    job = db.relationship("Job", back_populates="payments")
 
 
 class Proposal(TimestampMixin, SerializableMixin, db.Model):

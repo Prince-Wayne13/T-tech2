@@ -59,14 +59,15 @@ def create_invoice():
 @bp.get("/stats")
 def invoice_stats():
     invoices = Invoice.query.all()
-    totals = [serialize_invoice(invoice)["totals"] | {"status": invoice.status} for invoice in invoices]
+    serialized = [serialize_invoice(invoice) for invoice in invoices]
+    totals = [item["totals"] | {"status": item["status"]} for item in serialized]
     return jsonify(
         {
             "invoice_count": len(invoices),
-            "outstanding": sum(item["balance"] for item in totals if item["status"] in {"sent", "overdue"}),
+            "outstanding": sum(item["balance"] for item in totals if item["status"] in {"not_paid", "partial", "sent", "overdue"}),
             "paid": sum(item["paid"] for item in totals),
             "draft": sum(item["total"] for item in totals if item["status"] == "draft"),
-            "overdue_count": len([invoice for invoice in invoices if serialize_invoice(invoice)["is_overdue"]]),
+            "overdue_count": len([item for item in serialized if item["is_overdue"]]),
         }
     )
 

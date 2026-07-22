@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { PrintPreviewModal } from './components/PrintLayouts';
-import { NewJobModal } from './components/Modals';
+import { NewJobModal, RecordPaymentModal } from './components/Modals';
 import { api } from './api/client';
 import {
   Icon,
@@ -21,7 +21,7 @@ const D = {
   more: 'M12 12h.01 M19 12h.01 M5 12h.01',
 };
 
-const JOB_STATUSES = ['All', 'Queued', 'Printing', 'Finished', 'Cancelled'];
+const JOB_STATUSES = ['All', 'In Session', 'Finished', 'Cancelled'];
 
 const mapJob = job => ({
   id: job.job_ref || `JOB-${job.id}`,
@@ -30,7 +30,7 @@ const mapJob = job => ({
   title: job.title || 'Untitled job',
   pages: job.pages || 0,
   copies: job.copies || 1,
-  status: job.status === 'completed' || job.status === 'ready' ? 'finished' : job.status === 'finishing' ? 'printing' : job.status || 'queued',
+  status: ['queued', 'printing', 'finishing'].includes(job.status) ? 'in_session' : job.status === 'completed' || job.status === 'ready' ? 'finished' : job.status || 'in_session',
   progress: job.progress || 0,
   due: job.due_date || 'No due date',
   due_date: job.due_date,
@@ -38,6 +38,8 @@ const mapJob = job => ({
   machine_name: job.machine_name,
   service_category: job.service_category,
   notes: job.notes,
+  totals: job.totals || { total: 0, paid: 0, balance: 0 },
+  invoice: job.invoice,
 });
 
 function jobPayload(form, fallback = {}) {
@@ -51,14 +53,13 @@ function jobPayload(form, fallback = {}) {
   };
 }
 
-function JobRow({ job, onPreview, onEdit }) {
+function JobRow({ job, onPreview, onEdit, onPayment }) {
   const statusConfig = {
-    queued: { label: 'Queued', cls: 'pending', accent: 'var(--warning)' },
-    printing: { label: 'Printing', cls: 'active', accent: 'var(--primary)' },
+    in_session: { label: 'In Session', cls: 'active', accent: 'var(--primary)' },
     finished: { label: 'Finished', cls: 'paid', accent: 'var(--teal)' },
     cancelled: { label: 'Cancelled', cls: 'overdue', accent: 'var(--text-muted)' },
   };
-  const cfg = statusConfig[job.status] || statusConfig.queued;
+  const cfg = statusConfig[job.status] || statusConfig.in_session;
   return (
     <div className="vendor-item" style={{ position: 'relative', paddingLeft: '14px' }}>
       <div style={{ position: 'absolute', left: 0, top: '10px', bottom: '10px', width: '2px', background: cfg.accent, borderRadius: '2px' }} />
@@ -83,6 +84,9 @@ function JobRow({ job, onPreview, onEdit }) {
       <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Edit" onClick={() => onEdit(job)}>
         Edit
       </button>
+      <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Update Payment" onClick={() => onPayment(job)}>
+        Payment
+      </button>
     </div>
   );
 }
@@ -93,6 +97,7 @@ export default function Jobs() {
   const [preview, setPreview] = useState(null);
   const [showEntry, setShowEntry] = useState(false);
   const [editRecord, setEditRecord] = useState(null);
+  const [paymentRecord, setPaymentRecord] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -113,14 +118,14 @@ export default function Jobs() {
 
   const filtered = jobs.filter(job => {
     const query = search.toLowerCase();
-    const matchesStatus = filter === 'All' || job.status === filter.toLowerCase();
+    const matchesStatus = filter === 'All' || job.status === filter.toLowerCase().replace(' ', '_');
     const matchesSearch = `${job.client} ${job.title} ${job.id}`.toLowerCase().includes(query);
     return matchesStatus && matchesSearch;
   });
 
   const stats = [
-    { label: 'Active Jobs', value: jobs.filter(job => ['printing', 'queued'].includes(job.status)).length, sub: 'Currently processing', icon: D.printer, color: 'primary' },
-    { label: 'Queued', value: jobs.filter(job => job.status === 'queued').length, sub: 'Awaiting start', icon: D.clock, color: 'warning' },
+    { label: 'Active Jobs', value: jobs.filter(job => job.status === 'in_session').length, sub: 'Currently processing', icon: D.printer, color: 'primary' },
+    { label: 'Outstanding', value: `MK ${jobs.reduce((sum, job) => sum + Number(job.totals?.balance || 0), 0).toLocaleString()}`, sub: 'Job balances', icon: D.clock, color: 'warning' },
     { label: 'Completed', value: jobs.filter(job => job.status === 'finished').length, sub: 'Ready for pickup', icon: D.check, color: 'teal' },
     { label: 'Avg. Turnaround', value: '4.2h', sub: 'Last 7 days', icon: D.jobs, color: 'secondary' },
   ];
@@ -140,13 +145,31 @@ export default function Jobs() {
     }
   };
 
+  const handlePayment = async form => {
+    if (!paymentRecord?.backendId) return;
+    try {
+      await api.recordJobPayment(paymentRecord.backendId, {
+        amount: Number(form.amount || 0),
+        paid_on: form.date,
+        method: form.method,
+        payment_ref: form.ref,
+        notes: form.notes,
+      });
+      setPaymentRecord(null);
+      notify('Payment recorded');
+      loadJobs();
+    } catch (paymentError) {
+      notify(paymentError.message || 'Could not record payment', 'error');
+    }
+  };
+
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
       <ModuleHeader title="Jobs" subtitle="Manage print production queue" actionLabel="New Job" onAction={() => setShowEntry(true)} />
       <StatsGrid stats={stats} />
       <ModuleToolbar filters={JOB_STATUSES} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search client, title, or ID..." />
       <RegisterCard title="Production Queue" countLabel={`${filtered.length} job${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="JOB" emptyMessage="No jobs match your filters.">
-        {filtered.map(job => <JobRow key={job.id} job={job} onPreview={setPreview} onEdit={setEditRecord} />)}
+        {filtered.map(job => <JobRow key={job.id} job={job} onPreview={setPreview} onEdit={setEditRecord} onPayment={setPaymentRecord} />)}
       </RegisterCard>
       <NewJobModal
         isOpen={showEntry || Boolean(editRecord)}
@@ -155,6 +178,12 @@ export default function Jobs() {
         onSave={handleSave}
       />
       <PrintPreviewModal type="job" title={preview ? `Job Preview: ${preview.id}` : ''} data={preview} onClose={() => setPreview(null)} />
+      <RecordPaymentModal
+        isOpen={Boolean(paymentRecord)}
+        initialData={paymentRecord}
+        onClose={() => setPaymentRecord(null)}
+        onSave={handlePayment}
+      />
       <ModuleToast toast={toast} />
     </main>
   );

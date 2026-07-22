@@ -29,7 +29,8 @@ def invoice_totals(invoice):
     taxable = max(subtotal - discount, Decimal("0.00"))
     tax = (taxable * Decimal(str(invoice.tax_rate or 0))).quantize(Decimal("0.01"))
     total = taxable + tax
-    paid = sum((payment.amount or Decimal("0.00") for payment in invoice.payments), Decimal("0.00"))
+    payment_rows = invoice.job.payments if invoice.job else invoice.payments
+    paid = sum((payment.amount or Decimal("0.00") for payment in payment_rows), Decimal("0.00"))
     balance = max(total - paid, Decimal("0.00"))
 
     return {
@@ -42,15 +43,29 @@ def invoice_totals(invoice):
     }
 
 
+def invoice_status_from_totals(totals):
+    paid = Decimal(str(totals["paid"]))
+    total = Decimal(str(totals["total"]))
+    if paid <= 0:
+        return "not_paid"
+    if paid < total:
+        return "partial"
+    return "paid"
+
+
 def serialize_invoice(invoice, include_document=False):
     data = invoice.to_dict()
     data["line_items"] = [item.to_dict() for item in invoice.line_items]
-    data["payments"] = [payment.to_dict() for payment in invoice.payments]
+    payment_rows = invoice.job.payments if invoice.job else invoice.payments
+    data["payments"] = [payment.to_dict() for payment in payment_rows]
     data["totals"] = invoice_totals(invoice)
+    if invoice.job_id:
+        data["status"] = invoice_status_from_totals(data["totals"])
+        data["job_ref"] = invoice.job.job_ref if invoice.job else None
     data["is_overdue"] = bool(
         invoice.due_on
         and invoice.due_on < date.today()
-        and invoice.status not in {"paid", "cancelled"}
+        and data["status"] not in {"paid", "cancelled"}
     )
     # Proposal->Invoice link: invoice.source_proposal is the SQLAlchemy backref from
     # Proposal.converted_invoice_id. Requires uselist=False on BOTH sides of the
@@ -101,7 +116,10 @@ def apply_payments(invoice, payments):
 
 def sync_invoice_amount(invoice):
     invoice.amount = decimal_money(invoice_totals(invoice)["total"])
-    if invoice_totals(invoice)["balance"] == 0 and invoice.amount > 0:
+    totals = invoice_totals(invoice)
+    if invoice.job_id:
+        invoice.status = invoice_status_from_totals(totals)
+    elif totals["balance"] == 0 and invoice.amount > 0:
         invoice.status = "paid"
 
 

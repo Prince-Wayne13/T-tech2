@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
 import { Icon, ModuleHeader, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid } from './components/ModuleStandard';
+import { shortDate } from './utils/format';
 import UnifiedPreviewModal from './components/UnifiedPreviewModal';
 
 const D = {
@@ -27,7 +28,7 @@ function mapAuditEntry(entry) {
     user: entry.actor || entry.user || 'System',
     action: entry.action || entry.description || 'Action',
     target: entry.entity_type ? `${entry.entity_type} #${entry.entity_id || '-'}` : entry.target || 'Unknown',
-    time: stamp ? new Date(stamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Unknown',
+    time: stamp ? new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(stamp)) : 'Unknown',
     type: typeMap[entry.entity_type || entry.type] || 'User Action',
     details: entry.action || entry.details || 'No details available',
   };
@@ -87,13 +88,13 @@ export default function AuditLog() {
 
   const stats = [
     { label: 'Total Entries', value: String(auditData.length), sub: 'All time', icon: D.reports, color: 'primary' },
-    { label: "Today's Activity", value: String(auditData.filter(log => log.time.includes(new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }))).length), sub: 'Logged actions', icon: D.clock, color: 'warning' },
+    { label: "Today's Activity", value: String(auditData.filter(log => log.time.includes(shortDate(new Date()))).length), sub: 'Logged actions', icon: D.clock, color: 'warning' },
     { label: 'Critical Events', value: String(auditData.filter(log => log.type === 'Financial').length), sub: 'Financial changes', icon: D.alert, color: 'red' },
     { label: 'Active Users', value: String(new Set(auditData.map(log => log.user)).size), sub: 'This month', icon: D.reports, color: 'teal' },
   ];
 
   const downloadAudit = () => {
-    const htmlContent = `<div class="top"><div><h1>T-Tech Audit Log</h1><div>${filtered.length} entries</div></div><div>${new Date().toLocaleDateString()}</div></div><table><thead><tr><th>User</th><th>Action</th><th>Target</th><th>Time</th></tr></thead><tbody>${filtered.map(log => `<tr><td>${log.user}</td><td>${log.action}</td><td>${log.target}</td><td>${log.time}</td></tr>`).join('')}</tbody></table>`;
+    const htmlContent = `<div class="top"><div><h1>T-Tech Audit Log</h1><div>${filtered.length} entries</div></div><div>${shortDate(new Date())}</div></div><table><thead><tr><th>User</th><th>Action</th><th>Target</th><th>Time</th></tr></thead><tbody>${filtered.map(log => `<tr><td>${log.user}</td><td>${log.action}</td><td>${log.target}</td><td>${log.time}</td></tr>`).join('')}</tbody></table>`;
     const blob = new Blob([`<!doctype html><html><head><title>Audit Log</title><style>body { margin: 0; padding: 28px; font-family: Arial, sans-serif; color: #1f2937; background: #fff; } table { width: 100%; border-collapse: collapse; } th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 12px; } th { background: #f8fafc; color: #475569; }</style></head><body>${htmlContent}</body></html>`], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');

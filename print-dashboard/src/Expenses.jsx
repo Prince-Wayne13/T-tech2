@@ -50,7 +50,7 @@ const mapExpense = expense => ({
 // Shared row renderer. `onOutstandingTab` gates the Payables-style
 // relabeling (pending -> "Scheduled") and the days-overdue display that
 // only made sense in the money-owed framing.
-function ExpenseRow({ exp, onPreview, onStatus, onOutstandingTab }) {
+function ExpenseRow({ exp, onPreview, onStatus, onOutstandingTab, onEdit }) {
   const statusConfig = {
     pending: { label: onOutstandingTab ? 'Scheduled' : 'Pending', cls: onOutstandingTab ? 'pending' : 'pending', accent: 'var(--warning)' },
     approved: { label: 'Approved', cls: 'active', accent: 'var(--primary)' },
@@ -82,6 +82,9 @@ function ExpenseRow({ exp, onPreview, onStatus, onOutstandingTab }) {
         <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Preview" onClick={() => onPreview(exp)}>
           <Icon d={D.eye} size={11} />
         </button>
+        <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Edit" onClick={() => onEdit(exp)}>
+          Edit
+        </button>
         {exp.status === 'pending' && (
           <>
             <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Approve" onClick={() => onStatus(exp, 'approved')}>
@@ -110,6 +113,7 @@ export default function Expenses() {
   const [expenses, setExpenses] = useState([]);
   const [paidThisMonthExpenses, setPaidThisMonthExpenses] = useState([]);
   const [showEntry, setShowEntry] = useState(false);
+  const [editRecord, setEditRecord] = useState(null);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -196,18 +200,22 @@ export default function Expenses() {
 
   const handleSave = async form => {
     try {
-      const saved = await api.createExpense({
+      const payload = {
         category: form.category || 'Other',
         title: form.title || 'Expense',
         amount: Number(form.amount || 0),
         expense_date: form.date || new Date().toISOString().slice(0, 10),
-        status: 'pending',
-        submitted_by: 'Team',
+        status: editRecord?.status || 'pending',
+        submitted_by: editRecord?.submittedBy || 'Team',
         notes: form.notes,
-      });
+      };
+      const saved = editRecord?.backendId
+        ? await api.updateExpense(editRecord.backendId, payload)
+        : await api.createExpense(payload);
       setShowEntry(false);
+      setEditRecord(null);
       setPreview(saved);
-      notify('Expense created');
+      notify(editRecord ? 'Expense updated' : 'Expense created');
       loadExpenses();
     } catch (saveError) {
       notify(saveError.message || 'Could not save expense', 'error');
@@ -231,9 +239,14 @@ export default function Expenses() {
       <StatsGrid stats={stats} />
       <ModuleToolbar filters={TABS} filter={tab} setFilter={setTab} search={search} setSearch={setSearch} placeholder="Search category, title, or ID..." />
       <RegisterCard title="Expense Log" countLabel={`${filtered.length} expense${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="EXP" emptyMessage="No expenses match your filters.">
-        {filtered.map(exp => <ExpenseRow key={exp.id} exp={exp} onPreview={setPreview} onStatus={handleStatus} onOutstandingTab={onOutstandingTab} />)}
+        {filtered.map(exp => <ExpenseRow key={exp.id} exp={exp} onPreview={setPreview} onStatus={handleStatus} onOutstandingTab={onOutstandingTab} onEdit={setEditRecord} />)}
       </RegisterCard>
-      <AddExpenseModal isOpen={showEntry} onClose={() => setShowEntry(false)} onSave={handleSave} />
+      <AddExpenseModal
+        isOpen={showEntry || Boolean(editRecord)}
+        initialData={editRecord}
+        onClose={() => { setShowEntry(false); setEditRecord(null); }}
+        onSave={handleSave}
+      />
       <PreviewModal title={preview ? `Expense Preview: ${preview.expense_ref || preview.id || 'Draft'}` : ''} data={preview} onClose={() => setPreview(null)} />
       <ModuleToast toast={toast} />
     </main>

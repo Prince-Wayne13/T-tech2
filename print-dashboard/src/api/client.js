@@ -51,6 +51,10 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(payload),
   }),
+  recordJobPayment: (id, payload) => request(`/jobs/${id}/payments`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
   invoices: (params = '') => request(`/invoices${params}`),
   createInvoice: (payload) => request('/invoices', {
     method: 'POST',

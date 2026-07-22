@@ -462,9 +462,17 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
 
   useEffect(() => {
     if (!isOpen) return;
-    setForm({ client: '', title: '', items: [], validUntil: '', contact: '', notes: '', discount: 0 });
+    setForm({
+      client: initialData?.client_name || '',
+      title: initialData?.title || '',
+      items: (initialData?.line_items || []).map(item => ({ desc: item.description, amount: Number(item.amount) })),
+      validUntil: initialData?.valid_until || '',
+      contact: initialData?.contact || '',
+      notes: initialData?.notes || '',
+      discount: Number(initialData?.discount_amount || 0),
+    });
     setSelectedService(null); setQty('1'); setShowPreview(false);
-  }, [isOpen]);
+  }, [isOpen, initialData]);
 
   const addItem = () => {
     if (selectedService) {
@@ -563,9 +571,22 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
 }
 
 /* ═══════════════════════════════════════ MODAL: Add Expense ═══════════════════════════════════════ */
-export function AddExpenseModal({ isOpen, onClose, onSave }) {
+export function AddExpenseModal({ isOpen, onClose, onSave, initialData = null }) {
   const [form, setForm] = useState({ category: '', title: '', amount: '', date: new Date().toISOString().split('T')[0], notes: '' });
   const [showPreview, setShowPreview] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setForm({
+      category: initialData?.category || '',
+      title: initialData?.title || '',
+      amount: initialData?.amountValue ?? '',
+      date: initialData?.expense_date || new Date().toISOString().split('T')[0],
+      notes: initialData?.notes || '',
+    });
+    setShowPreview(false);
+  }, [isOpen, initialData]);
+
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="Add Expense" wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
@@ -643,9 +664,21 @@ export function NewVendorModal({ isOpen, onClose, onSave, initialData = null }) 
 }
 
 /* ═══════════════════════════════════════ MODAL: Record Payment ═══════════════════════════════════════ */
-export function RecordPaymentModal({ isOpen, onClose, onSave }) {
-  const [form, setForm] = useState({ invoice: '', amount: '', date: new Date().toISOString().split('T')[0], method: 'bank', ref: '', notes: '' });
+export function RecordPaymentModal({ isOpen, onClose, onSave, initialData = null }) {
+  const [form, setForm] = useState({ job: '', amount: '', date: new Date().toISOString().split('T')[0], method: 'bank', ref: '', notes: '' });
   const [showPreview, setShowPreview] = useState(false);
+  useEffect(() => {
+    if (!isOpen) return;
+    setForm({
+      job: initialData?.id || initialData?.job_ref || '',
+      amount: '',
+      date: new Date().toISOString().split('T')[0],
+      method: 'bank',
+      ref: '',
+      notes: '',
+    });
+    setShowPreview(false);
+  }, [isOpen, initialData]);
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="Record Payment" wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
@@ -654,7 +687,7 @@ export function RecordPaymentModal({ isOpen, onClose, onSave }) {
       <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={
           <div style={{ padding: '20px', display: 'grid', gap: '12px', alignContent: 'start', overflowY: 'auto', flex: 1 }}>
-            <div><label style={labelStyle}>Invoice / Client</label><input style={inputStyle} value={form.invoice} onChange={e => setForm({ ...form, invoice: e.target.value })} /></div>
+            <div><label style={labelStyle}>Job / Client</label><input style={inputStyle} value={form.job} onChange={e => setForm({ ...form, job: e.target.value })} /></div>
             <div><label style={labelStyle}>Amount Paid (MK)</label><input type="number" style={inputStyle} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} /></div>
             <div><label style={labelStyle}>Payment Date</label><input type="date" style={inputStyle} value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></div>
             <div><label style={labelStyle}>Method</label><div style={{ display: 'flex', gap: '6px' }}>{['cash', 'bank', 'mobile', 'cheque'].map(m => <button key={m} onClick={() => setForm({ ...form, method: m })} style={pillBtnStyle(form.method === m)}>{m}</button>)}</div></div>

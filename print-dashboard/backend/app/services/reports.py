@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from ..models import Expense, Invoice, Job, ProductionMachine
-from .invoices import invoice_totals
+from .invoices import invoice_status_from_totals, invoice_totals
 
 
 def money(value):
@@ -35,7 +35,7 @@ def trailing_month_keys(month_count=13):
 
 
 def active_invoice_statuses():
-    return {"sent", "overdue", "paid"}
+    return {"not_paid", "partial", "paid", "sent", "overdue"}
 
 
 def build_dashboard_summary():
@@ -44,13 +44,13 @@ def build_dashboard_summary():
     jobs = Job.query.all()
 
     totals = {invoice.id: invoice_totals(invoice) for invoice in invoices}
-    outstanding = sum(totals[i.id]["balance"] for i in invoices if i.status in {"sent", "overdue"})
+    outstanding = sum(totals[i.id]["balance"] for i in invoices if invoice_status_from_totals(totals[i.id]) in {"not_paid", "partial"})
     paid = sum(totals[i.id]["paid"] for i in invoices)
-    booked_revenue = sum(totals[i.id]["total"] for i in invoices if i.status in active_invoice_statuses())
+    booked_revenue = sum(totals[i.id]["total"] for i in invoices if invoice_status_from_totals(totals[i.id]) in active_invoice_statuses())
     total_expenses = sum(money(e.amount) for e in expenses if e.status in {"approved", "reimbursed"})
     overdue = [
         i for i in invoices
-        if i.due_on and i.due_on < date.today() and i.status not in {"paid", "cancelled"}
+        if i.due_on and i.due_on < date.today() and invoice_status_from_totals(totals[i.id]) not in {"paid", "cancelled"}
     ]
 
     return {
@@ -59,13 +59,12 @@ def build_dashboard_summary():
         "expenses": total_expenses,
         "booked_revenue": booked_revenue,
         "gross_profit": booked_revenue - total_expenses,
-        "active_jobs": len([j for j in jobs if j.status in {"queued", "printing"}]),
+        "active_jobs": len([j for j in jobs if j.status in {"in_session", "queued", "printing", "finishing"}]),
         "overdue_invoices": len(overdue),
         "pipeline": {
-            "queued": len([j for j in jobs if j.status == "queued"]),
-            "printing": len([j for j in jobs if j.status == "printing"]),
-            "finishing": len([j for j in jobs if j.status == "finishing"]),
-            "ready": len([j for j in jobs if j.status == "ready"]),
+            "in_session": len([j for j in jobs if j.status in {"in_session", "queued", "printing", "finishing"}]),
+            "finished": len([j for j in jobs if j.status in {"finished", "completed", "ready"}]),
+            "cancelled": len([j for j in jobs if j.status == "cancelled"]),
         },
     }
 
@@ -75,7 +74,7 @@ def build_financial_report(period="month"):
     expenses = Expense.query.all()
     jobs = Job.query.all()
 
-    revenue = sum(invoice_totals(invoice)["total"] for invoice in invoices if invoice.status in active_invoice_statuses())
+    revenue = sum(invoice_totals(invoice)["total"] for invoice in invoices if invoice_status_from_totals(invoice_totals(invoice)) in active_invoice_statuses())
     paid = sum(invoice_totals(invoice)["paid"] for invoice in invoices)
     expense_total = sum(money(expense.amount) for expense in expenses if expense.status in {"approved", "reimbursed"})
 
@@ -88,11 +87,12 @@ def build_financial_report(period="month"):
 
     for invoice in invoices:
         totals = invoice_totals(invoice)
-        by_status[invoice.status] += totals["total"]
+        status = invoice_status_from_totals(totals)
+        by_status[status] += totals["total"]
         # FIX (2026-07-20): revenue_by_month is keyed off actual cash received
         # (Payment.paid_on), not Invoice.issued_on (booked revenue). This is what
         # makes it a true cashflow figure rather than a booked-revenue figure.
-        for payment in invoice.payments:
+        for payment in (invoice.job.payments if invoice.job else invoice.payments):
             by_month[month_key(payment.paid_on)] += money(payment.amount)
         client_revenue[invoice.client_name] += totals["total"]
         for item in invoice.line_items:
@@ -126,7 +126,7 @@ def build_financial_report(period="month"):
         "product_mix": dict(sorted(product_mix.items(), key=lambda row: row[1], reverse=True)),
         "receivables_aging": build_receivables_aging(invoices),
         "production": {
-            "active_jobs": len([job for job in jobs if job.status in {"queued", "printing", "finishing"}]),
+            "active_jobs": len([job for job in jobs if job.status in {"in_session", "queued", "printing", "finishing"}]),
             "due_this_week": len([job for job in jobs if job.due_date and job.due_date <= date.today() + timedelta(days=7)]),
             "average_progress": round(sum(job.progress or 0 for job in jobs) / len(jobs), 1) if jobs else 0,
         },
@@ -160,7 +160,7 @@ def build_machine_revenue(invoices=None):
     jobs_by_machine = defaultdict(int)
 
     for invoice in invoices:
-        if invoice.status not in active_invoice_statuses():
+        if invoice_status_from_totals(invoice_totals(invoice)) not in active_invoice_statuses():
             continue
         for item in invoice.line_items:
             machine_name = item.machine.name if item.machine else (item.product_type or "Unassigned")

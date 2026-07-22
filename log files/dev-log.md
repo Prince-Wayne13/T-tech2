@@ -572,4 +572,161 @@ this environment), `POST /api/proposals/<id>/accept` → `serialize_invoice()` �
 environment attached), so this is a code-level confirmation, not a live-traffic confirmation —
 stated plainly rather than implied.
 
+## 2026-07-22 — Applied Fixes 1 & 2 from small-features audit (Proposal/Expense Edit); Fix 3 blocked
+Author: zcodex claude
+Date: 2026-07-22
+Scope: Execution session applying the three fixes queued up in the immediately preceding
+"small-features audit" entry, now that the sandbox container is available again. Files touched:
+`Proposals.jsx`, `Expenses.jsx`, `Modals.jsx`.
+
+**Fix 1 — Proposals Edit (applied):**
+* `Proposals.jsx`: added `editRecord` state; added an Edit button to `ProposalRow`, gated to
+  `prop.status === 'draft'` only (alongside the existing Send button) — editing a proposal
+  already sent without a re-send step would misrepresent what the client actually saw, so the
+  gate is intentional, not a placeholder.
+* `handleSave` now branches: `editRecord?.id ? api.updateProposal(editRecord.id, payload) :
+  api.createProposal(payload)`, preserves `editRecord?.status` on update instead of forcing
+  `'draft'`, calls `loadProposals()` on success (previously `handleSave`'s create path only
+  spliced the new proposal into local state — switched to a full reload so edit and create
+  behave consistently and stay in sync with the backend).
+* `NewProposalModal` wired with `isOpen={showEntry || Boolean(editRecord)}`,
+  `initialData={editRecord}`, and a combined `onClose` that clears both `showEntry` and
+  `editRecord`.
+* `Modals.jsx`'s `NewProposalModal` — confirmed `initialData` was already in the function's
+  destructured params (present since the modal was first built for `NewInvoiceModal`-parity, but
+  silently unused), so no signature change was needed. The bug was entirely in the `useEffect`,
+  which unconditionally reset form state to blanks on every open regardless of `initialData`.
+  Replaced it with a real prefill mapping backend field names to form state: `client_name` →
+  `client`, `line_items` → `items` (mapped from `{description, amount}` to the form's
+  `{desc, amount}` shape), `valid_until` → `validUntil`, `discount_amount` → `discount`, plus
+  `contact`/`notes` passthrough. Effect dependency array updated to `[isOpen, initialData]`.
+
+**Fix 2 — Expenses Edit (applied):**
+* `Expenses.jsx`: added `editRecord` state; added an Edit button to `ExpenseRow`, unrestricted by
+  status (editing category/title/amount/date/notes doesn't touch the
+  approve/reject/reimburse workflow, so no gating needed — matches the audit's reasoning).
+* `handleSave` now branches on `editRecord?.backendId` between `api.updateExpense()` and
+  `api.createExpense()`; preserves `editRecord?.status`/`editRecord?.submittedBy` on update
+  instead of forcing `status: 'pending', submitted_by: 'Team'` on every save.
+* `AddExpenseModal` wired the same way as `NewProposalModal` above:
+  `isOpen={showEntry || Boolean(editRecord)}`, `initialData={editRecord}`, combined `onClose`.
+* `Modals.jsx`'s `AddExpenseModal` — this one genuinely had no `initialData` param at all (unlike
+  `NewProposalModal`, which had the param but not the logic). Added `initialData = null` to the
+  destructured signature and a new `useEffect` prefilling `category`/`title`/`amount` (from
+  `initialData.amountValue`, matching `mapExpense()`'s output shape in `Expenses.jsx`)/`date`
+  (from `initialData.expense_date`)/`notes`. Confirmed `App.jsx`'s existing call site
+  (`<AddExpenseModal isOpen={...} onClose={...} onSave={...} />`, used for the Dashboard's Quick
+  Action) passes no `initialData` — defaults to `null`, all fields fall back to blank exactly as
+  before, so this is a strictly additive change with no regression to the existing call site.
+
+**Fix 3 — ProposalPrintLayout `valid_until` fallback (blocked, not applied):**
+* `PrintLayouts.jsx` is not among the files available in this project/session — it was referenced
+  in the prior two audit sessions but never actually uploaded. Cannot safely patch a fallback
+  chain in a file I can't read; guessing at the surrounding `normaliseItems`-equivalent code and
+  JSX structure risks introducing a syntax error in a file with no verification path. Flagging
+  this as blocked-on-missing-file rather than silently skipping it — needs `PrintLayouts.jsx`
+  attached in a follow-up session before this can be done safely.
+
+**Verification performed:**
+* Structural check via Python brace/paren/bracket balance count (`{`/`}`, `(`/`)`, `[`/`]`) on all
+  three edited files — all balanced (net zero) after edits. Confirmed export counts match
+  expectations: one `export default function` each in `Proposals.jsx`/`Expenses.jsx`, ten
+  `export function` declarations in `Modals.jsx` (unchanged count — no components added or
+  removed, only params/effects modified on two existing ones).
+* Attempted a real Babel AST parse for a stronger guarantee than brace-counting; `npm install
+  @babel/core` failed with `403 Forbidden` against the npm registry — no network egress available
+  in this sandbox (consistent with the same limitation noted in the 2026-07-21 merge-execution
+  session). Fell back to the structural check plus manual line-by-line review of every edited
+  region via `view`, stating this distinction plainly rather than overstating confidence.
+* Manually traced `AddExpenseModal`'s existing call site in `App.jsx` to confirm the new optional
+  `initialData` param doesn't break the Dashboard's "Add Expense" Quick Action — confirmed no
+  regression, since that call site never passed the prop before and still doesn't need to.
+* Copied all three fixed files to `/mnt/user-data/outputs/` for direct download/review, rather
+  than only describing the diffs in chat.
+
+**Explicitly not touched this session, per original audit's scope:**
+* Invoice PDF discount inconsistency (`InvoicePDF.jsx` vs. `PrintLayouts.jsx`'s
+  `InvoicePrintLayout`) — still flagged, not fixed, per the prior session's note that this needs
+  a design decision on which PDF system is canonical.
+* Client-side vs. server-side search architecture note — unchanged, still just a flagged
+  observation, not a bug.
+* No Admin/Activity page work, no PDF/XLS export or auto-report/email work — out of scope per the
+  original three-part audit's own scope boundaries.
+
+**Still open:**
+* Fix 3 (`PrintLayouts.jsx` valid_until fallback) needs that file uploaded before it can be
+  applied — this is now the single remaining item from the original three-fix list.
+
+## 2026-07-22 - Proposal -> Job -> Invoice restructure implementation
+Author: zcodex claude
+Date: 2026-07-22
+Scope: Implementation session following `proposal-job-invoice-restructure-prompt.md`.
+Files changed in this pass include backend models/routes/services/seed/backfill plus active frontend Jobs/Invoices/App/date/preview wiring.
+
+**Backend flow implemented:**
+* `Proposal.accept` no longer creates a direct standalone Invoice. `POST /api/proposals/<id>/accept` now creates a `Job` with status `in_session`, creates the derived linked `Invoice`, marks the Proposal accepted, and returns both `{ job, invoice }`.
+* Added `backend/app/services/jobs.py` as the shared job-domain service for status normalization, job serialization, derived invoice creation, and job payment recording.
+* Added a one-to-one `Job.invoice` / `Invoice.job` relationship via `Invoice.job_id` and a `Job.payments` ledger. `Payment.job_id` is nullable for compatibility; old `Payment.invoice_id` is also nullable so new payments can belong to Jobs without inventing a separate payment table.
+* Invoice status is computed for job-linked invoices from the Job payment ledger:
+  `not_paid` when paid total is zero, `partial` when paid total is below total, and `paid` when paid total covers the invoice total.
+* Added `POST /api/jobs/<id>/payments`, appending to the Job ledger and re-syncing the linked invoice. The old invoice payment helpers remain for compatibility with older/direct invoice records.
+* Updated dashboard/financial reports so active statuses include the new derived statuses and cashflow reads `invoice.job.payments` when a job link exists.
+
+**Backfill / migration path:**
+* Updated `seed.py` so `reset-mock-db` creates the new linked shape from scratch: seeded invoices now get synthetic `finished` Jobs and their seeded payments are linked to both the old invoice row and the new job ledger.
+* Added `backend/backfill_invoice_jobs.py` as the one-time script for persistent existing databases. It creates a synthetic `finished` Job for each Invoice with no `job_id`, links old invoice payments to that Job, and re-syncs invoice status.
+* Important migration note: this is a schema change (`invoices.job_id`, `payments.job_id`, nullable `payments.invoice_id`). `reset-mock-db` handles mock/dev reset databases, but a persistent database needs an Alembic/Flask-Migrate migration or a reset before the new columns exist. `db.create_all()` alone will not retrofit existing tables.
+
+**Frontend wiring:**
+* `Jobs.jsx`: status tabs are now `All / In Session / Finished / Cancelled`; legacy `queued/printing/finishing/ready/completed` values are normalized in the mapper. Added a row-level Payment action that opens `RecordPaymentModal` and calls `api.recordJobPayment(jobId, payload)`.
+* `api/client.js`: added `recordJobPayment`.
+* `Invoices.jsx`: removed the user-facing New Invoice and Edit paths. Invoices are now read-only from the page, with row-level Preview/Download only, and tabs now include `Outstanding / All / Paid / Partial`.
+* `App.jsx`: removed dashboard Quick Actions for direct New Invoice and generic Record Payment. Payment recording now happens from a Job row where the backend has a concrete `job_id`.
+* `PrintLayouts.jsx`: removed duplicate Download PDF and Print buttons from inside `PrintPreviewModal`; row-level download buttons remain. Also fixed `ProposalPrintLayout` to fall back through `validUntil || valid_until || expires`, closing the previously blocked `valid_until` preview bug now that the file exists.
+* `Invoices.jsx`: added the same `D.eye` preview icon path used by Proposals for invoice preview consistency.
+* Date formatting: `shortDate`/`compactDate` now render explicit `dd/mm/yyyy` via `en-GB`; default-locale `toLocaleDateString()` calls in Archive, Audit Log, PrintLayouts, and download utilities were made explicit.
+
+**Compatibility decisions / explicitly left alone:**
+* `POST /api/invoices` and `PUT /api/invoices/<id>` still exist as backend compatibility endpoints for old/admin/API use, but direct invoice creation/editing is no longer exposed in the active UI. This avoids breaking old data paths while honoring the prompt's "not user-facing" requirement.
+* Kept `Proposal.converted_invoice_id` rather than introducing `converted_job_id`, so existing proposal-to-invoice traceability remains intact. The accepted proposal now links to the invoice derived from the auto-created job.
+* Did not touch Vendor page behavior or vendor backend code, per prompt.
+* Did not address the separate InvoicePDF vs PrintLayouts discount inconsistency, per prompt.
+
+**Verification performed:**
+* Python AST parse across `print-dashboard/backend/**/*.py`: passed.
+* Frontend production build via `npm.cmd run build`: passed. Vite only reported the existing large-chunk warning.
+* Backend smoke test using Flask `testing` config and in-memory SQLite: created a Proposal, accepted it to a Job + Invoice, recorded one partial Job payment, then a second payment. Observed statuses: `in_session` Job, `not_paid` Invoice -> `partial` -> `paid`.
+
+**Still open / risk notes:**
+* A real schema migration is still needed for any persistent SQLite/production database. Running only the app restart against an old database will not add the new columns.
+* Existing legacy status strings are normalized at service/UI boundaries, but old rows may still store `queued`, `printing`, `finishing`, `ready`, or `completed` until reset/backfill/migration cleanup is run.
+
+## 2026-07-22 - Dashboard Recent Activity now uses AuditLog
+Author: zcodex claude
+Date: 2026-07-22
+Scope: Small dashboard fix requested after the Proposal -> Job -> Invoice restructure.
+
+* Fixed `App.jsx` dashboard Recent Activity so it no longer fabricates a mixed list from the latest invoices/jobs/expenses. It now calls the real backend audit stream via `api.audit('?per_page=6')`, which is backed by `routes/audit.py` ordering `AuditLog.created_at.desc()`.
+* Removed the static fake `ACTIVITY` fallback array from `App.jsx`. If the audit log is empty or unavailable, the dashboard now shows a neutral "No recent activity" state rather than pretending there are real events.
+* Added `mapRecentActivity(entry)` to adapt `AuditLog` rows into the existing dashboard card shape: action text as the main line, entity type/id as the subtype, actor on the right, and entity-specific icon/badge styling.
+
+**Verification performed:**
+* Frontend production build via `npm.cmd run build`: passed. Vite only reported the existing large-chunk warning.
+
+## 2026-07-22 - Applied persistent SQLite schema/data upgrade for Job->Invoice flow
+Author: zcodex claude
+Date: 2026-07-22
+Scope: Follow-up to the live `sqlite3.OperationalError: no such column: invoices.job_id` traceback after the Job->Invoice restructure.
+
+* Added `backend/app/schema_migrations.py` with an idempotent local upgrade path for existing SQLite databases:
+  adds `invoices.job_id` when missing, adds `payments.job_id` when missing, normalizes stored legacy Job statuses, and backfills synthetic finished Jobs for existing direct invoices.
+* Updated `backend/backfill_invoice_jobs.py` to call the shared upgrade routine instead of only doing the invoice backfill. This makes the standalone script safe to run against an old DB that does not yet have the new columns.
+* Added a Flask CLI command in `manage.py`: `flask --app manage.py upgrade-job-invoice-flow`.
+* Ran that command against the local persistent dev database (`backend/instance/ttech_dev.db`) that produced the traceback. Result:
+  `schema_changes=['invoices.job_id', 'payments.job_id']`, `statuses_normalized=74`, `invoice_jobs_backfilled=81`.
+* Confirmed the previously failing `/api/reports/dashboard` endpoint now returns 200 against the persistent dev DB; also spot-checked `/api/jobs?per_page=3` and `/api/invoices/stats`.
+
+**Decision note:**
+* This is a pragmatic local SQLite upgrader, not a formal Alembic revision. It is intentionally idempotent and safe for the current dev database. If this app later uses Flask-Migrate migrations in production, this same schema/data logic should be translated into a proper Alembic migration.
+
 <!-- New entries go above this line, most recent first -->

@@ -73,5 +73,6 @@ export function recordToPdfHtml(title, data) {
       return `<h2>${key.replaceAll('_', ' ')}</h2><table><thead><tr>${columns.map(col => `<th>${col.replaceAll('_', ' ')}</th>`).join('')}</tr></thead><tbody>${value.map(row => `<tr>${columns.map(col => `<td>${row[col] ?? ''}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
     })
     .join('');
-  return `<div class="top"><div><h1>T-Tech Printing</h1><div>Area 47, Lilongwe</div></div><div><strong>${title || 'Record Preview'}</strong><br/>${new Date().toLocaleDateString()}</div></div>${rows}${nestedTables}`;
+  const generatedOn = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date());
+  return `<div class="top"><div><h1>T-Tech Printing</h1><div>Area 47, Lilongwe</div></div><div><strong>${title || 'Record Preview'}</strong><br/>${generatedOn}</div></div>${rows}${nestedTables}`;
 }

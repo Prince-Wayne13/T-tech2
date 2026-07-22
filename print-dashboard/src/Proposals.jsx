@@ -21,7 +21,7 @@ const D = {
 // this is a visible UI behavior change (filter pills, badge labels), not a pure plumbing fix.
 const PROPOSAL_STATUSES = ['All', 'Draft', 'Sent', 'Accepted', 'Declined'];
 
-function ProposalRow({ prop, onPreview, onAccept, onSend, onDecline }) {
+function ProposalRow({ prop, onPreview, onAccept, onSend, onDecline, onEdit }) {
   const statusConfig = {
     draft: { label: 'Draft', cls: 'pending', accent: 'var(--warning)' },
     sent: { label: 'Sent', cls: 'current', accent: 'var(--secondary)' },
@@ -45,9 +45,14 @@ function ProposalRow({ prop, onPreview, onAccept, onSend, onDecline }) {
       <span className={`status-badge ${cfg.cls}`} style={{ marginLeft: '12px' }}>{cfg.label}</span>
       <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
         {prop.status === 'draft' && (
-          <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Mark as Sent to Client" onClick={() => onSend(prop)}>
-            Send
-          </button>
+          <>
+            <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Edit Draft" onClick={() => onEdit(prop)}>
+              Edit
+            </button>
+            <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Mark as Sent to Client" onClick={() => onSend(prop)}>
+              Send
+            </button>
+          </>
         )}
         {prop.status === 'sent' && (
           <>
@@ -71,6 +76,7 @@ export default function Proposals() {
   const [search, setSearch] = useState('');
   const [preview, setPreview] = useState(null);
   const [showEntry, setShowEntry] = useState(false);
+  const [editRecord, setEditRecord] = useState(null);
   const [proposals, setProposals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -111,17 +117,21 @@ export default function Proposals() {
       valid_until: form.validUntil || null,
       contact: form.contact,
       notes: form.notes,
-      status: 'draft',
+      status: editRecord?.status || 'draft',
       discount_amount: Number(form.discount || 0),
     };
-    api.createProposal(payload)
-      .then(created => {
-        setProposals(current => [created, ...current]);
+    const request = editRecord?.id
+      ? api.updateProposal(editRecord.id, payload)
+      : api.createProposal(payload);
+    request
+      .then(saved => {
         setShowEntry(false);
-        setPreview(created);
-        notify('Proposal draft added');
+        setEditRecord(null);
+        setPreview(saved);
+        notify(editRecord ? 'Proposal updated' : 'Proposal draft added');
+        loadProposals();
       })
-      .catch(() => notify('Could not save proposal. Check the backend connection.'));
+      .catch(() => notify(editRecord ? 'Could not update proposal.' : 'Could not save proposal. Check the backend connection.'));
   };
 
   const handleAccept = prop => {
@@ -157,9 +167,14 @@ export default function Proposals() {
       <StatsGrid stats={stats} />
       <ModuleToolbar filters={PROPOSAL_STATUSES} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search client, title, or ID..." />
       <RegisterCard title="Proposal Pipeline" countLabel={`${filtered.length} proposal${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="PROP" emptyMessage="No proposals match your filters.">
-        {filtered.map(prop => <ProposalRow key={prop.id} prop={prop} onPreview={setPreview} onAccept={handleAccept} onSend={handleSend} onDecline={handleDecline} />)}
+        {filtered.map(prop => <ProposalRow key={prop.id} prop={prop} onPreview={setPreview} onAccept={handleAccept} onSend={handleSend} onDecline={handleDecline} onEdit={setEditRecord} />)}
       </RegisterCard>
-      <NewProposalModal isOpen={showEntry} onClose={() => setShowEntry(false)} onSave={handleSave} />
+      <NewProposalModal
+        isOpen={showEntry || Boolean(editRecord)}
+        initialData={editRecord}
+        onClose={() => { setShowEntry(false); setEditRecord(null); }}
+        onSave={handleSave}
+      />
       <PrintPreviewModal type="proposal" title={preview ? `Proposal Preview: ${preview.proposal_ref}` : ''} data={preview} onClose={() => setPreview(null)} />
       <ModuleToast toast={toast} />
     </main>
