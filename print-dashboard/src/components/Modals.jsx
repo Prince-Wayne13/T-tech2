@@ -3,6 +3,7 @@
 // Modals.jsx — PrintOps BMS (Mobile Toggle + Full-Size Preview)
 import React, { useEffect, useState, useLayoutEffect, useRef } from 'react';
 import { calculateTotal, calculateDiscountedTotal } from '../utils/calculateTotal';
+import { api } from '../api/client';
 
 /* ═══════════════════════════════════════
    ICON SYSTEM
@@ -455,24 +456,56 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
 
 /* ═══════════════════════════════════════ MODAL: New Proposal ═══════════════════════════════════════ */
 export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', contact: '', notes: '', discount: 0 });
+  const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', validDays: '', contact: '', notes: '', discount: 0 });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
   const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
+    // Item 5 (Prompt 7): valid_until is entered as "N days from today"
+    // rather than a raw date picker — computed once at save time (today +
+    // N days), then stored as a fixed date, per this session's confirmed
+    // choice ("give us a day to do it for you" = a relative offset, not a
+    // live-recalculating one). When editing an existing draft, back-derive
+    // a days count from the stored valid_until so the field still shows a
+    // sensible number rather than blanking out; this is a display
+    // convenience only — re-saving recomputes from *today*, it does not
+    // preserve the original creation date as the base.
+    const existingValidUntil = initialData?.valid_until || '';
+    let derivedDays = '';
+    if (existingValidUntil) {
+      const msPerDay = 24 * 60 * 60 * 1000;
+      const diff = Math.round((new Date(existingValidUntil) - new Date(new Date().toDateString())) / msPerDay);
+      derivedDays = diff > 0 ? String(diff) : '';
+    }
     setForm({
       client: initialData?.client_name || '',
       title: initialData?.title || '',
       items: (initialData?.line_items || []).map(item => ({ desc: item.description, amount: Number(item.amount) })),
-      validUntil: initialData?.valid_until || '',
+      validUntil: existingValidUntil,
+      validDays: derivedDays,
       contact: initialData?.contact || '',
       notes: initialData?.notes || '',
       discount: Number(initialData?.discount_amount || 0),
     });
     setSelectedService(null); setQty('1'); setShowPreview(false);
   }, [isOpen, initialData]);
+
+  // Recompute the stored validUntil date whenever the days input changes.
+  // Base is always "today" at the moment of typing/saving — not the
+  // proposal's original creation date on edit — matching the confirmed
+  // "computed once at save time" behavior.
+  const setValidDays = daysStr => {
+    const days = Number(daysStr);
+    if (daysStr === '' || Number.isNaN(days) || days < 0) {
+      setForm(prev => ({ ...prev, validDays: daysStr, validUntil: '' }));
+      return;
+    }
+    const target = new Date();
+    target.setDate(target.getDate() + days);
+    setForm(prev => ({ ...prev, validDays: daysStr, validUntil: target.toISOString().slice(0, 10) }));
+  };
 
   const addItem = () => {
     if (selectedService) {
@@ -493,7 +526,23 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-faint)', display: 'grid', gap: '10px', flexShrink: 0 }}>
             <div><label style={labelStyle}>Client</label><input style={inputStyle} value={form.client} onChange={e => setForm({ ...form, client: e.target.value })} /></div>
             <div><label style={labelStyle}>Proposal Title</label><input style={inputStyle} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></div>
-            <div><label style={labelStyle}>Valid Until</label><input type="date" style={inputStyle} value={form.validUntil} onChange={e => setForm({ ...form, validUntil: e.target.value })} /></div>
+            <div>
+              <label style={labelStyle}>Valid For (days from today)</label>
+              <input type="number" min="0" style={inputStyle} placeholder="e.g. 14" value={form.validDays} onChange={e => setValidDays(e.target.value)} />
+              {form.validUntil && (
+                <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                  Expires: {new Date(form.validUntil).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </div>
+              )}
+            </div>
+            {/* Item 1 (Prompt 7): contact input was previously entirely
+                missing from this form's JSX despite existing in form state
+                and being sent to the backend — this was the actual bug, not
+                a broken selector. Plain text for now; to be upgraded to a
+                dropdown of the selected client's known contacts (with this
+                as the free-text fallback) once the Client model's contact
+                field shape is confirmed. */}
+            <div><label style={labelStyle}>Contact Person</label><input style={inputStyle} placeholder="Name or phone/email" value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} /></div>
           </div>
           <ServiceDropdown selectedService={selectedService} onSelect={s => { setSelectedService(s); setQty('1'); }} />
           <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px' }}>
@@ -570,10 +619,68 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
   );
 }
 
+/* ═══════════════════════════════════════
+   VENDOR PICKER (Prompt 6, item 4)
+   Shown only when the selected expense category is flagged vendor-related
+   on the backend (ExpenseCategory.vendor_related). Supports picking an
+   existing vendor or adding a new one inline (name + phone/email, matching
+   NewVendorModal's core fields, per this session's confirmed choice).
+═══════════════════════════════════════ */
+function VendorPicker({ vendorId, onSelectVendor, vendors, onVendorCreated }) {
+  const [showAddNew, setShowAddNew] = useState(false);
+  const [newVendor, setNewVendor] = useState({ name: '', phone: '', email: '' });
+  const [saving, setSaving] = useState(false);
+
+  const handleCreateVendor = async () => {
+    if (!newVendor.name.trim()) return;
+    setSaving(true);
+    try {
+      const created = await api.createVendor({ name: newVendor.name, phone: newVendor.phone, email: newVendor.email, category: 'Other' });
+      onVendorCreated(created);
+      onSelectVendor(created.id);
+      setShowAddNew(false);
+      setNewVendor({ name: '', phone: '', email: '' });
+    } catch (err) {
+      // Surfaced via the modal's own notify pattern isn't available here,
+      // so fall back to a lightweight inline message.
+      alert(err.message || 'Could not create vendor');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (showAddNew) {
+    return (
+      <div style={{ border: '1px dashed var(--border-faint)', borderRadius: '6px', padding: '10px', display: 'grid', gap: '8px' }}>
+        <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)' }}>New Vendor</div>
+        <input style={inputStyle} placeholder="Vendor name" value={newVendor.name} onChange={e => setNewVendor({ ...newVendor, name: e.target.value })} />
+        <input style={inputStyle} placeholder="Phone" value={newVendor.phone} onChange={e => setNewVendor({ ...newVendor, phone: e.target.value })} />
+        <input style={inputStyle} placeholder="Email" value={newVendor.email} onChange={e => setNewVendor({ ...newVendor, email: e.target.value })} />
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button onClick={() => setShowAddNew(false)} style={cancelButton}>Cancel</button>
+          <button onClick={handleCreateVendor} style={createButton} disabled={saving}>{saving ? 'Saving...' : 'Save Vendor'}</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: '8px' }}>
+      <select style={{ ...inputStyle, flex: 1 }} value={vendorId || ''} onChange={e => onSelectVendor(e.target.value || null)}>
+        <option value="">— Select vendor —</option>
+        {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+      </select>
+      <button onClick={() => setShowAddNew(true)} style={{ ...createButton, whiteSpace: 'nowrap' }}>+ New</button>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════ MODAL: Add Expense ═══════════════════════════════════════ */
 export function AddExpenseModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ category: '', title: '', amount: '', date: new Date().toISOString().split('T')[0], notes: '' });
+  const [form, setForm] = useState({ category: '', title: '', amount: '', date: new Date().toISOString().split('T')[0], notes: '', vendor_id: null });
   const [showPreview, setShowPreview] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [vendors, setVendors] = useState([]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -583,9 +690,18 @@ export function AddExpenseModal({ isOpen, onClose, onSave, initialData = null })
       amount: initialData?.amountValue ?? '',
       date: initialData?.expense_date || new Date().toISOString().split('T')[0],
       notes: initialData?.notes || '',
+      vendor_id: initialData?.vendorId || null,
     });
     setShowPreview(false);
+    // Category vendor-relatedness and the vendor list are only needed while
+    // this modal is open, so both are fetched here rather than pre-loaded
+    // app-wide. Failures here are non-fatal: the picker simply won't gate
+    // correctly (falls back to never showing), rather than blocking the form.
+    api.expenseCategories().then(data => setCategories(data.items || [])).catch(() => setCategories([]));
+    api.vendors('?per_page=200').then(data => setVendors(data.items || [])).catch(() => setVendors([]));
   }, [isOpen, initialData]);
+
+  const isVendorRelated = categories.some(c => c.name === form.category && c.vendor_related);
 
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="Add Expense" wide footer={<>
@@ -595,7 +711,18 @@ export function AddExpenseModal({ isOpen, onClose, onSave, initialData = null })
       <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={
           <div style={{ padding: '20px', display: 'grid', gap: '12px', alignContent: 'start', overflowY: 'auto', flex: 1 }}>
-            <div><label style={labelStyle}>Category</label><div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>{['Fuel', 'Paper', 'Maintenance', 'Utilities', 'Staff', 'Other'].map(c => <button key={c} onClick={() => setForm({ ...form, category: c })} style={pillBtnStyle(form.category === c)}>{c}</button>)}</div></div>
+            <div><label style={labelStyle}>Category</label><div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>{['Fuel', 'Paper', 'Maintenance', 'Utilities', 'Staff', 'Other'].map(c => <button key={c} onClick={() => setForm({ ...form, category: c, vendor_id: null })} style={pillBtnStyle(form.category === c)}>{c}</button>)}</div></div>
+            {isVendorRelated && (
+              <div>
+                <label style={labelStyle}>Vendor</label>
+                <VendorPicker
+                  vendorId={form.vendor_id}
+                  onSelectVendor={id => setForm(prev => ({ ...prev, vendor_id: id }))}
+                  vendors={vendors}
+                  onVendorCreated={created => setVendors(prev => [...prev, created])}
+                />
+              </div>
+            )}
             <div><label style={labelStyle}>Description</label><input style={inputStyle} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></div>
             <div><label style={labelStyle}>Amount (MK)</label><input type="number" style={inputStyle} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} /></div>
             <div><label style={labelStyle}>Date</label><input type="date" style={inputStyle} value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></div>

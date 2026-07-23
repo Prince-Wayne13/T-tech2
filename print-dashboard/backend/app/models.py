@@ -98,6 +98,8 @@ class Job(TimestampMixin, SerializableMixin, db.Model):
     pages = db.Column(db.Integer, default=0)
     copies = db.Column(db.Integer, default=1)
     progress = db.Column(db.Integer, default=0)
+    completed_count = db.Column(db.Integer, default=0, nullable=False)
+    total_count = db.Column(db.Integer, default=0, nullable=False)
     due_date = db.Column(db.Date)
     notes = db.Column(db.Text)
 
@@ -114,6 +116,11 @@ class Job(TimestampMixin, SerializableMixin, db.Model):
         back_populates="job",
         cascade="all, delete-orphan",
         order_by="Payment.paid_on.asc()",
+    )
+    sales = db.relationship(
+        "Sale",
+        back_populates="job",
+        cascade="all, delete-orphan",
     )
 
 
@@ -212,6 +219,9 @@ class Proposal(TimestampMixin, SerializableMixin, db.Model):
     currency = db.Column(db.String(10), default="MWK", nullable=False)
     valid_until = db.Column(db.Date)
     contact = db.Column(db.String(160))
+    # Item 6: free text, editable at any status. Will later feed "Prepared by"
+    # display on proposal documents; no such display wired in this pass.
+    prepared_by = db.Column(db.String(160))
     notes = db.Column(db.Text)
     converted_invoice_id = db.Column(
         db.Integer,
@@ -254,6 +264,23 @@ class ProposalLineItem(TimestampMixin, SerializableMixin, db.Model):
     proposal = db.relationship("Proposal", back_populates="line_items")
 
 
+class ExpenseCategory(TimestampMixin, SerializableMixin, db.Model):
+    """Item 3: lookup table for expense categories, with a vendor_related flag
+    marking whether a category represents money owed to a vendor (materials,
+    ink, installation) vs. not (utilities, transport reimbursement, in-house
+    maintenance). Expense.category stays a free-text string column for
+    backward compatibility with existing rows/seed data and the current
+    frontend, which only ever sent plain strings - this table is additive,
+    matched by name, not a replacement/migration of that column.
+    """
+    __tablename__ = "expense_categories"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    vendor_related = db.Column(db.Boolean, default=False, nullable=False)
+    notes = db.Column(db.Text)
+
+
 class Expense(TimestampMixin, SerializableMixin, db.Model):
     __tablename__ = "expenses"
 
@@ -261,6 +288,7 @@ class Expense(TimestampMixin, SerializableMixin, db.Model):
     expense_ref = db.Column(db.String(40), unique=True, nullable=False, index=True)
     vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=True, index=True)
     category = db.Column(db.String(100), nullable=False, index=True)
+    category_id = db.Column(db.Integer, db.ForeignKey("expense_categories.id"), nullable=True, index=True)
     title = db.Column(db.String(180), nullable=False)
     amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     expense_date = db.Column(db.Date, nullable=False)
@@ -270,6 +298,7 @@ class Expense(TimestampMixin, SerializableMixin, db.Model):
     notes = db.Column(db.Text)
 
     vendor = db.relationship("Vendor", backref="expenses")
+    expense_category = db.relationship("ExpenseCategory", backref="expenses")
 
 
 class Advance(TimestampMixin, SerializableMixin, db.Model):
@@ -318,3 +347,70 @@ class ExportJob(TimestampMixin, SerializableMixin, db.Model):
     status = db.Column(db.String(30), default="processing", index=True)
     generated_by = db.Column(db.String(120))
     notes = db.Column(db.Text)
+
+
+class Staff(TimestampMixin, SerializableMixin, db.Model):
+    """Item 5: simple staff directory. Will later populate "Prepared by",
+    "Assigned printer", Petty Cash staff selection, and the To-Do List - none
+    of those UI surfaces are wired in this pass.
+    """
+    __tablename__ = "staff"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(160), nullable=False, index=True)
+    role = db.Column(db.String(80), index=True)
+    active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    notes = db.Column(db.Text)
+
+
+class Sale(TimestampMixin, SerializableMixin, db.Model):
+    """Item 7: every Sale must reference an existing Job (nullable=False FK) -
+    no standalone entries. `amount` is intentionally NOT a plain editable
+    column from the frontend's point of view; it is written only by
+    services.sales.sync_sale_amount(), derived from the linked Job's Invoice
+    payment status. The column still exists (rather than being computed
+    on read only) so it can be queried/reported on directly without joining
+    through Job->Invoice->Payments every time.
+    """
+    __tablename__ = "sales"
+
+    id = db.Column(db.Integer, primary_key=True)
+    sale_ref = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    job_id = db.Column(db.Integer, db.ForeignKey("jobs.id"), nullable=False, index=True)
+    description = db.Column(db.String(255))
+    notes = db.Column(db.Text)
+    amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+
+    job = db.relationship("Job", back_populates="sales")
+
+    @property
+    def client_name(self):
+        return self.job.client_name if self.job else None
+
+
+class PettyCash(TimestampMixin, SerializableMixin, db.Model):
+    """Item 8: three entry types.
+    - top_up: increases the running balance.
+    - staff_expense: decreases the running balance.
+    - sales_cash_used: does NOT affect the balance directly (cash was already
+      collected as a Sale, this just records how it was spent), but must
+      auto-create a mirrored Expense row tagged "Petty Cash" - see
+      services.petty_cash.record_petty_cash_entry() for that side effect,
+      which is deliberately not duplicated here in the model layer.
+    `linked_expense_id` records that mirrored Expense so the two rows stay
+    traceable to each other without guessing by amount/date.
+    """
+    __tablename__ = "petty_cash_entries"
+
+    ENTRY_TYPES = ("top_up", "staff_expense", "sales_cash_used")
+
+    id = db.Column(db.Integer, primary_key=True)
+    entry_ref = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    entry_type = db.Column(db.String(30), nullable=False, index=True)
+    amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+    staff_id = db.Column(db.Integer, db.ForeignKey("staff.id"), nullable=True, index=True)
+    linked_expense_id = db.Column(db.Integer, db.ForeignKey("expenses.id"), nullable=True, index=True)
+    notes = db.Column(db.Text)
+
+    staff = db.relationship("Staff", backref="petty_cash_entries")
+    linked_expense = db.relationship("Expense", backref="petty_cash_source")

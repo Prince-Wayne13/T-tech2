@@ -42,7 +42,17 @@ const TAB_STATUS_SETS = {
 
 function mapInvoice(invoice) {
   const lineItems = invoice.line_items || [];
-  const total = calculateTotal(lineItems);
+  // Item 4 (Prompt 7): read total/paid/balance straight from the backend's
+  // own invoice.totals (services/invoices.py::invoice_totals()), rather than
+  // recomputing from line items client-side. The prior calculateTotal(lineItems)
+  // approach silently ignored discount_amount and never carried paid/balance
+  // at all, so "Balance ${inv.amount}" in the reminder message below was
+  // actually showing the full total, not what's still owed — this fix
+  // corrects both the summary stat and that per-invoice reminder text.
+  const totals = invoice.totals || {};
+  const total = Number(totals.total ?? calculateTotal(lineItems));
+  const paid = Number(totals.paid ?? 0);
+  const balance = Number(totals.balance ?? total);
   return {
     backendId: invoice.id,
     id: invoice.invoice_ref || `INV-${invoice.id}`,
@@ -50,6 +60,10 @@ function mapInvoice(invoice) {
     title: invoice.title || 'Untitled invoice',
     amount: money(total, invoice.currency || 'MWK'),
     amountValue: total,
+    paidValue: paid,
+    balanceValue: balance,
+    paidLabel: money(paid, invoice.currency || 'MWK'),
+    balanceLabel: money(balance, invoice.currency || 'MWK'),
     status: invoice.status || 'draft',
     issued: compactDate(invoice.issued_on),
     due: compactDate(invoice.due_on),
@@ -92,14 +106,20 @@ function InvoiceRow({ inv, onPreview, onOutstandingTab }) {
           <div className="activity-time" style={{ marginTop: '2px' }}>Converted from {inv.sourceProposalRef}</div>
         )}
       </div>
-      <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '90px' }}>
+      <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '110px' }}>
         <div className="activity-amount">{inv.amount}</div>
+        {/* Item 4 (Prompt 7): show what's still owed alongside the total,
+            distinct from "Paid" status badges — a partially-paid invoice
+            should visibly show its remaining balance, not just its total. */}
+        {inv.balanceValue > 0 && inv.status !== 'draft' && (
+          <div className="activity-time" style={{ color: 'var(--warning)', fontWeight: 600 }}>Owed: {inv.balanceLabel}</div>
+        )}
         <div className="activity-time">Issued: {inv.issued || '-'}</div>
       </div>
       <span className={`status-badge ${cfg.cls}`} style={{ marginLeft: '12px' }}>{cfg.label}</span>
       <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
         {inv.status === 'sent' && (
-          <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Send Reminder" onClick={() => shareText(`Invoice reminder ${inv.id}`, `Reminder for ${inv.client}: ${inv.title} is due ${inv.due}. Balance ${inv.amount}.`)}>
+          <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Send Reminder" onClick={() => shareText(`Invoice reminder ${inv.id}`, `Reminder for ${inv.client}: ${inv.title} is due ${inv.due}. Balance ${inv.balanceLabel}.`)}>
             <Icon d={D.send} size={11} />
           </button>
         )}
@@ -154,10 +174,15 @@ export default function Invoices() {
 
   // Stats reflect the ACTIVE tab, not always the full unfiltered total.
   // On "Outstanding" the headline is "Total Outstanding," not "Total (All)."
-  const outstandingTotal = invoices.filter(i => ['not_paid', 'partial', 'sent', 'overdue'].includes(i.status)).reduce((sum, i) => sum + i.amountValue, 0);
+  // Item 4 (Prompt 7): sums balanceValue (what's actually still owed, from
+  // the backend's own paid/total split), not amountValue (the full invoice
+  // total) — a partially-paid invoice's remaining balance is less than its
+  // total, and the prior version overstated "outstanding" by ignoring that.
+  const outstandingTotal = invoices.filter(i => ['not_paid', 'partial', 'sent', 'overdue'].includes(i.status)).reduce((sum, i) => sum + i.balanceValue, 0);
   const overdueList = invoices.filter(i => i.status === 'overdue');
   const paidTotal = invoices.filter(i => i.status === 'paid').reduce((sum, i) => sum + i.amountValue, 0);
   const allTotal = invoices.reduce((sum, i) => sum + i.amountValue, 0);
+  const allOwed = invoices.reduce((sum, i) => sum + i.balanceValue, 0);
 
   const statsByTab = {
     Outstanding: [
@@ -168,7 +193,7 @@ export default function Invoices() {
     ],
     All: [
       { label: 'Total Invoiced', value: money(allTotal), sub: 'All statuses', icon: D.invoices, color: 'primary' },
-      { label: 'Outstanding', value: money(outstandingTotal), sub: 'Unpaid invoices', icon: D.clock, color: 'warning' },
+      { label: 'Total Owed', value: money(allOwed), sub: 'Total minus payments received', icon: D.clock, color: 'warning' },
       { label: 'Overdue', value: String(overdueList.length), sub: 'Past due invoices', icon: D.alert, color: 'red' },
       { label: 'Invoice Count', value: String(invoices.length), sub: 'All records', icon: D.invoices, color: 'secondary' },
     ],

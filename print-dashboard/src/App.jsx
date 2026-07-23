@@ -7,6 +7,8 @@ import Invoices from './Invoices';
 import Expenses from './Expenses';
 import Vendors from './Vendors';
 import Advances from './Advances';
+import Sales from './Sales';
+import PettyCash, { AddPettyCashModal } from './PettyCash';
 import Reports from './Reports';
 import AuditLog from './AuditLog';
 import Archive from './Archive';
@@ -56,6 +58,8 @@ const D = {
   expenses:   'M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 4l-5 5-4-4-5 6',
   vendors:    'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
   advances:   'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  sales:      'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
+  pettyCash:  'M2 7h20v13H2z M2 7l3-4h14l3 4 M8 12h8',
   reports:    'M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7',
   settings:   'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
   bell:       'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
@@ -96,6 +100,8 @@ const NAV_GROUPS = [
     items: [
       { id: 'Vendors',     icon: 'vendors'    },
       { id: 'Advances',    icon: 'advances'   },
+      { id: 'Sales',       icon: 'sales'      },
+      { id: 'Petty Cash',  icon: 'pettyCash'  },
       { id: 'Audit Log',   icon: 'reports'    },
       { id: 'Archive',     icon: 'reports'    },
       { id: 'Export Data', icon: 'reports'    },
@@ -116,6 +122,7 @@ const QUICK_ACTIONS = [
   { label: 'New Proposal',   color: 'purple',    icon: 'proposals' },
   { label: 'Add Expense',    color: 'warning',   icon: 'expenses'  },
   { label: 'New Vendor',     color: 'red',       icon: 'vendors'   },
+  { label: 'Add Petty Cash', color: 'secondary', icon: 'pettyCash' },
 ];
 
 const ACTION_FIELDS = {
@@ -635,6 +642,13 @@ export default function App() {
   const [activityPreview, setActivityPreview] = useState(null);
   const [globalSearch, setGlobalSearch] = useState('');
   const [searchResults, setSearchResults] = useState(null);
+  const [dashboardStaff, setDashboardStaff] = useState([]);
+
+  useEffect(() => {
+    // Only needed for the "Add Petty Cash" quick action's staff picker
+    // (staff_expense entries can optionally attribute to a staff member).
+    api.staff('?active=true').then(data => setDashboardStaff(data.items || [])).catch(() => {});
+  }, []);
 
   const openSearch = () => {
     const query = globalSearch.trim();
@@ -668,6 +682,16 @@ export default function App() {
       } else if (action === 'New Vendor') {
         const created = await api.createVendor(values);
         setPreview({ title: `Vendor Added: ${created.name}`, data: created });
+      } else if (action === 'Add Petty Cash') {
+        const created = await api.createPettyCashEntry({
+          entry_type: values.entry_type || 'staff_expense',
+          amount: Number(values.amount || 0),
+          staff_id: values.staff_id || null,
+          notes: values.notes,
+          title: values.title,
+          submitted_by: values.staff_id ? dashboardStaff.find(s => String(s.id) === String(values.staff_id))?.name : undefined,
+        });
+        setPreview({ title: `Petty Cash Entry Recorded: ${created.entry_ref}`, data: created });
       } else {
         const type = action.includes('Proposal') ? 'proposal' : null;
         if (type) setPrintPreview({ type, title: `${action} Preview`, data: { id: 'Draft', ...values } });
@@ -698,6 +722,8 @@ export default function App() {
       case 'Expenses': return <Expenses />;
       case 'Vendors': return <Vendors />;
       case 'Advances': return <Advances />;
+      case 'Sales': return <Sales />;
+      case 'Petty Cash': return <PettyCash />;
       case 'Reports': return <Reports />;
       case 'Audit Log': return <AuditLog />;
       case 'Archive': return <Archive />;
@@ -722,6 +748,7 @@ export default function App() {
       <NewProposalModal isOpen={actionModal === 'New Proposal'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('New Proposal', values)} />
       <AddExpenseModal isOpen={actionModal === 'Add Expense'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('Add Expense', values)} />
       <NewVendorModal isOpen={actionModal === 'New Vendor'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('New Vendor', values)} />
+      <AddPettyCashModal isOpen={actionModal === 'Add Petty Cash'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('Add Petty Cash', values)} staffList={dashboardStaff} defaultType="staff_expense" />
       <QuickEntryModal isOpen={actionModal === 'Quick Entry'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('Quick Entry', values)} />
       <ActivityPreviewModal isOpen={Boolean(activityPreview)} activity={activityPreview?.data} onClose={() => setActivityPreview(null)} />
       <PreviewModal title={preview?.title} data={preview?.data} onClose={() => setPreview(null)} />

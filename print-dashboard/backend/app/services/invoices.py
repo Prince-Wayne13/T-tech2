@@ -114,6 +114,35 @@ def apply_payments(invoice, payments):
         )
 
 
+def update_payment(invoice, payment_id, data):
+    """Fix for "Update payment throws an error": no route or service function
+    for editing an existing Payment ever existed anywhere in the codebase -
+    only append-only apply_payments()/add_job_payment() (create). Any
+    frontend call to update a single payment had nothing to hit.
+
+    Direct-invoice-payments path (Invoice.payments, job_id is null).
+    Job-linked invoices use update_job_payment() in services/jobs.py
+    instead, since their ledger lives on Job.payments, not Invoice.payments.
+    """
+    payment = next((row for row in invoice.payments if row.id == payment_id), None)
+    if payment is None:
+        raise ValueError(f"Payment {payment_id} not found on invoice {invoice.invoice_ref}")
+
+    if "amount" in data:
+        payment.amount = decimal_money(data["amount"])
+    if "method" in data:
+        payment.method = data["method"]
+    if "paid_on" in data:
+        payment.paid_on = parse_date(data["paid_on"]) or payment.paid_on
+    if "received_by" in data:
+        payment.received_by = data["received_by"]
+    if "notes" in data:
+        payment.notes = data["notes"]
+
+    sync_invoice_amount(invoice)
+    return payment
+
+
 def sync_invoice_amount(invoice):
     invoice.amount = decimal_money(invoice_totals(invoice)["total"])
     totals = invoice_totals(invoice)

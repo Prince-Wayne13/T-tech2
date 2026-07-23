@@ -1,3 +1,4 @@
+#route/proposals.py
 from flask import Blueprint, jsonify, request
 
 from ..extensions import db
@@ -49,6 +50,7 @@ def create_proposal():
         currency=data.get("currency", "MWK"),
         valid_until=parse_date(data.get("valid_until")),
         contact=data.get("contact"),
+        prepared_by=data.get("prepared_by"),
         notes=data.get("notes"),
     )
     apply_proposal_line_items(proposal, data.get("line_items"))
@@ -68,11 +70,21 @@ def get_proposal(proposal_id):
 def update_proposal(proposal_id):
     proposal = Proposal.query.get_or_404(proposal_id)
     data = request.get_json() or {}
-    for field in ["client_name", "title", "status", "discount_amount", "currency", "contact", "notes"]:
+    for field in ["client_name", "title", "status", "discount_amount", "currency", "contact", "prepared_by", "notes"]:
         if field in data:
             setattr(proposal, field, data[field])
     if "valid_until" in data:
         proposal.valid_until = parse_date(data.get("valid_until"))
+        # Fix: keep the derived Job's due_date in sync with the Proposal's
+        # own due-date field. Previously, once a Proposal was accepted and
+        # converted to a Job, editing the Proposal's valid_until afterwards
+        # (still allowed at any status, per prompt item 6) had no effect on
+        # the Job the business actually schedules against - the two dates
+        # silently diverged. Job.due_date is now re-derived here at the
+        # source whenever the Proposal's date changes and a Job already
+        # exists from it, rather than patched independently in the frontend.
+        if proposal.converted_invoice and proposal.converted_invoice.job:
+            proposal.converted_invoice.job.due_date = proposal.valid_until
     if "line_items" in data:
         apply_proposal_line_items(proposal, data.get("line_items"))
     db.session.add(AuditLog(action=f"Updated proposal {proposal.proposal_ref}", entity_type="proposal", entity_id=proposal.id))
@@ -93,6 +105,12 @@ def accept_proposal(proposal_id):
         title=proposal.title,
         status=ACTIVE_STATUS,
         progress=10,
+        # Fix: due_date was never carried over from the Proposal on job
+        # creation, so create_invoice_for_job() (which correctly reads
+        # job.due_date to set the derived Invoice's due_on) always received
+        # None here. valid_until is the Proposal's only date field, so it's
+        # the source of truth for the Job's initial due_date.
+        due_date=proposal.valid_until,
         notes=proposal.notes,
     )
     invoice = create_invoice_for_job(

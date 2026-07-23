@@ -44,6 +44,7 @@ const mapExpense = expense => ({
   // linked expenses. Fallback chain stays in place for legitimately
   // vendor-less expenses (utilities, fuel, in-house technician work).
   vendorName: expense.vendor_name || expense.submitted_by || 'Internal',
+  vendorId: expense.vendor_id || null,
   notes: expense.notes || 'Backend expense record',
 });
 
@@ -208,6 +209,10 @@ export default function Expenses() {
         status: editRecord?.status || 'pending',
         submitted_by: editRecord?.submittedBy || 'Team',
         notes: form.notes,
+        // Prompt 6 item 4: only sent when the category was vendor-related and
+        // a vendor was actually picked; null explicitly clears any prior link
+        // (e.g. user switched away from a vendor-related category).
+        vendor_id: form.vendor_id || null,
       };
       const saved = editRecord?.backendId
         ? await api.updateExpense(editRecord.backendId, payload)

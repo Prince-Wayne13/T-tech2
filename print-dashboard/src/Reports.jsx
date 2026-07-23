@@ -12,7 +12,13 @@ import { ModuleHeader, StatsGrid } from './components/ModuleStandard';
 // are no longer surfaced here — this page now reads financialReport(),
 // invoiceStats(), jobs(), and expenses() directly instead.
 
-const TABS = ['Cashflow', 'Snapshot'];
+// Prompt 6 item 3: the five new analytics endpoints (Prompt 5) are grouped
+// into a single "Analytics" tab rather than five separate top-level tabs, per
+// this session's confirmed choice ("easy to get right on the first try, not
+// confusing" — a 7-tab bar was judged more likely to overwhelm a first-time
+// user than a single tab with clear sub-section headers).
+const TABS = ['Cashflow', 'Snapshot', 'Analytics'];
+const ANALYTICS_SECTIONS = ['Vendor Spend', 'Client Performance', 'Projections', 'Sales vs Expenses', 'Machine Revenue'];
 
 // ── PulseChart ─────────────────────────────────────────────────────────
 // Moved from App.jsx verbatim (dataset construction + SVG rendering logic
@@ -177,6 +183,215 @@ const OUTSTANDING_EXPENSE_STATUSES = ['pending', 'approved', 'scheduled'];
 // Active-jobs status set — identical to Jobs.jsx's "Active Jobs" stat filter.
 const ACTIVE_JOB_STATUSES = ['printing', 'queued'];
 
+/* ═══════════════════════════════════════
+   ANALYTICS TAB (Prompt 6, item 3)
+   Wraps the five Prompt 5 aggregation endpoints as sub-sections within one
+   tab. Each section fetches its own endpoint independently and renders its
+   own loading/error/empty state, so one slow or failing endpoint doesn't
+   block the others from showing.
+═══════════════════════════════════════ */
+function useAnalyticsData(loader, deps = []) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    loader()
+      .then(setData)
+      .catch(() => setError('Could not load this report. Check the backend connection and try again.'))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  return { data, loading, error };
+}
+
+function SectionShell({ title, loading, error, empty, children }) {
+  return (
+    <div className="card" style={{ marginBottom: '14px', borderTop: '2px solid var(--secondary)' }}>
+      <div className="card-header" style={{ marginBottom: '10px' }}>
+        <h3 className="card-title">{title}</h3>
+      </div>
+      {loading && <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px' }}>Loading...</div>}
+      {!loading && error && <div style={{ padding: '16px', textAlign: 'center', color: 'var(--red)', fontSize: '11px' }}>{error}</div>}
+      {!loading && !error && empty && <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px' }}>No data available yet.</div>}
+      {!loading && !error && !empty && children}
+    </div>
+  );
+}
+
+function VendorSpendSection() {
+  const { data, loading, error } = useAnalyticsData(() => api.analyticsVendors());
+  const rows = data?.items || [];
+  return (
+    <SectionShell title="Vendor Spend" loading={loading} error={error} empty={rows.length === 0}>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)' }}>Vendor</th>
+              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)' }}>Category</th>
+              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>Lifetime Spend</th>
+              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)' }}>Top Category (This Year)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(row => {
+              const currentYear = row.yearly?.[row.yearly.length - 1];
+              return (
+                <tr key={row.vendor_id} style={{ borderBottom: '1px solid var(--border-faint)' }}>
+                  <td style={{ padding: '8px' }}>{row.vendor_name}</td>
+                  <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{row.category || '-'}</td>
+                  <td style={{ padding: '8px', textAlign: 'right', fontWeight: 600 }}>{money(row.lifetime_total)}</td>
+                  <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{currentYear?.top_category || '-'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </SectionShell>
+  );
+}
+
+function ClientPerformanceSection() {
+  const { data, loading, error } = useAnalyticsData(() => api.analyticsClients());
+  const rows = data?.items || [];
+  return (
+    <SectionShell title="Client Performance" loading={loading} error={error} empty={rows.length === 0}>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)' }}>Client</th>
+              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>Total Purchased</th>
+              <th style={{ textAlign: 'center', padding: '8px', color: 'var(--text-muted)' }}>Invoices</th>
+              <th style={{ textAlign: 'center', padding: '8px', color: 'var(--text-muted)' }}>Recurring?</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 20).map(row => (
+              <tr key={row.client_id} style={{ borderBottom: '1px solid var(--border-faint)' }}>
+                <td style={{ padding: '8px' }}>{row.client_name}</td>
+                <td style={{ padding: '8px', textAlign: 'right', fontWeight: 600 }}>{money(row.total_purchased)}</td>
+                <td style={{ padding: '8px', textAlign: 'center' }}>{row.invoice_count}</td>
+                <td style={{ padding: '8px', textAlign: 'center' }}>
+                  <span className={`status-badge ${row.is_recurring ? 'paid' : 'pending'}`}>{row.is_recurring ? 'Recurring' : 'One-off'}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </SectionShell>
+  );
+}
+
+function ProjectionsSection() {
+  const { data, loading, error } = useAnalyticsData(() => api.analyticsProjections());
+  return (
+    <SectionShell title="Projections" loading={loading} error={error} empty={!data}>
+      {data && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+            <div style={{ padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px' }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>Sent Pipeline</div>
+              <div style={{ fontSize: '15px', fontWeight: 700 }}>{money(data.pipeline?.sent_not_expired?.total)}</div>
+              <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{data.pipeline?.sent_not_expired?.count || 0} proposals</div>
+            </div>
+            <div style={{ padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px' }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>Accepted, Awaiting Payment</div>
+              <div style={{ fontSize: '15px', fontWeight: 700 }}>{money(data.pipeline?.accepted_not_yet_invoiced?.total)}</div>
+              <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{data.pipeline?.accepted_not_yet_invoiced?.count || 0} proposals</div>
+            </div>
+            <div style={{ padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px' }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>Recurring Clients (Avg.)</div>
+              <div style={{ fontSize: '15px', fontWeight: 700 }}>{money(data.recurring_clients_projection?.total)}</div>
+              <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{data.recurring_clients_projection?.count || 0} clients</div>
+            </div>
+            <div style={{ padding: '12px', background: 'rgba(196, 163, 90, 0.08)', borderRadius: '8px', border: '1px solid rgba(196, 163, 90, 0.2)' }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>Total Projected ({data.projection_month})</div>
+              <div style={{ fontSize: '16px', fontWeight: 700, color: '#C4A35A' }}>{money(data.total_projected_revenue)}</div>
+            </div>
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            This is a simple historical-average projection based on existing pipeline and recurring-client data — not a forecasting model.
+          </div>
+        </>
+      )}
+    </SectionShell>
+  );
+}
+
+function SalesVsExpensesSection() {
+  const { data, loading, error } = useAnalyticsData(() => api.analyticsSalesVsExpenses());
+  const rows = data?.months || [];
+  return (
+    <SectionShell title="Sales vs Expenses" loading={loading} error={error} empty={rows.length === 0}>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)' }}>Month</th>
+              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>Sales</th>
+              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>Expenses</th>
+              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(row => (
+              <tr key={row.month} style={{ borderBottom: '1px solid var(--border-faint)' }}>
+                <td style={{ padding: '8px' }}>{row.month}</td>
+                <td style={{ padding: '8px', textAlign: 'right', color: 'var(--teal)' }}>{money(row.sales)}</td>
+                <td style={{ padding: '8px', textAlign: 'right', color: 'var(--warning)' }}>{money(row.expenses)}</td>
+                <td style={{ padding: '8px', textAlign: 'right', fontWeight: 600, color: row.balance >= 0 ? 'var(--teal)' : 'var(--red)' }}>{money(row.balance)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </SectionShell>
+  );
+}
+
+function MachineRevenueSection() {
+  const { data, loading, error } = useAnalyticsData(() => api.analyticsMachineRevenue());
+  const rows = data?.items || [];
+  return (
+    <SectionShell title="Machine Revenue" loading={loading} error={error} empty={rows.length === 0}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+        {rows.slice(0, 12).map(row => (
+          <div key={row.key} style={{ padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>{row.name}</div>
+            <div style={{ fontSize: '15px', fontWeight: 700 }}>{money(row.lifetime_revenue)}</div>
+            <div style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'capitalize' }}>{row.type}</div>
+          </div>
+        ))}
+      </div>
+    </SectionShell>
+  );
+}
+
+function AnalyticsTab() {
+  const [section, setSection] = useState(ANALYTICS_SECTIONS[0]);
+  return (
+    <>
+      <div className="chart-filters" style={{ marginBottom: '14px', width: 'fit-content', flexWrap: 'wrap' }}>
+        {ANALYTICS_SECTIONS.map(s => (
+          <button key={s} className={`filter-btn ${section === s ? 'active' : ''}`} onClick={() => setSection(s)}>{s}</button>
+        ))}
+      </div>
+      {section === 'Vendor Spend' && <VendorSpendSection />}
+      {section === 'Client Performance' && <ClientPerformanceSection />}
+      {section === 'Projections' && <ProjectionsSection />}
+      {section === 'Sales vs Expenses' && <SalesVsExpensesSection />}
+      {section === 'Machine Revenue' && <MachineRevenueSection />}
+    </>
+  );
+}
+
 export default function Reports() {
   const [tab, setTab] = useState('Cashflow');
   const [financials, setFinancials] = useState(null);
@@ -259,6 +474,8 @@ export default function Reports() {
       {!loading && !error && tab === 'Snapshot' && (
         <StatsGrid stats={snapshotStats} />
       )}
+
+      {tab === 'Analytics' && <AnalyticsTab />}
     </main>
   );
 }

@@ -4,7 +4,7 @@ from flask import Blueprint, jsonify, request
 
 from ..extensions import db
 from ..models import AuditLog, Invoice
-from ..services.invoices import apply_line_items, apply_payments, serialize_invoice, sync_invoice_amount
+from ..services.invoices import apply_line_items, apply_payments, serialize_invoice, sync_invoice_amount, update_payment as update_invoice_payment
 from ..utils import parse_date
 from .common import apply_search, list_response
 
@@ -104,3 +104,20 @@ def update_invoice(invoice_id):
 @bp.get("/<int:invoice_id>/document")
 def invoice_document(invoice_id):
     return jsonify(serialize_invoice(Invoice.query.get_or_404(invoice_id), include_document=True)["document"])
+
+
+@bp.put("/<int:invoice_id>/payments/<int:payment_id>")
+def update_invoice_payment_route(invoice_id, payment_id):
+    # Direct-invoice compatibility path (no job_id): mirrors the job-linked
+    # payment-update route in routes/jobs.py. Only applies to invoices whose
+    # payments live on Invoice.payments directly (job_id is null) — job-linked
+    # invoices store their ledger on Job.payments and must go through
+    # PUT /api/jobs/<job_id>/payments/<payment_id> instead, since that is the
+    # payment_rows source serialize_invoice()/invoice_totals() actually read
+    # for a job-linked invoice.
+    invoice = Invoice.query.get_or_404(invoice_id)
+    data = request.get_json() or {}
+    payment = update_invoice_payment(invoice, payment_id, data)
+    db.session.add(AuditLog(action=f"Updated payment {payment.payment_ref} on {invoice.invoice_ref}", entity_type="invoice", entity_id=invoice.id))
+    db.session.commit()
+    return jsonify(serialize_invoice(invoice, include_document=True))

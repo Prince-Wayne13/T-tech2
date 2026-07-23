@@ -1,3 +1,5 @@
+# path: backend/app/schema_migrations.py
+
 from sqlalchemy import inspect, text
 
 from .extensions import db
@@ -8,6 +10,10 @@ from .services.jobs import normalise_job_status
 
 def _columns(table_name):
     return {column["name"] for column in inspect(db.engine).get_columns(table_name)}
+
+
+def _tables():
+    return set(inspect(db.engine).get_table_names())
 
 
 def _add_column(table_name, column_sql):
@@ -32,6 +38,85 @@ def ensure_job_invoice_schema():
     if "job_id" not in payment_columns:
         _add_column("payments", "job_id INTEGER REFERENCES jobs(id)")
         changed.append("payments.job_id")
+
+    db.session.commit()
+    return changed
+
+
+def ensure_prompt4_schema():
+    """Catches up databases created before Prompt 4's additions. None of these
+    were ever added to this migration file at the time, which is why a dev
+    database that predates Prompt 4 is currently missing `staff`,
+    `expense_categories`, `petty_cash_entries`, `sales`, and several columns
+    on `expenses`/`jobs`/`proposals` entirely — this is what was throwing
+    'no such table: staff', 'no such column: expenses.category_id', and
+    'no such column: proposals.prepared_by'.
+
+    `proposals.prepared_by` was missed in this function's first pass — it's
+    a Prompt 4 item 6 column (added to the ORM model alongside
+    `expenses.category_id` etc.) but wasn't included in the original
+    ALTER TABLE checks below, so it was still throwing after that first
+    migration ran clean. Added here now, same idempotent pattern as the rest.
+
+    `db.create_all()` (called from wherever the app initializes tables) will
+    create any table that doesn't exist at all yet (staff, expense_categories,
+    sales, petty_cash_entries) since those are brand-new tables, not altered
+    existing ones — CREATE TABLE IF NOT EXISTS-equivalent behavior. What
+    create_all() will NOT do is add a new column to an existing table
+    (expenses, jobs, proposals), which is the SQLite ALTER TABLE gap this
+    function covers. Both are called together in run_full_upgrade() below so
+    a single call fixes the whole gap regardless of which kind it is.
+    """
+    changed = []
+    expense_columns = _columns("expenses")
+    job_columns = _columns("jobs")
+    proposal_columns = _columns("proposals")
+
+    # Predates Prompt 4 (added during the earlier Payables-consolidation
+    # session per dev-log.md) but was never covered by this migration file
+    # at any point until now — found via a systematic cross-check against
+    # documented column additions, not a live traceback. Included so a
+    # sufficiently old database doesn't hit this as a fourth surprise.
+    if "vendor_id" not in expense_columns:
+        _add_column("expenses", "vendor_id INTEGER REFERENCES vendors(id)")
+        changed.append("expenses.vendor_id")
+
+    if "category_id" not in expense_columns:
+        _add_column("expenses", "category_id INTEGER REFERENCES expense_categories(id)")
+        changed.append("expenses.category_id")
+
+    if "paid_on" not in expense_columns:
+        _add_column("expenses", "paid_on DATE")
+        changed.append("expenses.paid_on")
+
+    if "completed_count" not in job_columns:
+        _add_column("jobs", "completed_count INTEGER NOT NULL DEFAULT 0")
+        changed.append("jobs.completed_count")
+
+    if "total_count" not in job_columns:
+        _add_column("jobs", "total_count INTEGER NOT NULL DEFAULT 0")
+        changed.append("jobs.total_count")
+
+    if "prepared_by" not in proposal_columns:
+        _add_column("proposals", "prepared_by VARCHAR(160)")
+        changed.append("proposals.prepared_by")
+
+    db.session.commit()
+    return changed
+
+
+def ensure_staff_assignment_schema():
+    """This session's addition: Job.assigned_staff_id (Prompt 7, item 7).
+    Separated from ensure_prompt4_schema() since it postdates that prompt —
+    keeping migrations attributable to the change that introduced them,
+    rather than folding everything into one undifferentiated bucket.
+    """
+    changed = []
+    job_columns = _columns("jobs")
+
+    if "assigned_staff_id" not in job_columns:
+        _add_column("jobs", "assigned_staff_id INTEGER REFERENCES staff(id)")
+        changed.append("jobs.assigned_staff_id")
 
     db.session.commit()
     return changed
@@ -87,4 +172,34 @@ def upgrade_job_invoice_flow():
         "schema_changes": changed,
         "statuses_normalized": normalized,
         "invoice_jobs_backfilled": backfilled,
+    }
+
+
+def run_full_upgrade():
+    """Single entry point covering every migration added so far, in order.
+    Call this once (e.g. from a `flask shell` one-liner or a small script)
+    against the live dev database to fix the 'no such table: staff' /
+    'no such column: expenses.category_id' / 'no such column:
+    jobs.completed_count' errors.
+
+    Ordering matters here and was previously wrong: db.create_all() handles
+    wholly-new tables, but ensure_prompt4_schema() and
+    ensure_staff_assignment_schema() (which ALTER TABLE to add missing
+    columns) must run BEFORE anything does an ORM query against the full
+    Job/Expense model — e.g. upgrade_job_invoice_flow() ->
+    normalize_legacy_job_statuses() -> Job.query.all(), which SELECTs every
+    column the ORM model declares, including completed_count/total_count/
+    assigned_staff_id. Running that query while those columns are still
+    missing from the actual table throws 'no such column' even though
+    db.create_all() succeeded, because create_all() only creates tables that
+    don't exist yet — it never ALTERs an existing table to add a column.
+    """
+    db.create_all()
+    prompt4 = ensure_prompt4_schema()
+    staff_assignment = ensure_staff_assignment_schema()
+    job_invoice = upgrade_job_invoice_flow()
+    return {
+        "prompt4_schema_changes": prompt4,
+        "staff_assignment_schema_changes": staff_assignment,
+        "job_invoice_flow": job_invoice,
     }

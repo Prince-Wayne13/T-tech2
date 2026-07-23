@@ -3,12 +3,22 @@
 from flask import Blueprint, jsonify, request
 
 from ..extensions import db
-from ..models import AuditLog, Expense
+from ..models import AuditLog, Expense, ExpenseCategory
 from ..services.expenses import sync_expense_status
 from ..utils import parse_date
 from .common import apply_search, list_response
 
 bp = Blueprint("expenses", __name__)
+
+
+@bp.get("/categories")
+def list_expense_categories():
+    # Item 4 (Prompt 6): the Expense modal needs to know which categories are
+    # vendor-related to conditionally show the vendor picker. Expense.category
+    # stays a free-text string (per services/expenses.py's docstring), so this
+    # is a simple lookup-table read, not tied to any individual Expense row.
+    categories = ExpenseCategory.query.order_by(ExpenseCategory.name.asc()).all()
+    return jsonify({"items": [category.to_dict() for category in categories]})
 
 
 def next_expense_ref():
@@ -24,6 +34,7 @@ def serialize_expense(expense):
     # and the frontend's existing fallback chain handles that case.
     return expense.to_dict() | {
         "vendor_name": expense.vendor.name if expense.vendor else None,
+        "category_vendor_related": bool(expense.expense_category and expense.expense_category.vendor_related),
     }
 
 
@@ -44,6 +55,7 @@ def create_expense():
         expense_ref=data.get("expense_ref") or next_expense_ref(),
         vendor_id=data.get("vendor_id"),
         category=data["category"],
+        category_id=data.get("category_id"),
         title=data["title"],
         amount=data.get("amount", 0),
         expense_date=parse_date(data["expense_date"]),
@@ -65,9 +77,13 @@ def create_expense():
 def update_expense(expense_id):
     expense = Expense.query.get_or_404(expense_id)
     data = request.get_json() or {}
-    for field in ["vendor_id", "category", "title", "amount", "status", "submitted_by", "notes"]:
+    for field in ["vendor_id", "category", "category_id", "title", "amount", "status", "submitted_by", "notes"]:
         if field in data:
             setattr(expense, field, data[field])
+    # Prompt 6 item 4: allow explicitly clearing the vendor link (e.g. user
+    # switches to a non-vendor-related category after picking a vendor).
+    if "vendor_id" in data and data["vendor_id"] is None:
+        expense.vendor_id = None
     if "expense_date" in data:
         expense.expense_date = parse_date(data.get("expense_date"))
     if "paid_on" in data:

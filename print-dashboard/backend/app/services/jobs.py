@@ -1,8 +1,13 @@
+#services/jobs.py
 from datetime import date
 
 from ..models import Invoice, Job, Payment
 from ..services.invoices import apply_line_items, decimal_money, next_payment_ref, serialize_invoice, sync_invoice_amount
 from ..utils import parse_date
+
+# Job fields that stay editable at any status, per prompt item 6
+# (Job.notes free text, editable regardless of job/proposal status).
+ALWAYS_EDITABLE_JOB_FIELDS = {"notes"}
 
 
 ACTIVE_STATUS = "in_session"
@@ -68,3 +73,44 @@ def add_job_payment(job, payload):
     if job.invoice:
         sync_invoice_amount(job.invoice)
     return payment
+
+
+def update_job_payment(job, payment_id, data):
+    """Fix for "Update payment throws an error" (job-linked ledger side).
+    add_job_payment() only ever appended - there was no edit path for a
+    payment already recorded against a Job. Mirrors
+    services/invoices.py::update_payment()'s field-by-field patch, then
+    re-syncs the linked invoice's derived status the same way
+    add_job_payment() already does on create.
+    """
+    payment = next((row for row in job.payments if row.id == payment_id), None)
+    if payment is None:
+        raise ValueError(f"Payment {payment_id} not found on job {job.job_ref}")
+
+    if "amount" in data:
+        payment.amount = decimal_money(data["amount"])
+    if "method" in data:
+        payment.method = data["method"]
+    if "paid_on" in data or "date" in data:
+        parsed = parse_date(data.get("paid_on") or data.get("date"))
+        payment.paid_on = parsed or payment.paid_on
+    if "received_by" in data:
+        payment.received_by = data["received_by"]
+    if "notes" in data:
+        payment.notes = data["notes"]
+
+    if job.invoice:
+        sync_invoice_amount(job.invoice)
+    return payment
+
+
+def update_job_progress(job, completed_count=None, total_count=None):
+    """Item 4: completed_count/total_count patch helper. Completed may exceed
+    total (reprints) - deliberately not clamped, no validation error raised
+    since this is an expected real-world state, not a bug.
+    """
+    if completed_count is not None:
+        job.completed_count = completed_count
+    if total_count is not None:
+        job.total_count = total_count
+    return job

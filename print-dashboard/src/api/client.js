@@ -51,6 +51,10 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(payload),
   }),
+  updateJobProgress: (id, payload) => request(`/jobs/${id}/progress`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  }),
   recordJobPayment: (id, payload) => request(`/jobs/${id}/payments`, {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -120,4 +124,30 @@ export const api = {
   }),
   exportDownloadUrl: (id) => `${API_BASE_URL}/exports/${id}/download`,
   invoiceDocumentUrl: (id) => `${API_BASE_URL}/invoices/${id}/document`,
+  sales: (params = '') => request(`/sales${params}`),
+  createSale: (payload) => request('/sales', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  updateSale: (id, payload) => request(`/sales/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  pettyCash: (params = '') => request(`/petty-cash${params}`),
+  pettyCashBalance: () => request('/petty-cash/balance'),
+  createPettyCashEntry: (payload) => request('/petty-cash', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  staff: (params = '') => request(`/staff${params}`),
+  createStaff: (payload) => request('/staff', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  expenseCategories: (params = '') => request(`/expenses/categories${params}`),
+  analyticsVendors: () => request('/reports/analytics/vendors'),
+  analyticsClients: () => request('/reports/analytics/clients'),
+  analyticsProjections: () => request('/reports/analytics/projections'),
+  analyticsSalesVsExpenses: () => request('/reports/analytics/sales-vs-expenses'),
+  analyticsMachineRevenue: () => request('/reports/analytics/machine-category-revenue'),
 };

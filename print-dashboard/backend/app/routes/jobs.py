@@ -1,8 +1,17 @@
+#routes/jobs.py
 from flask import Blueprint, jsonify, request
 
 from ..extensions import db
 from ..models import AuditLog, Job
-from ..services.jobs import ACTIVE_STATUS, add_job_payment, create_invoice_for_job, normalise_job_status, serialize_job
+from ..services.jobs import (
+    ACTIVE_STATUS,
+    add_job_payment,
+    create_invoice_for_job,
+    normalise_job_status,
+    serialize_job,
+    update_job_payment,
+    update_job_progress,
+)
 from ..services.invoices import serialize_invoice
 from ..utils import parse_date
 from .common import apply_search, list_response
@@ -40,7 +49,12 @@ def create_job():
         pages=data.get("pages", 0),
         copies=data.get("copies", 1),
         progress=data.get("progress", 0),
+        completed_count=data.get("completed_count", 0),
+        total_count=data.get("total_count", 0),
         due_date=parse_date(data.get("due_date")),
+        # Item 7 (Prompt 7): accept assigned_staff_id on create, same pattern
+        # as machine_id/client_id above.
+        assigned_staff_id=data.get("assigned_staff_id"),
         notes=data.get("notes"),
     )
     invoice = create_invoice_for_job(
@@ -68,12 +82,30 @@ def get_job(job_id):
 def update_job(job_id):
     job = Job.query.get_or_404(job_id)
     data = request.get_json() or {}
-    for field in ["machine_id", "service_category", "client_name", "title", "status", "priority", "pages", "copies", "progress", "notes"]:
+    for field in ["machine_id", "service_category", "client_name", "title", "status", "priority", "pages", "copies", "progress", "completed_count", "total_count", "assigned_staff_id", "notes"]:
         if field in data:
             setattr(job, field, normalise_job_status(data[field]) if field == "status" else data[field])
     if "due_date" in data:
         job.due_date = parse_date(data.get("due_date"))
     db.session.add(AuditLog(action=f"Updated job {job.job_ref}", entity_type="job", entity_id=job.id))
+    db.session.commit()
+    return jsonify(serialize_job(job))
+
+
+@bp.patch("/<int:job_id>/progress")
+def patch_job_progress(job_id):
+    # Item 4: dedicated progress-counter patch route, separate from the
+    # general update_job() route above so a UI can bump completed_count
+    # without needing to resend the whole job payload. Completed may exceed
+    # total (reprints) - not validated/clamped here, per prompt instruction.
+    job = Job.query.get_or_404(job_id)
+    data = request.get_json() or {}
+    update_job_progress(
+        job,
+        completed_count=data.get("completed_count"),
+        total_count=data.get("total_count"),
+    )
+    db.session.add(AuditLog(action=f"Updated progress for {job.job_ref}", entity_type="job", entity_id=job.id))
     db.session.commit()
     return jsonify(serialize_job(job))
 
@@ -92,3 +124,13 @@ def record_job_payment(job_id):
     db.session.add(AuditLog(action=f"Recorded payment {payment.payment_ref} for {job.job_ref}", entity_type="job", entity_id=job.id))
     db.session.commit()
     return jsonify({"payment": payment.to_dict(), "job": serialize_job(job), "invoice": serialize_invoice(job.invoice) if job.invoice else None}), 201
+
+
+@bp.put("/<int:job_id>/payments/<int:payment_id>")
+def update_job_payment_route(job_id, payment_id):
+    job = Job.query.get_or_404(job_id)
+    data = request.get_json() or {}
+    payment = update_job_payment(job, payment_id, data)
+    db.session.add(AuditLog(action=f"Updated payment {payment.payment_ref} for {job.job_ref}", entity_type="job", entity_id=job.id))
+    db.session.commit()
+    return jsonify({"payment": payment.to_dict(), "job": serialize_job(job), "invoice": serialize_invoice(job.invoice) if job.invoice else None})
