@@ -33,6 +33,13 @@ function monthKey(dateStr) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function formatMonthLabel(month) {
+  if (!month || month === 'All') return 'All Months';
+  const [year, monthNumber] = month.split('-').map(Number);
+  if (!year || !monthNumber) return month;
+  return new Date(year, monthNumber - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+
 function mapEntry(entry) {
   return {
     id: entry.entry_ref || `PC-${entry.id}`,
@@ -48,7 +55,7 @@ function mapEntry(entry) {
   };
 }
 
-function EntryRow({ entry }) {
+function EntryRow({ entry, onDelete }) {
   const cfg = typeConfig(entry.type);
   const isNegative = entry.type === 'staff_expense';
   return (
@@ -68,6 +75,9 @@ function EntryRow({ entry }) {
         </div>
       </div>
       <span className={`status-badge ${cfg.cls}`} style={{ marginLeft: '12px' }}>{cfg.label}</span>
+      <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px', color: 'var(--red)' }} title="Delete entry" onClick={() => onDelete(entry)}>
+        Delete
+      </button>
     </div>
   );
 }
@@ -215,6 +225,18 @@ export default function PettyCash() {
     }
   };
 
+  const handleDelete = async entry => {
+    if (!window.confirm(`Delete ${entry.id}?`)) return;
+    try {
+      const result = await api.deletePettyCashEntry(entry.backendId);
+      setBalance(Number(result.balance || 0));
+      notify('Petty cash entry deleted');
+      loadData();
+    } catch (deleteError) {
+      notify(deleteError.message || 'Could not delete entry', 'error');
+    }
+  };
+
   const downloadPettyCashLog = () => {
     // HTML print-dialog export, matching Audit Log's existing look/approach
     // rather than a real PDF renderer, per this session's confirmed choice.
@@ -243,14 +265,14 @@ export default function PettyCash() {
           onChange={e => setMonthFilter(e.target.value)}
           style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: '#fff', fontSize: '10px', color: 'var(--text-body)' }}
         >
-          {monthOptions.map(month => <option key={month} value={month}>{month === 'All' ? 'All Months' : month}</option>)}
+          {monthOptions.map(month => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
         </select>
         <button className="notif-btn" style={{ width: '30px', height: '30px' }} title="Download Log" onClick={downloadPettyCashLog}>
           <Icon d={D.download} size={13} />
         </button>
       </div>
       <RegisterCard title="Petty Cash Log" countLabel={`${filtered.length} entr${filtered.length !== 1 ? 'ies' : 'y'} found`} loading={loading} error={error} emptyIcon="PC" emptyMessage="No entries match your filters.">
-        {filtered.map(entry => <EntryRow key={entry.id} entry={entry} />)}
+        {filtered.map(entry => <EntryRow key={entry.id} entry={entry} onDelete={handleDelete} />)}
       </RegisterCard>
       <AddPettyCashModal isOpen={showEntry} onClose={() => setShowEntry(false)} onSave={handleSave} staffList={staffList} />
       <ModuleToast toast={toast} />

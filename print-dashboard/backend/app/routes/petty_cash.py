@@ -50,3 +50,20 @@ def create_petty_cash_entry():
     ))
     db.session.commit()
     return jsonify(serialize_petty_cash_entry(entry) | {"balance": float(petty_cash_balance())}), 201
+
+
+@bp.delete("/<int:entry_id>")
+def delete_petty_cash_entry(entry_id):
+    entry = PettyCash.query.get_or_404(entry_id)
+    entry_ref = entry.entry_ref
+    linked_expense = entry.linked_expense
+    if linked_expense:
+        db.session.delete(linked_expense)
+    db.session.delete(entry)
+    db.session.add(AuditLog(
+        action=f"Deleted petty cash entry {entry_ref}",
+        entity_type="petty_cash",
+        entity_id=entry_id,
+    ))
+    db.session.commit()
+    return jsonify({"deleted": True, "balance": float(petty_cash_balance())})

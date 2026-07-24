@@ -1,9 +1,12 @@
 from app import create_app
 from app.extensions import db
-from app.schema_migrations import upgrade_job_invoice_flow
+from app.schema_migrations import run_full_upgrade, upgrade_job_invoice_flow
 from app.seed import seed_mock_data
 
 app = create_app()
+
+with app.app_context():
+    run_full_upgrade()
 
 
 @app.cli.command("init-db")

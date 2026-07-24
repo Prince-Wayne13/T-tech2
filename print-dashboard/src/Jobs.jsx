@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { PrintPreviewModal } from './components/PrintLayouts';
-import { NewJobModal, RecordPaymentModal } from './components/Modals';
+import { NewJobModal, RecordPaymentModal, JobProgressModal } from './components/Modals';
 import { api } from './api/client';
 import { shortDate } from './utils/format';
 import {
@@ -57,27 +57,41 @@ const mapJob = job => ({
   // slightly ahead of that backend field landing.
   assignedStaffId: job.assigned_staff_id || null,
   assignedStaffName: job.assigned_staff_name || null,
+  // Item 6 (backend priority list): client phone, now joined by the backend
+  // (services/jobs.py::serialize_job()), for the To-Do List export below.
+  clientPhone: job.client_phone || null,
   notes: job.notes,
   totals: job.totals || { total: 0, paid: 0, balance: 0 },
   invoice: job.invoice,
+  line_items: job.invoice?.line_items || job.line_items || [],
+  discount_amount: job.invoice?.discount_amount ?? job.discount_amount ?? 0,
 });
 
 function jobPayload(form, fallback = {}) {
+  const lineItems = (form.items || []).map((item, index) => ({
+    position: index + 1,
+    description: item.desc || item.description || form.title || 'Print service',
+    quantity: Number(item.qty ?? item.quantity ?? 1) || 1,
+    unit_price: Number(item.rate ?? item.unit_price ?? 0) || 0,
+    unit: item.unit || 'item',
+  }));
+  const totalCount = lineItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+
   return {
     client_name: form.client || fallback.client || 'Walk-in Client',
     title: form.title || fallback.title || 'New print job',
     priority: form.priority || fallback.priority || 'medium',
     due_date: form.due || fallback.due_date || null,
     service_category: form.printer || fallback.service_category || form.specs?.[0],
+    assigned_staff_id: form.assignedStaffId || fallback.assignedStaffId || null,
     notes: [form.notes, form.specs?.join(', ')].filter(Boolean).join('\n'),
+    line_items: lineItems,
+    discount_amount: Number(form.discount || 0),
+    total_count: totalCount || fallback.totalCount || fallback.total_count || 0,
   };
 }
 
-function ProgressCell({ job, onUpdateProgress }) {
-  const [editing, setEditing] = useState(false);
-  const [completed, setCompleted] = useState(job.completedCount);
-  const [total, setTotal] = useState(job.totalCount);
-
+function ProgressCell({ job, onOpenProgress }) {
   const hasCounts = job.totalCount > 0;
   // Item 6: visual fill is capped at 100% even when completed exceeds total
   // (reprints), but the real numbers are still shown alongside the bar —
@@ -86,29 +100,12 @@ function ProgressCell({ job, onUpdateProgress }) {
   const fillPct = Math.min(rawPct, 100);
   const overCount = hasCounts && job.completedCount > job.totalCount;
 
-  const save = () => {
-    onUpdateProgress(job, Number(completed) || 0, Number(total) || 0);
-    setEditing(false);
-  };
-
-  if (editing) {
-    return (
-      <div style={{ textAlign: 'center', flexShrink: 0, width: '120px' }}>
-        <div style={{ display: 'flex', gap: '4px', alignItems: 'center', justifyContent: 'center' }}>
-          <input type="number" min="0" value={completed} onChange={e => setCompleted(e.target.value)} style={{ width: '38px', padding: '3px', fontSize: '10px', textAlign: 'center', border: '1px solid var(--border-faint)', borderRadius: '4px' }} />
-          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>/</span>
-          <input type="number" min="0" value={total} onChange={e => setTotal(e.target.value)} style={{ width: '38px', padding: '3px', fontSize: '10px', textAlign: 'center', border: '1px solid var(--border-faint)', borderRadius: '4px' }} />
-        </div>
-        <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', marginTop: '4px' }}>
-          <button className="filter-btn active" style={{ padding: '2px 6px', fontSize: '9px' }} onClick={save}>Save</button>
-          <button className="filter-btn" style={{ padding: '2px 6px', fontSize: '9px' }} onClick={() => setEditing(false)}>Cancel</button>
-        </div>
-      </div>
-    );
-  }
-
+  // Inline two-input editing replaced by JobProgressModal (opens with the
+  // job's tagged service/amount already shown, so the user isn't re-entering
+  // context they've already set elsewhere — just adjusting the one figure
+  // that changes day to day).
   return (
-    <div style={{ textAlign: 'center', flexShrink: 0, width: '120px', cursor: 'pointer' }} onClick={() => { setCompleted(job.completedCount); setTotal(job.totalCount); setEditing(true); }} title="Click to update progress">
+    <div style={{ textAlign: 'center', flexShrink: 0, width: '120px', cursor: 'pointer' }} onClick={() => onOpenProgress(job)} title="Click to update progress">
       <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>
         {hasCounts ? `${job.completedCount} of ${job.totalCount}` : 'Progress'}
       </div>
@@ -120,7 +117,7 @@ function ProgressCell({ job, onUpdateProgress }) {
   );
 }
 
-function JobRow({ job, onPreview, onEdit, onPayment, onUpdateProgress, onMarkFinished }) {
+function JobRow({ job, onPreview, onEdit, onPayment, onOpenProgress, onMarkFinished }) {
   const statusConfig = {
     in_session: { label: 'In Session', cls: 'active', accent: 'var(--primary)' },
     finished: { label: 'Finished', cls: 'paid', accent: 'var(--teal)' },
@@ -135,7 +132,7 @@ function JobRow({ job, onPreview, onEdit, onPayment, onUpdateProgress, onMarkFin
         <div className="vendor-name">{job.title}</div>
         <div className="vendor-cat">{job.client} - {job.pages}pp x {job.copies}</div>
       </div>
-      <ProgressCell job={job} onUpdateProgress={onUpdateProgress} />
+      <ProgressCell job={job} onOpenProgress={onOpenProgress} />
       <div className="vendor-right">
         <span className={`status-badge ${cfg.cls}`}>{cfg.label}</span>
         <div className="activity-time" style={{ marginTop: '4px' }}>{job.due}</div>
@@ -166,6 +163,7 @@ export default function Jobs() {
   const [showEntry, setShowEntry] = useState(false);
   const [editRecord, setEditRecord] = useState(null);
   const [paymentRecord, setPaymentRecord] = useState(null);
+  const [progressJob, setProgressJob] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -244,11 +242,13 @@ export default function Jobs() {
   // Item 6: increment-based progress entry, e.g. "20 of 40 diaries done".
   // Hits the dedicated PATCH /api/jobs/<id>/progress route added in Prompt 4
   // rather than the general update_job() route, so this doesn't need to
-  // resend the whole job payload just to bump a counter.
-  const handleUpdateProgress = async (job, completedCount, totalCount) => {
+  // resend the whole job payload just to bump a counter. Now the save
+  // handler for JobProgressModal rather than inline ProgressCell state.
+  const handleSaveProgress = async (job, completedCount, totalCount) => {
     try {
       await api.updateJobProgress(job.backendId, { completed_count: completedCount, total_count: totalCount });
       notify('Progress updated');
+      setProgressJob(null);
       loadJobs();
     } catch (progressError) {
       notify(progressError.message || 'Could not update progress', 'error');
@@ -276,17 +276,28 @@ export default function Jobs() {
   // a fourth different export approach.
   const downloadTodoList = () => {
     const activeJobs = jobs.filter(job => job.status === 'in_session');
-    const rows = activeJobs.map(job => `
+    // Item 6 (backend priority list): added client phone, amount to pay
+    // (total), amount paid so far, and quantity (completedCount/totalCount
+    // when tracked, else pages x copies) to the printable to-do list.
+    const rows = activeJobs.map(job => {
+      const total = Number(job.totals?.total || 0);
+      const paid = Number(job.totals?.paid || 0);
+      const quantity = job.totalCount > 0 ? `${job.completedCount} of ${job.totalCount}` : `${job.pages}pp x ${job.copies}`;
+      return `
       <tr>
         <td>${job.id}</td>
         <td>${job.client}</td>
+        <td>${job.clientPhone || '-'}</td>
         <td>${job.title}</td>
-        <td>${job.pages}pp x ${job.copies}</td>
+        <td>${quantity}</td>
         <td style="text-transform:capitalize">${job.priority}</td>
         <td>${job.due}</td>
+        <td>MK ${total.toLocaleString()}</td>
+        <td>MK ${paid.toLocaleString()}</td>
         <td>${job.assignedStaffName || '________________'}</td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
     const htmlContent = `
       <div class="top">
         <div><h1>T-Tech Today's To-Do List</h1><div>${activeJobs.length} active job${activeJobs.length !== 1 ? 's' : ''}</div></div>
@@ -294,9 +305,9 @@ export default function Jobs() {
       </div>
       <table>
         <thead>
-          <tr><th>Job Ref</th><th>Client</th><th>Job Title</th><th>Specs</th><th>Priority</th><th>Due</th><th>Assigned Staff</th></tr>
+          <tr><th>Job Ref</th><th>Client</th><th>Phone</th><th>Job Title</th><th>Qty</th><th>Priority</th><th>Due</th><th>Amount to Pay</th><th>Amount Paid</th><th>Assigned Staff</th></tr>
         </thead>
-        <tbody>${rows || '<tr><td colspan="7" style="text-align:center;color:#94a3b8;">No active jobs right now.</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="10" style="text-align:center;color:#94a3b8;">No active jobs right now.</td></tr>'}</tbody>
       </table>
     `;
     const blob = new Blob([`<!doctype html><html><head><title>Today's To-Do List</title><style>body { margin: 0; padding: 28px; font-family: Arial, sans-serif; color: #1f2937; background: #fff; } table { width: 100%; border-collapse: collapse; } th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 12px; } th { background: #f8fafc; color: #475569; } .top { display: flex; justify-content: space-between; margin-bottom: 16px; }</style></head><body>${htmlContent}</body></html>`], { type: 'text/html' });
@@ -342,7 +353,7 @@ export default function Jobs() {
             onPreview={setPreview}
             onEdit={setEditRecord}
             onPayment={setPaymentRecord}
-            onUpdateProgress={handleUpdateProgress}
+            onOpenProgress={setProgressJob}
             onMarkFinished={handleMarkFinished}
           />
         ))}
@@ -359,6 +370,12 @@ export default function Jobs() {
         initialData={paymentRecord}
         onClose={() => setPaymentRecord(null)}
         onSave={handlePayment}
+      />
+      <JobProgressModal
+        isOpen={Boolean(progressJob)}
+        job={progressJob}
+        onClose={() => setProgressJob(null)}
+        onSave={handleSaveProgress}
       />
       <ModuleToast toast={toast} />
     </main>

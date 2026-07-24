@@ -50,6 +50,8 @@ def create_proposal():
         currency=data.get("currency", "MWK"),
         valid_until=parse_date(data.get("valid_until")),
         contact=data.get("contact"),
+        priority=data.get("priority", "medium"),
+        assigned_staff_id=data.get("assigned_staff_id"),
         prepared_by=data.get("prepared_by"),
         notes=data.get("notes"),
     )
@@ -70,7 +72,7 @@ def get_proposal(proposal_id):
 def update_proposal(proposal_id):
     proposal = Proposal.query.get_or_404(proposal_id)
     data = request.get_json() or {}
-    for field in ["client_name", "title", "status", "discount_amount", "currency", "contact", "prepared_by", "notes"]:
+    for field in ["client_name", "title", "status", "discount_amount", "currency", "contact", "priority", "assigned_staff_id", "prepared_by", "notes"]:
         if field in data:
             setattr(proposal, field, data[field])
     if "valid_until" in data:
@@ -104,20 +106,28 @@ def accept_proposal(proposal_id):
         client_name=proposal.client_name,
         title=proposal.title,
         status=ACTIVE_STATUS,
+        priority=proposal.priority or "medium",
         progress=10,
+        total_count=len(proposal.line_items),
         # Fix: due_date was never carried over from the Proposal on job
         # creation, so create_invoice_for_job() (which correctly reads
         # job.due_date to set the derived Invoice's due_on) always received
         # None here. valid_until is the Proposal's only date field, so it's
         # the source of truth for the Job's initial due_date.
         due_date=proposal.valid_until,
+        assigned_staff_id=proposal.assigned_staff_id,
         notes=proposal.notes,
     )
     invoice = create_invoice_for_job(
         job,
         next_invoice_ref(),
         [
-            {"description": item.description, "quantity": 1, "unit_price": float(item.amount)}
+            {
+                "description": item.description,
+                "quantity": float(item.quantity or 1),
+                "unit": item.unit or "item",
+                "unit_price": float(item.unit_price or item.amount or 0),
+            }
             for item in proposal.line_items
         ],
         discount_amount=proposal.discount_amount,

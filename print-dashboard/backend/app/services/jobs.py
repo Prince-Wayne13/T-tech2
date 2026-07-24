@@ -33,6 +33,18 @@ def serialize_job(job):
     data["status"] = normalise_job_status(job.status)
     data["machine_name"] = job.machine.name if job.machine else None
     data["machine_category"] = job.machine.category if job.machine else job.service_category
+    # Item 7 (Prompt 7): same null-safe join pattern as machine_name above.
+    # This was missing even after Job.assigned_staff_id/assigned_staff were
+    # added to the model — Jobs.jsx's mapJob() already reads
+    # job.assigned_staff_name expecting the backend to expose it, so without
+    # this the field would always resolve to null/undefined on the frontend
+    # even once jobs could actually be assigned.
+    data["assigned_staff_name"] = job.assigned_staff.name if job.assigned_staff else None
+    # Item 6 (backend priority list): client phone for the To-Do List export.
+    # Null-safe join, same pattern as machine_name/assigned_staff_name above -
+    # jobs created before a Client link existed, or walk-in jobs with no
+    # client_id, simply return null rather than raising.
+    data["client_phone"] = job.client.phone if job.client else None
     data["payments"] = [payment.to_dict() for payment in job.payments]
     data["invoice"] = serialize_invoice(job.invoice) if job.invoice else None
     data["totals"] = data["invoice"]["totals"] if data["invoice"] else {"total": 0, "paid": 0, "balance": 0}
@@ -59,6 +71,33 @@ def create_invoice_for_job(job, invoice_ref, line_items=None, discount_amount=0,
     return invoice
 
 
+def _sync_linked_sale(job):
+    """Item 3 (backend priority list): add_job_payment()/update_job_payment()
+    already re-sync the Job's Invoice on every payment change, but never
+    touched Job.sales - the linked Sale row (services/sales.py) silently
+    drifted out of date whenever a payment was recorded or edited after the
+    Sale was first created. Sale.amount is derived from the same Invoice
+    payment status (see sales.py::derive_sale_amount), so this just calls
+    that same sync function for every Sale linked to this job - normally
+    exactly one, per create_sale_for_job()'s one-sale-per-job usage, but this
+    loops defensively rather than assuming index 0 exists.
+
+    Import is local (not top-of-file) to avoid a circular import: services/sales.py
+    imports from services/invoices.py, and jobs.py already imports from
+    services/invoices.py too - importing sales.py at module load time here
+    risks a partially-initialized module if load order ever shifts. Importing
+    inside the function sidesteps that entirely.
+    """
+    if not job.sales:
+        return []
+    from ..services.sales import sync_sale_amount
+    synced = []
+    for sale in job.sales:
+        sync_sale_amount(sale)
+        synced.append(sale)
+    return synced
+
+
 def add_job_payment(job, payload):
     payment = Payment(
         job=job,
@@ -72,6 +111,7 @@ def add_job_payment(job, payload):
     job.payments.append(payment)
     if job.invoice:
         sync_invoice_amount(job.invoice)
+    _sync_linked_sale(job)
     return payment
 
 
@@ -101,6 +141,7 @@ def update_job_payment(job, payment_id, data):
 
     if job.invoice:
         sync_invoice_amount(job.invoice)
+    _sync_linked_sale(job)
     return payment
 
 

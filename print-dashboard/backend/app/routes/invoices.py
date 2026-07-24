@@ -120,4 +120,13 @@ def update_invoice_payment_route(invoice_id, payment_id):
     payment = update_invoice_payment(invoice, payment_id, data)
     db.session.add(AuditLog(action=f"Updated payment {payment.payment_ref} on {invoice.invoice_ref}", entity_type="invoice", entity_id=invoice.id))
     db.session.commit()
-    return jsonify(serialize_invoice(invoice, include_document=True))
+    serialized = serialize_invoice(invoice, include_document=True)
+    # Item 2: explicit amount-paid-so-far vs total-owed, named plainly rather
+    # than requiring the frontend to dig into invoice.totals for this.
+    return jsonify(serialized | {
+        "payment_summary": {
+            "total": serialized["totals"]["total"],
+            "paid": serialized["totals"]["paid"],
+            "balance": serialized["totals"]["balance"],
+        },
+    })

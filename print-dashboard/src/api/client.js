@@ -91,6 +91,15 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(payload),
   }),
+  clients: (params = '') => request(`/clients${params}`),
+  createClient: (payload) => request('/clients', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  updateClient: (id, payload) => request(`/clients/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
   vendors: (params = '') => request(`/vendors${params}`),
   createVendor: (payload) => request('/vendors', {
     method: 'POST',
@@ -139,6 +148,9 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
+  deletePettyCashEntry: (id) => request(`/petty-cash/${id}`, {
+    method: 'DELETE',
+  }),
   staff: (params = '') => request(`/staff${params}`),
   createStaff: (payload) => request('/staff', {
     method: 'POST',
@@ -149,5 +161,5 @@ export const api = {
   analyticsClients: () => request('/reports/analytics/clients'),
   analyticsProjections: () => request('/reports/analytics/projections'),
   analyticsSalesVsExpenses: () => request('/reports/analytics/sales-vs-expenses'),
-  analyticsMachineRevenue: () => request('/reports/analytics/machine-category-revenue'),
+  analyticsMachineRevenue: (params = '') => request(`/reports/analytics/machine-category-revenue${params}`),
 };

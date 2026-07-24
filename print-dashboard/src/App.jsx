@@ -87,6 +87,8 @@ const NAV_GROUPS = [
       { id: 'Proposals',   icon: 'proposals'  },
       { id: 'Invoices',    icon: 'invoices'   },
       { id: 'Expenses',    icon: 'expenses'   },
+      { id: 'Sales',       icon: 'sales'      },
+      { id: 'Petty Cash',  icon: 'pettyCash'  },
     ],
   },
   {
@@ -100,8 +102,6 @@ const NAV_GROUPS = [
     items: [
       { id: 'Vendors',     icon: 'vendors'    },
       { id: 'Advances',    icon: 'advances'   },
-      { id: 'Sales',       icon: 'sales'      },
-      { id: 'Petty Cash',  icon: 'pettyCash'  },
       { id: 'Audit Log',   icon: 'reports'    },
       { id: 'Archive',     icon: 'reports'    },
       { id: 'Export Data', icon: 'reports'    },

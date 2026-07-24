@@ -1,0 +1,117 @@
+Fix prompt: payments.invoice_id NOT NULL crash on job payments
+
+The bug
+
+POST /api/jobs/<id>/payments throws a 500:
+
+sqlite3.IntegrityError: NOT NULL constraint failed: payments.invoice_id
+
+
+whenever a payment is recorded against a job that has no direct invoice_id (job-linked payments only set job_id, per add_job_payment() in services/jobs.py).
+
+Root cause
+
+models.py declares Payment.invoice_id as nullable=True, but the actual SQLite table was created before that column allowed nulls, and still enforces NOT NULL at the database level. SQLite's ALTER TABLE ... ADD COLUMN (used everywhere in schema_migrations.py) cannot loosen an existing column's constraint — that requires rebuilding the table.
+
+What to do
+
+Add a new migration function to backend/app/schema_migrations.py, following the same idempotent style as the existing ensure_job_invoice_schema() and ensure_prompt4_schema() functions in that file, that:
+
+
+
+
+
+Checks whether payments.invoice_id is currently NOT NULL (inspect the column's nullable flag via SQLAlchemy's inspect(db.engine).get_columns("payments"), not just whether the column exists — this is a constraint-level fix, not a missing-column fix).
+
+
+
+If it is still NOT NULL, rebuild the payments table with the corrected schema:
+
+
+
+
+
+Create a new table (e.g. payments_new) with the exact same columns as the current Payment model in models.py, but with invoice_id genuinely nullable.
+
+
+
+Copy all existing rows from payments into payments_new.
+
+
+
+Drop the old payments table.
+
+
+
+Rename payments_new to payments.
+
+
+
+Recreate any indexes that existed on the original table (invoice_id, job_id are both indexed per the model).
+
+
+
+Wrap the whole rebuild in a single transaction so a failure midway doesn't leave the database half-migrated.
+
+
+
+Add this new function to run_full_upgrade() in the same file, in the correct order (after ensure_job_invoice_schema(), since that's what introduces job_id in the first place — the rebuild should happen once both columns are known to exist).
+
+
+
+Do not modify models.py — it's already correct. This is purely a database-schema catch-up migration.
+
+Constraints
+
+
+
+
+
+Keep it idempotent, matching the existing pattern in this file — running it twice on an already-fixed database should be a safe no-op.
+
+
+
+Don't touch add_job_payment() or any other service/route code — the application logic is already correct; only the live table is wrong.
+
+
+
+Preserve all existing data during the rebuild — this will likely run against a database with real payment history already in it.Your list, organized for when files arrive
+
+
+
+
+
+Update payment failing — root cause found above; needs invoice_id nullable fix
+
+
+
+Jobs: switch due-date to "days" style like Proposals — need Jobs.jsx + whatever Proposals uses for its days-based field
+
+
+
+Add 5 staff members (Vivienne, Victor, Adam, Chisomo, Galfken) — need Staff model/seed
+
+
+
+Analytics tab hidden behind gray overlay — you said you fixed this before with z-index; need the current CSS/component to see what regressed
+
+
+
+Sales vs Expenses report broken — need that component + its API response shape
+
+
+
+Machine revenue: add month + service-type filter — need current machine-category-revenue endpoint and its report component
+
+
+
+Petty cash month dropdown: 2026-07 → July 2026 — trivial formatting fix once I see the dropdown code
+
+
+
+Petty cash: add delete entry — need the petty cash route file (to add a DELETE endpoint) and its page component
+
+
+
+Petty cash top-up not showing in expense log — need to see whether petty cash top-ups are supposed to create an Expense row or a separate ledger; likely a missing cross-write
+

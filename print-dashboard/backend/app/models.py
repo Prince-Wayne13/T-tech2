@@ -101,10 +101,24 @@ class Job(TimestampMixin, SerializableMixin, db.Model):
     completed_count = db.Column(db.Integer, default=0, nullable=False)
     total_count = db.Column(db.Integer, default=0, nullable=False)
     due_date = db.Column(db.Date)
+    # Item 7 (Prompt 7): FK to Staff, added here. This column was referenced
+    # by routes/jobs.py (create_job/update_job's field allowlist) and by
+    # schema_migrations.py's ensure_staff_assignment_schema() migration —
+    # both were already written assuming this column existed on the model,
+    # but it was never actually added to Job itself. That mismatch is the
+    # direct cause of "'assigned_staff_id' is an invalid keyword argument for
+    # Job": SQLAlchemy's declarative constructor rejects any keyword that
+    # isn't a real mapped attribute, regardless of what the database schema
+    # or the route code assumes. Adding the column here is the actual fix —
+    # schema_migrations.py's ALTER TABLE only adds the column at the database
+    # level, it can't teach the ORM model about an attribute that was never
+    # declared on the class.
+    assigned_staff_id = db.Column(db.Integer, db.ForeignKey("staff.id"), nullable=True, index=True)
     notes = db.Column(db.Text)
 
     client = db.relationship("Client", backref="jobs")
     machine = db.relationship("ProductionMachine", backref="jobs")
+    assigned_staff = db.relationship("Staff", backref="assigned_jobs")
     invoice = db.relationship(
         "Invoice",
         back_populates="job",
@@ -219,6 +233,8 @@ class Proposal(TimestampMixin, SerializableMixin, db.Model):
     currency = db.Column(db.String(10), default="MWK", nullable=False)
     valid_until = db.Column(db.Date)
     contact = db.Column(db.String(160))
+    priority = db.Column(db.String(30), default="medium")
+    assigned_staff_id = db.Column(db.Integer, db.ForeignKey("staff.id"), nullable=True, index=True)
     # Item 6: free text, editable at any status. Will later feed "Prepared by"
     # display on proposal documents; no such display wired in this pass.
     prepared_by = db.Column(db.String(160))
@@ -231,6 +247,7 @@ class Proposal(TimestampMixin, SerializableMixin, db.Model):
     )
 
     client = db.relationship("Client", backref="proposals")
+    assigned_staff = db.relationship("Staff", backref="assigned_proposals")
     # backref=backref(...) with uselist=False on BOTH sides: the plain string-form
     # backref used previously only sets uselist=False on the forward accessor
     # (Proposal.converted_invoice); the reverse accessor (Invoice.source_proposal)
@@ -259,6 +276,9 @@ class ProposalLineItem(TimestampMixin, SerializableMixin, db.Model):
     proposal_id = db.Column(db.Integer, db.ForeignKey("proposals.id"), nullable=False, index=True)
     position = db.Column(db.Integer, default=1, nullable=False)
     description = db.Column(db.String(255), nullable=False)
+    quantity = db.Column(db.Numeric(12, 2), nullable=False, default=1)
+    unit = db.Column(db.String(40), default="item")
+    unit_price = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
 
     proposal = db.relationship("Proposal", back_populates="line_items")

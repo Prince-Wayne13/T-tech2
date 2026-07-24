@@ -113,12 +113,28 @@ export default function Proposals() {
     const payload = {
       client_name: form.client || 'Walk-in Client',
       title: form.title || 'New proposal draft',
-      line_items: form.items,
+      line_items: (form.items || []).map((item, index) => ({
+        position: index + 1,
+        description: item.desc || item.description || 'Print service',
+        quantity: Number(item.qty ?? item.quantity ?? 1) || 1,
+        unit_price: Number(item.rate ?? item.unit_price ?? item.amount ?? 0) || 0,
+        unit: item.unit || 'item',
+      })),
       valid_until: form.validUntil || null,
       contact: form.contact,
       notes: form.notes,
       status: editRecord?.status || 'draft',
       discount_amount: Number(form.discount || 0),
+      // Internal-only fields (Job/Proposal parity). Sent here so they aren't
+      // silently dropped from the form, but note: Proposal has no
+      // priority/assigned_staff_id columns on the backend yet, and
+      // accept_proposal() doesn't currently read these two keys onto the
+      // Job it creates. Until that backend piece lands, the API will ignore
+      // unknown keys (routes/proposals.py's create/update only pull named
+      // fields), so this is safe to send now and becomes live the moment
+      // the backend is extended — it does not need a second frontend change.
+      priority: form.priority,
+      assigned_staff_id: form.assignedStaffId || null,
     };
     const request = editRecord?.id
       ? api.updateProposal(editRecord.id, payload)

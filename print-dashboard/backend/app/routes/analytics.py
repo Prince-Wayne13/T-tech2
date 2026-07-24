@@ -1,6 +1,6 @@
 # path: backend/app/routes/analytics.py
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from ..services.analytics import (
     build_client_report,
@@ -35,4 +35,7 @@ def sales_vs_expenses():
 
 @bp.get("/machine-category-revenue")
 def machine_category_revenue():
-    return jsonify(build_machine_category_revenue_report())
+    return jsonify(build_machine_category_revenue_report(
+        month=request.args.get("month"),
+        service_type=request.args.get("service_type"),
+    ))

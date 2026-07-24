@@ -37,12 +37,19 @@ const printStyles = `
 const asMoney = value => `MK ${Number(value || 0).toLocaleString()}`;
 
 const normaliseItems = data => {
-  if (Array.isArray(data?.items) && data.items.length) return data.items;
+  if (Array.isArray(data?.items) && data.items.length) {
+    return data.items.map(item => ({
+      desc: item.desc || item.description || 'Print item',
+      qty: item.qty || item.quantity || 1,
+      rate: item.rate || item.unit_price || (item.amount && !item.qty && !item.quantity ? item.amount : 0),
+      amount: item.amount,
+    }));
+  }
   if (Array.isArray(data?.line_items) && data.line_items.length) {
     return data.line_items.map(item => ({
       desc: item.description || item.name || 'Print item',
       qty: item.quantity || 1,
-      rate: item.unit_price || item.rate || 0,
+      rate: item.unit_price || item.rate || (item.amount && !item.quantity ? item.amount : 0),
       amount: item.amount || item.line_total,
     }));
   }
@@ -114,7 +121,7 @@ export function InvoicePrintLayout({ data, business = businessDefault }) {
 
 export function ProposalPrintLayout({ data, business = businessDefault }) {
   if (!data) return null;
-  const items = data.items?.length ? data.items : (data.line_items?.length ? data.line_items.map(li => ({ desc: li.description, amount: li.amount })) : [{ desc: data.title || 'Proposal item', amount: 0 }]);
+  const items = normaliseItems(data);
   const subtotal = calculateTotal(items);
   const discount = Number(data.discount ?? data.discount_amount ?? 0);
   const total = Math.max(subtotal - discount, 0);
@@ -136,8 +143,13 @@ export function ProposalPrintLayout({ data, business = businessDefault }) {
           <div style={{ fontSize: '11px', color: '#4A5568', lineHeight: 1.5 }}>{data.notes || 'Scope of work and pricing breakdown as discussed.'}</div>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '24px' }}>
-          <thead><tr><th>Service / Item</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
-          <tbody>{items.map((item, index) => <tr key={index}><td>{item.desc}</td><td style={{ textAlign: 'right' }}>{asMoney(item.amount)}</td></tr>)}</tbody>
+          <thead><tr><th>Service / Item</th><th style={{ textAlign: 'center' }}>Qty</th><th style={{ textAlign: 'right' }}>Rate</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
+          <tbody>
+            {items.map((item, index) => {
+              const amount = Number(item.amount ?? Number(item.qty || 1) * Number(item.rate || 0));
+              return <tr key={index}><td>{item.desc}</td><td style={{ textAlign: 'center' }}>{item.qty || 1}</td><td style={{ textAlign: 'right' }}>{asMoney(item.rate)}</td><td style={{ textAlign: 'right' }}>{asMoney(amount)}</td></tr>;
+            })}
+          </tbody>
         </table>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', marginBottom: '30px' }}>
           {discount > 0 && (
@@ -159,10 +171,18 @@ export function ProposalPrintLayout({ data, business = businessDefault }) {
 
 export function JobTicketPrintLayout({ data }) {
   if (!data) return null;
+  const items = normaliseItems(data.invoice || data);
+  const subtotal = calculateTotal(items);
+  const discount = Number(data.discount ?? data.discount_amount ?? data.invoice?.discount_amount ?? 0);
+  const total = data.totals?.total ?? data.invoice?.totals?.total ?? Math.max(subtotal - discount, 0);
+  const paid = data.totals?.paid ?? data.invoice?.totals?.paid ?? 0;
+  const balance = data.totals?.balance ?? data.invoice?.totals?.balance ?? total;
+  const completed = data.completedCount ?? data.completed_count ?? 0;
+  const totalCount = data.totalCount ?? data.total_count ?? 0;
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: printStyles }} />
-      <div className="print-layout" style={{ fontFamily: 'Inter, sans-serif', maxWidth: '420px', margin: '0 auto', padding: '20px', background: '#fff', border: '2px dashed #6B8E7B' }}>
+      <div className="print-layout" style={{ fontFamily: 'Inter, sans-serif', maxWidth: '620px', margin: '0 auto', padding: '20px', background: '#fff', border: '2px dashed #6B8E7B' }}>
         <div style={{ textAlign: 'center', marginBottom: '16px' }}>
           <div style={{ fontSize: '16px', fontWeight: 700, color: '#6B8E7B' }}>PRODUCTION TICKET</div>
           <div style={{ fontSize: '12px', color: '#4A5568' }}>#{data.id || data.job_ref || 'JOB-0000'}</div>
@@ -174,10 +194,29 @@ export function JobTicketPrintLayout({ data }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '10px', marginBottom: '16px' }}>
           <div><strong>Due:</strong> {data.due || data.due_date || '-'}</div>
           <div><strong>Priority:</strong> {data.priority || 'medium'}</div>
-          <div><strong>Printer:</strong> {data.printer || data.machine_name || '-'}</div>
+          <div><strong>Printer:</strong> {data.printer || data.machine_name || data.service_category || '-'}</div>
           <div><strong>Status:</strong> {data.status || 'queued'}</div>
+          <div><strong>Assigned Staff:</strong> {data.assignedStaffName || data.assigned_staff_name || '-'}</div>
+          <div><strong>Progress:</strong> {totalCount > 0 ? `${completed} of ${totalCount}` : `${data.progress || 0}%`}</div>
         </div>
         <div style={{ fontSize: '10px', marginBottom: '8px' }}><strong>Specs:</strong> {data.specs?.join(', ') || `${data.pages || 0} pages, ${data.copies || 1} copies`}</div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px' }}>
+          <thead><tr><th>Service / Item</th><th style={{ textAlign: 'center' }}>Qty</th><th style={{ textAlign: 'right' }}>Rate</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
+          <tbody>
+            {items.map((item, index) => {
+              const amount = Number(item.amount ?? Number(item.qty || 1) * Number(item.rate || 0));
+              return <tr key={index}><td>{item.desc}</td><td style={{ textAlign: 'center' }}>{item.qty || 1}</td><td style={{ textAlign: 'right' }}>{asMoney(item.rate)}</td><td style={{ textAlign: 'right' }}>{asMoney(amount)}</td></tr>;
+            })}
+          </tbody>
+        </table>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '14px' }}>
+          <div style={{ width: '220px', fontSize: '11px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}><span>Subtotal</span><span>{asMoney(subtotal)}</span></div>
+            {discount > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', color: '#8B9BB0' }}><span>Discount</span><span>-{asMoney(discount)}</span></div>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}><span>Paid</span><span>{asMoney(paid)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#6B8E7B', borderTop: '1px solid #E5E8ED', paddingTop: '6px' }}><span>Balance / Total</span><span>{asMoney(balance)} / {asMoney(total)}</span></div>
+          </div>
+        </div>
         <div style={{ fontSize: '10px', padding: '8px', border: '1px solid #E5E8ED', borderRadius: '4px', minHeight: '40px' }}><strong>Notes:</strong> {data.notes || 'None'}</div>
         <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '9px', color: '#8B9BB0' }}>T-Tech Printing Solutions - Area 47, Lilongwe - {businessDefault.phone}</div>
       </div>

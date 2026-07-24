@@ -51,17 +51,17 @@ def record_petty_cash_entry(entry_type, amount, staff_id=None, notes=None, categ
         notes=notes,
     )
 
-    if entry_type == "sales_cash_used":
-        # Must auto-create a mirrored Expense row tagged "Petty Cash" -
-        # this is the one entry type with a required side effect, since the
-        # spend needs to show up in Expenses/Payables reporting even though
-        # it doesn't move the petty cash balance itself.
+    if entry_type in {"top_up", "sales_cash_used"}:
+        expense_title = title
+        if not expense_title:
+            expense_title = "Petty cash top-up" if entry_type == "top_up" else "Sales cash used (Petty Cash)"
         expense = Expense(
             expense_ref=next_expense_ref(),
             category=PETTY_CASH_CATEGORY,
-            title=title or "Sales cash used (Petty Cash)",
+            title=expense_title,
             amount=amount,
             expense_date=expense_date or date.today(),
+            paid_on=expense_date or date.today(),
             status="approved",
             submitted_by=submitted_by,
             notes=notes,

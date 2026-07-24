@@ -2,7 +2,7 @@
 
 // Modals.jsx — PrintOps BMS (Mobile Toggle + Full-Size Preview)
 import React, { useEffect, useState, useLayoutEffect, useRef } from 'react';
-import { calculateTotal, calculateDiscountedTotal } from '../utils/calculateTotal';
+import { calculateLineTotal, calculateTotal, calculateDiscountedTotal } from '../utils/calculateTotal';
 import { api } from '../api/client';
 
 /* ═══════════════════════════════════════
@@ -296,7 +296,7 @@ function InvoicePreviewFrame({ data, total }) {
 }
 
 function ProposalPreviewFrame({ data, total }) {
-  const subtotal = data.items?.reduce((s, it) => s + Number(it.amount || 0), 0) || 0;
+  const subtotal = calculateTotal(data.items || []);
   const discount = Number(data.discount || 0);
   return (
     <PaperPreview accentColor="#5B7C99">
@@ -308,12 +308,16 @@ function ProposalPreviewFrame({ data, total }) {
       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px', fontSize: '10px' }}>
         <thead><tr>
           <th style={{ textAlign: 'left', padding: '6px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-muted)' }}>Service</th>
+          <th style={{ textAlign: 'center', padding: '6px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-muted)' }}>Qty</th>
+          <th style={{ textAlign: 'right', padding: '6px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-muted)' }}>Rate</th>
           <th style={{ textAlign: 'right', padding: '6px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-muted)' }}>Value</th>
         </tr></thead>
         <tbody>{data.items?.map((it, i) => (
           <tr key={i}>
             <td style={{ padding: '6px 0', borderBottom: '1px solid var(--border-faint)' }}>{it.desc}</td>
-            <td style={{ padding: '6px 0', textAlign: 'right', borderBottom: '1px solid var(--border-faint)' }}>MK {Number(it.amount).toLocaleString()}</td>
+            <td style={{ padding: '6px 0', textAlign: 'center', borderBottom: '1px solid var(--border-faint)' }}>{it.qty || 1}</td>
+            <td style={{ padding: '6px 0', textAlign: 'right', borderBottom: '1px solid var(--border-faint)' }}>MK {Number(it.rate || 0).toLocaleString()}</td>
+            <td style={{ padding: '6px 0', textAlign: 'right', borderBottom: '1px solid var(--border-faint)' }}>MK {calculateLineTotal(it).toLocaleString()}</td>
           </tr>
         ))}</tbody>
       </table>
@@ -334,7 +338,17 @@ function ProposalPreviewFrame({ data, total }) {
   );
 }
 
-function JobPreviewFrame({ data }) {
+function JobPreviewFrame({ data, total }) {
+  // Job/Proposal parity: Job now supports scoped items + discount, same as
+  // Invoice/Proposal previews. Assigned Staff/Printer are intentionally NOT
+  // shown here even though they're real internal fields on the form — this
+  // preview mirrors what would print on the physical Production Ticket
+  // handed to production, and staff assignment isn't part of that document
+  // (it belongs to the internal queue view only, per this session's scope).
+  const items = data.items || [];
+  const subtotal = calculateTotal(items);
+  const discount = Number(data.discount || 0);
+  const hasItems = items.length > 0;
   return (
     <PaperPreview accentColor="#6B8E7B">
       <div style={{ textAlign: 'center', marginBottom: '16px', borderBottom: '2px dashed #6B8E7B', paddingBottom: '10px' }}>
@@ -347,6 +361,31 @@ function JobPreviewFrame({ data }) {
         <div><span style={{ color: 'var(--text-muted)' }}>Priority:</span> <span style={{ textTransform: 'capitalize' }}>{data.priority || 'medium'}</span></div>
         <div><span style={{ color: 'var(--text-muted)' }}>Specs:</span> {data.specs?.join(', ') || '—'}</div>
       </div>
+      {hasItems && (
+        <>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '12px', fontSize: '10px' }}>
+            <thead><tr>
+              <th style={{ textAlign: 'left', padding: '6px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-muted)' }}>Item</th>
+              <th style={{ textAlign: 'right', padding: '6px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-muted)' }}>Amt</th>
+            </tr></thead>
+            <tbody>{items.map((it, i) => (
+              <tr key={i}>
+                <td style={{ padding: '6px 0', borderBottom: '1px solid var(--border-faint)' }}>{it.desc}</td>
+                <td style={{ padding: '6px 0', textAlign: 'right', borderBottom: '1px solid var(--border-faint)' }}>MK {(it.qty * it.rate).toLocaleString()}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-end', marginBottom: '12px' }}>
+            {discount > 0 && (
+              <>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Subtotal: MK {subtotal.toLocaleString()}</div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Discount: -MK {discount.toLocaleString()}</div>
+              </>
+            )}
+            <div style={{ fontWeight: 700, fontSize: '13px', color: '#6B8E7B' }}>Total: MK {(total ?? subtotal).toLocaleString()}</div>
+          </div>
+        </>
+      )}
       <div style={{ padding: '10px', background: 'var(--bg-canvas)', borderRadius: '6px', fontSize: '9px', lineHeight: 1.4 }}>
         <strong style={{ display: 'block', marginBottom: '4px' }}>Notes:</strong> {data.notes || 'None'}
       </div>
@@ -413,7 +452,7 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
             <div><label style={labelStyle}>Due Date</label><input type="date" style={inputStyle} value={form.due} onChange={e => setForm({ ...form, due: e.target.value })} /></div>
           </div>
           <ServiceDropdown selectedService={selectedService} onSelect={s => { setSelectedService(s); setQty('1'); }} />
-          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px' }}>
+          <div style={{ flex: 1, padding: '12px 20px' }}>
             <label style={labelStyle}>Line Items ({form.items.length})</label>
             {form.items.length === 0
               ? <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '10px' }}>No items added yet. Select a service above.</div>
@@ -456,10 +495,12 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
 
 /* ═══════════════════════════════════════ MODAL: New Proposal ═══════════════════════════════════════ */
 export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', validDays: '', contact: '', notes: '', discount: 0 });
+  const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', validDays: '', contact: '', notes: '', discount: 0, priority: 'medium', assignedStaffId: '' });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
   const [showPreview, setShowPreview] = useState(false);
+  const [clients, setClients] = useState([]);
+  const [staffList, setStaffList] = useState([]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -482,15 +523,54 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
     setForm({
       client: initialData?.client_name || '',
       title: initialData?.title || '',
-      items: (initialData?.line_items || []).map(item => ({ desc: item.description, amount: Number(item.amount) })),
+      items: (initialData?.line_items || []).map(item => ({
+        desc: item.desc || item.description || '',
+        qty: item.qty || item.quantity || 1,
+        rate: item.rate || item.unit_price || item.amount || 0,
+        unit: item.unit || 'item',
+      })),
       validUntil: existingValidUntil,
       validDays: derivedDays,
       contact: initialData?.contact || '',
       notes: initialData?.notes || '',
       discount: Number(initialData?.discount_amount || 0),
+      // Job/Proposal parity: Priority and Assigned Staff are captured here so
+      // they're already known the moment a proposal converts to a Job — but
+      // both are INTERNAL-ONLY. They must never render on the proposal
+      // document (preview or PDF) and never carry onto the derived invoice.
+      // ProposalPreviewFrame/ProposalPrintLayout are not passed these two
+      // fields for that reason — see their call sites below/in PrintLayouts.
+      priority: initialData?.priority || 'medium',
+      assignedStaffId: initialData?.assignedStaffId || initialData?.assigned_staff_id || '',
     });
     setSelectedService(null); setQty('1'); setShowPreview(false);
+    api.clients('?per_page=500').then(data => setClients(data.items || [])).catch(() => setClients([]));
+    api.staff('?active=true').then(data => setStaffList(data.items || [])).catch(() => setStaffList([]));
   }, [isOpen, initialData]);
+
+  // Contact autofill (confirmed design, dev-log 2026-07-23): selecting/typing
+  // a known client name autofills the contact field from that Client's
+  // stored phone/email — only if contact is still empty, never overwriting
+  // something already typed. Saving with a changed contact persists it back
+  // onto the Client row via persistContactIfChanged(), so it's remembered
+  // next time rather than needing retyping.
+  const handleClientChange = value => {
+    setForm(prev => {
+      if (prev.contact) return { ...prev, client: value };
+      const match = clients.find(c => c.name === value);
+      const autofilled = match ? (match.phone || match.email || '') : '';
+      return { ...prev, client: value, contact: autofilled || prev.contact };
+    });
+  };
+
+  const persistContactIfChanged = async () => {
+    const match = clients.find(c => c.name === form.client);
+    if (!match || !form.contact) return;
+    const onFile = match.phone || match.email || '';
+    if (form.contact !== onFile) {
+      try { await api.updateClient(match.id, { phone: form.contact }); } catch { /* non-fatal */ }
+    }
+  };
 
   // Recompute the stored validUntil date whenever the days input changes.
   // Base is always "today" at the moment of typing/saving — not the
@@ -509,22 +589,33 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
 
   const addItem = () => {
     if (selectedService) {
-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, amount: Number(selectedService.rate) * Number(qty) }] }));
+      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: selectedService.rate, unit: selectedService.unit }] }));
       setQty('1'); setSelectedService(null);
     }
   };
-  const subtotal = form.items.reduce((s, it) => s + Number(it.amount || 0), 0);
+  const subtotal = calculateTotal(form.items);
   const total = Math.max(subtotal - Number(form.discount || 0), 0);
+
+  const handleSave = () => {
+    persistContactIfChanged();
+    onSave(form);
+  };
 
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="New Proposal" wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>Create</button>
+      <button onClick={handleSave} style={createButton}>Create</button>
     </>}>
       <SplitPane showGrid showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={<>
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-faint)', display: 'grid', gap: '10px', flexShrink: 0 }}>
-            <div><label style={labelStyle}>Client</label><input style={inputStyle} value={form.client} onChange={e => setForm({ ...form, client: e.target.value })} /></div>
+            <div>
+              <label style={labelStyle}>Client</label>
+              <input style={inputStyle} list="proposal-client-list" value={form.client} onChange={e => handleClientChange(e.target.value)} />
+              <datalist id="proposal-client-list">
+                {clients.map(c => <option key={c.id} value={c.name} />)}
+              </datalist>
+            </div>
             <div><label style={labelStyle}>Proposal Title</label><input style={inputStyle} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></div>
             <div>
               <label style={labelStyle}>Valid For (days from today)</label>
@@ -535,25 +626,46 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
                 </div>
               )}
             </div>
-            {/* Item 1 (Prompt 7): contact input was previously entirely
-                missing from this form's JSX despite existing in form state
-                and being sent to the backend — this was the actual bug, not
-                a broken selector. Plain text for now; to be upgraded to a
-                dropdown of the selected client's known contacts (with this
-                as the free-text fallback) once the Client model's contact
-                field shape is confirmed. */}
+            {/* Item 1 (Prompt 7): contact autofills from the matched client's
+                phone/email above (only when empty), and is persisted back to
+                the Client row on save if changed — see handleClientChange /
+                persistContactIfChanged. Still a free-text fallback field for
+                clients with no contact on file yet. */}
             <div><label style={labelStyle}>Contact Person</label><input style={inputStyle} placeholder="Name or phone/email" value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} /></div>
           </div>
+          {/* Internal-only block: Priority + Assigned Staff. Deliberately
+              styled distinctly (dashed border, muted label) to signal this
+              data is for internal scheduling only — it is never read by
+              ProposalPreviewFrame below, never sent into the print/PDF
+              layouts, and never copied onto the invoice created at accept
+              time. It only becomes visible/used once this proposal converts
+              into a Job (see Proposals.jsx::handleSave / handleAccept). */}
+          <div style={{ padding: '12px 20px', borderBottom: '1px dashed var(--border-faint)', display: 'grid', gap: '10px', flexShrink: 0, background: 'var(--bg-canvas)' }}>
+            <div style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Internal Only — not shown to client, not on invoice
+            </div>
+            <div><label style={labelStyle}>Priority</label><div style={{ display: 'flex', gap: '6px' }}>{['low', 'medium', 'high'].map(p => <button key={p} onClick={() => setForm({ ...form, priority: p })} style={pillBtnStyle(form.priority === p)}>{p}</button>)}</div></div>
+            <div>
+              <label style={labelStyle}>Assigned Staff</label>
+              <select style={{ ...inputStyle, cursor: 'pointer' }} value={form.assignedStaffId} onChange={e => setForm({ ...form, assignedStaffId: e.target.value })}>
+                <option value="">— Unassigned —</option>
+                {staffList.map(s => <option key={s.id} value={s.id}>{s.name}{s.role ? ` (${s.role})` : ''}</option>)}
+              </select>
+            </div>
+          </div>
           <ServiceDropdown selectedService={selectedService} onSelect={s => { setSelectedService(s); setQty('1'); }} />
-          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px' }}>
+          <div style={{ flex: 1, padding: '12px 20px' }}>
             <label style={labelStyle}>Scope Items ({form.items.length})</label>
             {form.items.length === 0
               ? <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '10px' }}>No items added yet. Select a service above.</div>
               : form.items.map((it, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px', marginBottom: '6px', background: 'var(--bg-canvas)', borderRadius: '6px', fontSize: '10px' }}>
-                  <div><div style={{ fontWeight: 600 }}>{it.desc}</div></div>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{it.desc}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '9px' }}>{it.qty || 1} × MK {Number(it.rate || 0).toLocaleString()}</div>
+                  </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontWeight: 600 }}>MK {Number(it.amount).toLocaleString()}</span>
+                    <span style={{ fontWeight: 600 }}>MK {calculateLineTotal(it).toLocaleString()}</span>
                     <button onClick={() => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }))} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}>×</button>
                   </div>
                 </div>
@@ -583,37 +695,165 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
   );
 }
 
-/* ═══════════════════════════════════════ MODAL: New Job ═══════════════════════════════════════ */
+/* ═══════════════════════════════════════ MODAL: New Job ═══════════════════════════════════════
+   Job/Proposal parity pass: Job now gets everything Proposal already had that
+   it lacked — client autofill against the real Client directory, scoped
+   items via the same ServiceDropdown/AddItemBar, and a discount breakdown
+   with a matching live preview. Assigned Staff is Job's own internal field
+   (Proposal gets it too, but only visibly used once a Proposal converts to
+   a Job — see NewProposalModal below); "Assigned Printer" remains its own
+   separate free-text machine/service field, unchanged, since it means a
+   different thing (which press/service does the work) than which staff
+   member is assigned to run it.
+═══════════════════════════════════════ */
 export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ client: '', title: '', specs: [], priority: 'medium', due: '', printer: '', notes: '' });
+  const [form, setForm] = useState({ client: '', title: '', items: [], specs: [], priority: 'medium', due: '', dueDays: '', printer: '', assignedStaffId: '', notes: '', discount: 0 });
+  const [selectedService, setSelectedService] = useState(null);
+  const [qty, setQty] = useState('1');
   const [showPreview, setShowPreview] = useState(false);
+  const [clients, setClients] = useState([]);
+  const [staffList, setStaffList] = useState([]);
 
   useEffect(() => {
     if (!isOpen) return;
-    setForm({ client: initialData?.client || '', title: initialData?.title || '', specs: initialData?.specs || [], priority: initialData?.priority || 'medium', due: initialData?.due_date || initialData?.due || '', printer: initialData?.printer || '', notes: initialData?.notes || '' });
-    setShowPreview(false);
+    const existingDue = initialData?.due_date || initialData?.due || '';
+    let derivedDays = '';
+    if (existingDue) {
+      const msPerDay = 24 * 60 * 60 * 1000;
+      const diff = Math.round((new Date(existingDue) - new Date(new Date().toDateString())) / msPerDay);
+      derivedDays = diff > 0 ? String(diff) : '';
+    }
+    setForm({
+      client: initialData?.client || initialData?.client_name || '',
+      title: initialData?.title || '',
+      items: (initialData?.items || initialData?.line_items || initialData?.invoice?.line_items || []).map(item => ({
+        desc: item.desc || item.description || '',
+        qty: item.qty || item.quantity || 1,
+        rate: item.rate || item.unit_price || 0,
+        unit: item.unit || 'item',
+      })),
+      specs: initialData?.specs || [],
+      priority: initialData?.priority || 'medium',
+      due: existingDue,
+      dueDays: derivedDays,
+      printer: initialData?.printer || initialData?.service_category || initialData?.machine_name || '',
+      assignedStaffId: initialData?.assignedStaffId || initialData?.assigned_staff_id || '',
+      notes: initialData?.notes || '',
+      discount: Number(initialData?.discount_amount || initialData?.discount || 0),
+    });
+    setSelectedService(null); setQty('1'); setShowPreview(false);
+    // Non-fatal fetches, same pattern as AddExpenseModal's categories/vendors
+    // load — this modal must still open and work even if either call fails.
+    api.clients('?per_page=500').then(data => setClients(data.items || [])).catch(() => setClients([]));
+    api.staff('?active=true').then(data => setStaffList(data.items || [])).catch(() => setStaffList([]));
   }, [isOpen, initialData]);
 
   const toggleSpec = s => setForm(p => ({ ...p, specs: p.specs.includes(s) ? p.specs.filter(x => x !== s) : [...p.specs, s] }));
+
+  // Client autofill: typing/selecting a known client name doesn't need to do
+  // anything beyond hold the text here — Job has no contact field to
+  // autofill (that's a Proposal/Invoice-facing concept), so this is simpler
+  // than the Proposal version below. Kept as its own handler regardless, so
+  // the datalist wiring reads the same way across both forms.
+  const handleClientChange = value => setForm(prev => ({ ...prev, client: value }));
+
+  const setDueDays = daysStr => {
+    const days = Number(daysStr);
+    if (daysStr === '' || Number.isNaN(days) || days < 0) {
+      setForm(prev => ({ ...prev, dueDays: daysStr, due: '' }));
+      return;
+    }
+    const target = new Date();
+    target.setDate(target.getDate() + days);
+    setForm(prev => ({ ...prev, dueDays: daysStr, due: target.toISOString().slice(0, 10) }));
+  };
+
+  const addItem = () => {
+    if (selectedService && qty > 0) {
+      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: selectedService.rate }] }));
+      setQty('1'); setSelectedService(null);
+    }
+  };
+  const removeItem = i => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }));
+  const total = calculateDiscountedTotal(form.items, form.discount);
 
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title={initialData ? 'Edit Job' : 'New Job'} wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
       <button onClick={() => onSave(form)} style={createButton}>{initialData ? 'Update' : 'Create'}</button>
     </>}>
-      <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
-        formChildren={
-          <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
-            <div style={{ marginBottom: '12px' }}><label style={labelStyle}>Client</label><input style={inputStyle} placeholder="Search client..." value={form.client} onChange={e => setForm({ ...form, client: e.target.value })} /></div>
-            <div style={{ marginBottom: '12px' }}><label style={labelStyle}>Job Title</label><input style={inputStyle} placeholder="e.g., Annual Report 500x" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></div>
-            <div style={{ marginBottom: '12px' }}><label style={labelStyle}>Specs</label><div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>{['A4 B&W', 'A4 Color', 'A3 B&W', 'A3 Color', 'Lamination', 'Binding', 'Delivery', 'Glossy'].map(s => <button key={s} onClick={() => toggleSpec(s)} style={pillBtnStyle(form.specs.includes(s))}>{s}</button>)}</div></div>
-            <div style={{ marginBottom: '12px' }}><label style={labelStyle}>Priority</label><div style={{ display: 'flex', gap: '6px' }}>{['low', 'medium', 'high'].map(p => <button key={p} onClick={() => setForm({ ...form, priority: p })} style={pillBtnStyle(form.priority === p)}>{p}</button>)}</div></div>
-            <div style={{ marginBottom: '12px' }}><label style={labelStyle}>Due Date</label><input type="date" style={inputStyle} value={form.due} onChange={e => setForm({ ...form, due: e.target.value })} /></div>
-            <div style={{ marginBottom: '12px' }}><label style={labelStyle}>Assigned Printer</label><input style={inputStyle} value={form.printer} onChange={e => setForm({ ...form, printer: e.target.value })} /></div>
-            <div><label style={labelStyle}>Notes</label><textarea style={{ ...inputStyle, minHeight: '60px', resize: 'vertical' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
+      <SplitPane showGrid showPreview={showPreview} setShowPreview={setShowPreview}
+        formChildren={<>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-faint)', display: 'grid', gap: '10px', flexShrink: 0 }}>
+            <div>
+              <label style={labelStyle}>Client</label>
+              <input style={inputStyle} list="job-client-list" placeholder="Search client..." value={form.client} onChange={e => handleClientChange(e.target.value)} />
+              <datalist id="job-client-list">
+                {clients.map(c => <option key={c.id} value={c.name} />)}
+              </datalist>
+            </div>
+            <div><label style={labelStyle}>Job Title</label><input style={inputStyle} placeholder="e.g., Annual Report 500x" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></div>
+            <div><label style={labelStyle}>Specs</label><div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>{['A4 B&W', 'A4 Color', 'A3 B&W', 'A3 Color', 'Lamination', 'Binding', 'Delivery', 'Glossy'].map(s => <button key={s} onClick={() => toggleSpec(s)} style={pillBtnStyle(form.specs.includes(s))}>{s}</button>)}</div></div>
+            <div><label style={labelStyle}>Priority</label><div style={{ display: 'flex', gap: '6px' }}>{['low', 'medium', 'high'].map(p => <button key={p} onClick={() => setForm({ ...form, priority: p })} style={pillBtnStyle(form.priority === p)}>{p}</button>)}</div></div>
+            <div>
+              <label style={labelStyle}>Due In (days from today)</label>
+              <input type="number" min="0" style={inputStyle} placeholder="e.g. 3" value={form.dueDays} onChange={e => setDueDays(e.target.value)} />
+              {form.due && (
+                <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                  Due: {new Date(form.due).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </div>
+              )}
+            </div>
+            <div><label style={labelStyle}>Assigned Printer</label><input style={inputStyle} value={form.printer} onChange={e => setForm({ ...form, printer: e.target.value })} /></div>
+            <div>
+              <label style={labelStyle}>Assigned Staff</label>
+              <select style={{ ...inputStyle, cursor: 'pointer' }} value={form.assignedStaffId} onChange={e => setForm({ ...form, assignedStaffId: e.target.value })}>
+                <option value="">— Unassigned —</option>
+                {staffList.map(s => <option key={s.id} value={s.id}>{s.name}{s.role ? ` (${s.role})` : ''}</option>)}
+              </select>
+            </div>
           </div>
-        }
-        previewContent={<JobPreviewFrame data={form} />}
+          <ServiceDropdown selectedService={selectedService} onSelect={s => { setSelectedService(s); setQty('1'); }} />
+          <div style={{ flex: 1, padding: '12px 20px' }}>
+            <label style={labelStyle}>Line Items ({form.items.length})</label>
+            {form.items.length === 0
+              ? <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '10px' }}>No items added yet. Select a service above.</div>
+              : form.items.map((it, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px', marginBottom: '6px', background: 'var(--bg-canvas)', borderRadius: '6px', fontSize: '10px' }}>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{it.desc}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '9px' }}>{it.qty} × MK {Number(it.rate).toLocaleString()}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontWeight: 600 }}>MK {(it.qty * it.rate).toLocaleString()}</span>
+                    <button onClick={() => removeItem(i)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: '14px', padding: '0 4px' }}>×</button>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+          <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-faint)', flexShrink: 0 }}>
+            <label style={labelStyle}>Discount (flat amount, MK)</label>
+            <input type="number" min="0" style={inputStyle} placeholder="0" value={form.discount || ''} onChange={e => setForm({ ...form, discount: Number(e.target.value) || 0 })} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '10px', color: 'var(--text-muted)' }}>
+              <span>Subtotal</span><span>MK {calculateTotal(form.items).toLocaleString()}</span>
+            </div>
+            {form.discount > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
+                <span>Discount</span><span>-MK {Number(form.discount).toLocaleString()}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '11px', fontWeight: 700, color: 'var(--text-head)' }}>
+              <span>Total</span><span>MK {total.toLocaleString()}</span>
+            </div>
+          </div>
+          <AddItemBar selectedService={selectedService} form={{ qty }} setForm={f => setQty(f.qty)} onAdd={addItem} />
+          <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-faint)', flexShrink: 0 }}>
+            <label style={labelStyle}>Notes</label>
+            <textarea style={{ ...inputStyle, minHeight: '60px', resize: 'vertical' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+          </div>
+        </>}
+        previewContent={<JobPreviewFrame data={form} total={total} />}
       />
     </ModalWrapper>
   );
@@ -824,6 +1064,85 @@ export function RecordPaymentModal({ isOpen, onClose, onSave, initialData = null
         }
         previewContent={<SimpleRecordPreview type="payment" data={form} />}
       />
+    </ModalWrapper>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: Job Progress ═══════════════════════════════════════
+   Replaces the inline two-input edit that used to live directly in Jobs.jsx's
+   ProgressCell. This is a proper modal: it shows what the job actually is
+   (the tagged service/line item and its amount, both read-only — this modal
+   is not for changing what the job is, only how far along it is) and a
+   single editable field for "what's been done so far" against the known
+   total. No preview pane — this is a quick figure-adjustment action, not a
+   document-creation flow, so a SplitPane would be unnecessary ceremony here.
+═══════════════════════════════════════ */
+export function JobProgressModal({ isOpen, onClose, onSave, job }) {
+  const [completed, setCompleted] = useState(0);
+
+  useEffect(() => {
+    if (!isOpen || !job) return;
+    setCompleted(job.completedCount ?? 0);
+  }, [isOpen, job]);
+
+  if (!job) return null;
+
+  // The job's tagged service/item, read from its derived invoice's line
+  // items (the same shape Job/Proposal/Invoice all share by this point in
+  // the pipeline). Falls back to the job title if no line item is present
+  // (e.g. a job created before invoice line items existed, or a synthetic
+  // backfilled job) — never blocks the modal from opening.
+  const lineItems = job.invoice?.line_items || [];
+  const primaryItem = lineItems[0];
+  const serviceLabel = primaryItem?.description || job.title || 'Print job';
+  const amountLabel = primaryItem
+    ? `MK ${Number(primaryItem.unit_price || 0).toLocaleString()} × ${Number(primaryItem.quantity || 1)}`
+    : (job.totals?.total ? `MK ${Number(job.totals.total).toLocaleString()} total` : null);
+  const total = job.totalCount || 0;
+  const overCount = total > 0 && Number(completed) > total;
+
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title="Update Progress" footer={<>
+      <button onClick={onClose} style={cancelButton}>Cancel</button>
+      <button onClick={() => onSave(job, Number(completed) || 0, total)} style={createButton}>Save</button>
+    </>}>
+      <div style={{ padding: '20px', display: 'grid', gap: '14px' }}>
+        <div style={{ padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px', border: '1px solid var(--border-faint)' }}>
+          <div style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
+            {job.id} — {job.client}
+          </div>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-head)' }}>{serviceLabel}</div>
+          {amountLabel && <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>{amountLabel}</div>}
+        </div>
+
+        {total > 0 ? (
+          <div>
+            <label style={labelStyle}>Completed</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="number"
+                min="0"
+                autoFocus
+                style={{ ...inputStyle, width: '90px', textAlign: 'center' }}
+                value={completed}
+                onChange={e => setCompleted(e.target.value)}
+              />
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>of {total}</span>
+            </div>
+            <div className="fin-bar" style={{ height: '5px', marginTop: '10px' }}>
+              <div
+                className={`fin-bar-fill ${job.priority === 'high' ? 'red' : job.priority === 'medium' ? 'warning' : 'teal'}`}
+                style={{ width: `${Math.min(total > 0 ? (Number(completed) / total) * 100 : 0, 100)}%` }}
+              />
+            </div>
+            {overCount && <div style={{ fontSize: '10px', color: 'var(--warning)', marginTop: '4px' }}>This exceeds the original total — recorded as a reprint, not an error.</div>}
+          </div>
+        ) : (
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+            This job has no total count set yet, so progress can't be tracked as a fraction. Set a total via Edit Job first.
+          </div>
+        )}
+      </div>
     </ModalWrapper>
   );
 }

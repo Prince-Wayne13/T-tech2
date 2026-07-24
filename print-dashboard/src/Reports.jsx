@@ -20,6 +20,13 @@ import { ModuleHeader, StatsGrid } from './components/ModuleStandard';
 const TABS = ['Cashflow', 'Snapshot', 'Analytics'];
 const ANALYTICS_SECTIONS = ['Vendor Spend', 'Client Performance', 'Projections', 'Sales vs Expenses', 'Machine Revenue'];
 
+function formatMonthLabel(month) {
+  if (!month || month === 'All') return 'All Months';
+  const [year, monthNumber] = month.split('-').map(Number);
+  if (!year || !monthNumber) return month;
+  return new Date(year, monthNumber - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+
 // ── PulseChart ─────────────────────────────────────────────────────────
 // Moved from App.jsx verbatim (dataset construction + SVG rendering logic
 // unchanged) so Reports.jsx owns the chart it's meant to house, rather than
@@ -343,10 +350,10 @@ function SalesVsExpensesSection() {
           <tbody>
             {rows.map(row => (
               <tr key={row.month} style={{ borderBottom: '1px solid var(--border-faint)' }}>
-                <td style={{ padding: '8px' }}>{row.month}</td>
+                <td style={{ padding: '8px' }}>{formatMonthLabel(row.month)}</td>
                 <td style={{ padding: '8px', textAlign: 'right', color: 'var(--teal)' }}>{money(row.sales)}</td>
                 <td style={{ padding: '8px', textAlign: 'right', color: 'var(--warning)' }}>{money(row.expenses)}</td>
-                <td style={{ padding: '8px', textAlign: 'right', fontWeight: 600, color: row.balance >= 0 ? 'var(--teal)' : 'var(--red)' }}>{money(row.balance)}</td>
+                <td style={{ padding: '8px', textAlign: 'right', fontWeight: 600, color: Number(row.balance || 0) >= 0 ? 'var(--teal)' : 'var(--red)' }}>{money(row.balance)}</td>
               </tr>
             ))}
           </tbody>
@@ -357,10 +364,34 @@ function SalesVsExpensesSection() {
 }
 
 function MachineRevenueSection() {
-  const { data, loading, error } = useAnalyticsData(() => api.analyticsMachineRevenue());
+  const [month, setMonth] = useState('All');
+  const [serviceType, setServiceType] = useState('All');
+  const params = new URLSearchParams();
+  if (month !== 'All') params.set('month', month);
+  if (serviceType !== 'All') params.set('service_type', serviceType);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const { data, loading, error } = useAnalyticsData(() => api.analyticsMachineRevenue(query), [query]);
   const rows = data?.items || [];
+  const monthOptions = ['All', ...(data?.available_months || [])].sort((a, b) => (a === 'All' ? -1 : b < a ? -1 : 1));
+  const serviceOptions = ['All', ...(data?.available_service_types || [])].sort();
   return (
     <SectionShell title="Machine Revenue" loading={loading} error={error} empty={rows.length === 0}>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+        <select
+          value={month}
+          onChange={e => setMonth(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: '#fff', fontSize: '10px', color: 'var(--text-body)' }}
+        >
+          {monthOptions.map(option => <option key={option} value={option}>{formatMonthLabel(option)}</option>)}
+        </select>
+        <select
+          value={serviceType}
+          onChange={e => setServiceType(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: '#fff', fontSize: '10px', color: 'var(--text-body)' }}
+        >
+          {serviceOptions.map(option => <option key={option} value={option}>{option === 'All' ? 'All Service Types' : option}</option>)}
+        </select>
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
         {rows.slice(0, 12).map(row => (
           <div key={row.key} style={{ padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px' }}>
@@ -459,8 +490,8 @@ export default function Reports() {
         ))}
       </div>
 
-      {loading && <div className="card" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading reports...</div>}
-      {!loading && error && <div className="card" style={{ padding: '24px', textAlign: 'center', color: 'var(--red)' }}>{error}</div>}
+      {tab !== 'Analytics' && loading && <div className="card" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading reports...</div>}
+      {tab !== 'Analytics' && !loading && error && <div className="card" style={{ padding: '24px', textAlign: 'center', color: 'var(--red)' }}>{error}</div>}
 
       {!loading && !error && tab === 'Cashflow' && (
         <>

@@ -17,6 +17,7 @@ from .models import (
     ProductionMachine,
     Proposal,
     ProposalLineItem,
+    Staff,
     Vendor,
 )
 from .services.invoices import apply_line_items, apply_payments, sync_invoice_amount
@@ -39,7 +40,7 @@ def spread_days(month_start, month_end, count, force_first=False):
 def seed_mock_data(reset=False):
     random.seed(20250101)
     if reset:
-        for model in [ExportJob, AuditLog, Advance, Expense, Payment, ProposalLineItem, Proposal, Invoice, Job, PricingItem, ProductionMachine, Vendor, Client]:
+        for model in [ExportJob, AuditLog, Advance, Expense, Payment, ProposalLineItem, Proposal, Invoice, Job, PricingItem, ProductionMachine, Vendor, Staff, Client]:
             db.session.query(model).delete()
         db.session.commit()
 
@@ -85,6 +86,16 @@ def seed_mock_data(reset=False):
     db.session.add_all(vendors)
     db.session.flush()
     vendor_by_name = {vendor.name: vendor for vendor in vendors}
+
+    staff_members = [
+        Staff(name="Vivienne", role="Production"),
+        Staff(name="Victor", role="Production"),
+        Staff(name="Adam", role="Production"),
+        Staff(name="Chisomo", role="Production"),
+        Staff(name="Galfken", role="Production"),
+    ]
+    db.session.add_all(staff_members)
+    db.session.flush()
 
     machines = [
         ProductionMachine(machine_ref="MCH-DTF-01", name="DTF Print & Heat Press Line", category="DTF Apparel", capability="T-shirts, hoodies, caps, diaries and fabric transfers", image_path="/machines/dtf.svg", notes="Includes DTF printer, powdering/curing workflow and heat pressing machines."),

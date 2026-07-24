@@ -320,7 +320,7 @@ def build_sales_vs_expenses_report():
 
 # ── Item 5: Machine/category revenue report ─────────────────────────────────
 
-def build_machine_category_revenue_report():
+def build_machine_category_revenue_report(month=None, service_type=None):
     """'How much has DTF made this month' style breakdown - group
     InvoiceLineItem by machine_id (falling back to product_type when
     machine_id is null), sum revenue per month AND per year. Only counts
@@ -330,10 +330,13 @@ def build_machine_category_revenue_report():
     """
     active_statuses = {"not_paid", "partial", "paid", "sent", "overdue"}
     invoices = Invoice.query.all()
+    service_filter = (service_type or "").strip().lower()
 
     by_key_month = defaultdict(lambda: defaultdict(Decimal))
     by_key_year = defaultdict(lambda: defaultdict(Decimal))
     display_name = {}
+    available_months = set()
+    available_service_types = set()
 
     for invoice in invoices:
         totals = invoice_totals(invoice)
@@ -343,6 +346,15 @@ def build_machine_category_revenue_report():
         mkey = month_key(invoice.issued_on)
         ykey = year_key(invoice.issued_on)
         for item in invoice.line_items:
+            item_service = item.product_type or item.machine.category if item.machine else item.product_type
+            if mkey != "unscheduled":
+                available_months.add(mkey)
+            if item_service:
+                available_service_types.add(item_service)
+            if month and mkey != month:
+                continue
+            if service_filter and (item_service or "").lower() != service_filter:
+                continue
             if item.machine_id:
                 group_key = f"machine:{item.machine_id}"
                 display_name[group_key] = item.machine.name if item.machine else f"Machine #{item.machine_id}"
@@ -371,4 +383,10 @@ def build_machine_category_revenue_report():
         })
 
     rows.sort(key=lambda row: row["lifetime_revenue"], reverse=True)
-    return {"items": rows, "total": len(rows)}
+    return {
+        "items": rows,
+        "total": len(rows),
+        "filters": {"month": month, "service_type": service_type},
+        "available_months": sorted(available_months),
+        "available_service_types": sorted(available_service_types),
+    }

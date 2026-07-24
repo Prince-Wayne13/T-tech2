@@ -1,0 +1,19 @@
+I'll start by reviewing the current backend structure to understand what exists before planning this out, since there's a lot here (material/stock tracking, machine/service separation, payment-sales sync, vendor balance tracking, to-do list fields, and a UI scroll bug).I don't have `Jobs.jsx`, `Expenses.jsx`, `Vendors.jsx`, `services/sales.py`, `services/petty_cash.py`, `services/expenses.py`, `routes/expenses.py`, `routes/sales.py`, `routes/vendors.py`, or `services/invoices.py` attached — several of the requested items touch those files directly. Let me lay out a prioritized plan first, and flag exactly which files I need before I can safely implement each part.
+
+## Reading your request into a backlog
+
+**Backend, in priority order:**
+
+1. **Vendor payment tracking** ("did we pay them back, how much we owe, what we've paid") — needs `Vendor` balance to be *derived* from linked `Expense` rows (owed vs paid), not the dead `balance` column.
+2. **Update-payment → totals visibility** — payment update responses should show amount paid so far vs. total owed (partially exists via `invoice_totals`, needs surfacing).
+3. **Job payments not syncing to Sale** — `add_job_payment`/`update_job_payment` re-sync the Invoice but never re-sync the linked `Sale.amount`. Real bug, quick fix once I have `services/sales.py`.
+4. **Machine vs Service separation** — currently `PricingItem`/`InvoiceLineItem` link a `machine_id` directly. You want Machine (the physical asset/resource) and Service (what's offered/billed) as independent entities that can *optionally* relate — bigger schema change.
+5. **Material/stock tracking + depletion projections** (the 50sqm banner example) — this is the explicitly-deferred "Prompt 8" stock feature from the dev log. New models needed: something like `MaterialStock` (purchased qty, unit) + usage draw-down + revenue/profit-per-job tied to that material + projected-finish-date math, tax-aware.
+6. **To-do list fields** — add client phone, amount to pay, amount paid so far, quantity of items to the job to-do/download list.
+
+**Frontend:**
+
+7. **Line-items scroll bug** in `NewInvoiceModal`/`NewProposalModal`/`NewJobModal` — the inner `overflowY: 'auto'` div for line items is creating a second nested scrollbar on top of the panel's own scroll. This one I can fix right now from `Modals.jsx`, which I have.
+
+Let me tackle what's fully unblocked now (item 7), then scope the rest precisely.
+search tingy could be better...like i dont have to wait till i press enter for suggestions to strat...and also the ui for it is boring...it doesnt close when i press close(could be an x button though) or when i press outside it "div"...

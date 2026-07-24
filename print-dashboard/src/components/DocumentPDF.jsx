@@ -54,13 +54,22 @@ const fmtDate = value => {
 };
 
 const normaliseItems = (data) => {
-  if (Array.isArray(data?.line_items) && data.line_items.length) return data.line_items;
+  if (Array.isArray(data?.line_items) && data.line_items.length) {
+    return data.line_items.map(item => ({
+      description: item.desc || item.description || '',
+      quantity: item.qty || item.quantity || 1,
+      unit: item.unit || 'item',
+      unit_price: item.rate || item.unit_price || (item.amount && !item.quantity ? item.amount : 0),
+      amount: item.amount || item.line_total,
+    }));
+  }
   if (Array.isArray(data?.items) && data.items.length) {
     return data.items.map(item => ({
       description: item.desc || item.description,
       quantity: item.qty || item.quantity || 1,
       unit: item.unit || 'item',
-      unit_price: item.rate || item.unit_price || 0,
+      unit_price: item.rate || item.unit_price || (item.amount && !item.qty && !item.quantity ? item.amount : 0),
+      amount: item.amount,
     }));
   }
   return [{ description: data?.title || 'Service', quantity: 1, unit: 'item', unit_price: 0 }];
@@ -111,7 +120,7 @@ function InvoiceDocument({ data }) {
             <Text style={[styles.cellText, styles.colDesc]}>{item.description}</Text>
             <Text style={[styles.cellText, styles.colQty]}>{item.quantity} {item.unit || ''}</Text>
             <Text style={[styles.cellText, styles.colRate]}>{fmt(item.unit_price)}</Text>
-            <Text style={[styles.cellText, styles.colAmount]}>{fmt(Number(item.quantity || 0) * Number(item.unit_price || 0))}</Text>
+            <Text style={[styles.cellText, styles.colAmount]}>{fmt(Number(item.amount ?? Number(item.quantity || 0) * Number(item.unit_price || 0)))}</Text>
           </View>
         ))}
         <View style={styles.totalsSection}>

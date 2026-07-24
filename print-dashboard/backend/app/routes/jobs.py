@@ -12,7 +12,8 @@ from ..services.jobs import (
     update_job_payment,
     update_job_progress,
 )
-from ..services.invoices import serialize_invoice
+from ..services.invoices import apply_line_items, serialize_invoice, sync_invoice_amount
+from ..services.sales import serialize_sale
 from ..utils import parse_date
 from .common import apply_search, list_response
 
@@ -87,6 +88,18 @@ def update_job(job_id):
             setattr(job, field, normalise_job_status(data[field]) if field == "status" else data[field])
     if "due_date" in data:
         job.due_date = parse_date(data.get("due_date"))
+    if job.invoice:
+        if "line_items" in data:
+            apply_line_items(job.invoice, data.get("line_items") or [])
+        if "discount_amount" in data:
+            job.invoice.discount_amount = data.get("discount_amount") or 0
+        if "currency" in data:
+            job.invoice.currency = data.get("currency") or job.invoice.currency
+        job.invoice.client_name = job.client_name
+        job.invoice.title = job.title
+        job.invoice.due_on = job.due_date
+        job.invoice.notes = job.notes
+        sync_invoice_amount(job.invoice)
     db.session.add(AuditLog(action=f"Updated job {job.job_ref}", entity_type="job", entity_id=job.id))
     db.session.commit()
     return jsonify(serialize_job(job))
@@ -117,13 +130,33 @@ def next_invoice_ref():
     return f"INV-{((last.id if last else 0) + 1):04d}"
 
 
+def _payment_summary(invoice):
+    """Item 2: explicit amount-paid-so-far vs total-owed breakdown, surfaced
+    directly on payment responses rather than requiring the frontend to dig
+    it out of invoice.totals. invoice_totals() already computes this - this
+    just names it plainly for the payment-recording call sites.
+    """
+    if not invoice:
+        return {"total": 0, "paid": 0, "balance": 0}
+    totals = serialize_invoice(invoice)["totals"]
+    return {"total": totals["total"], "paid": totals["paid"], "balance": totals["balance"]}
+
+
 @bp.post("/<int:job_id>/payments")
 def record_job_payment(job_id):
     job = Job.query.get_or_404(job_id)
     payment = add_job_payment(job, request.get_json() or {})
     db.session.add(AuditLog(action=f"Recorded payment {payment.payment_ref} for {job.job_ref}", entity_type="job", entity_id=job.id))
     db.session.commit()
-    return jsonify({"payment": payment.to_dict(), "job": serialize_job(job), "invoice": serialize_invoice(job.invoice) if job.invoice else None}), 201
+    return jsonify({
+        "payment": payment.to_dict(),
+        "job": serialize_job(job),
+        "invoice": serialize_invoice(job.invoice) if job.invoice else None,
+        "payment_summary": _payment_summary(job.invoice),
+        # Item 3: linked Sale(s), now kept in sync with this payment. Empty
+        # list if this job has no Sale record yet (not every job has one).
+        "sales": [serialize_sale(sale) for sale in job.sales],
+    }), 201
 
 
 @bp.put("/<int:job_id>/payments/<int:payment_id>")
@@ -133,4 +166,10 @@ def update_job_payment_route(job_id, payment_id):
     payment = update_job_payment(job, payment_id, data)
     db.session.add(AuditLog(action=f"Updated payment {payment.payment_ref} for {job.job_ref}", entity_type="job", entity_id=job.id))
     db.session.commit()
-    return jsonify({"payment": payment.to_dict(), "job": serialize_job(job), "invoice": serialize_invoice(job.invoice) if job.invoice else None})
+    return jsonify({
+        "payment": payment.to_dict(),
+        "job": serialize_job(job),
+        "invoice": serialize_invoice(job.invoice) if job.invoice else None,
+        "payment_summary": _payment_summary(job.invoice),
+        "sales": [serialize_sale(sale) for sale in job.sales],
+    })
