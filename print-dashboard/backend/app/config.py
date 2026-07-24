@@ -4,6 +4,14 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# The 'instance' folder holds the SQLite database files. SQLite will not
+# create this directory itself, so we ensure it exists before any
+# SQLALCHEMY_DATABASE_URI is built. Doing this once here (module import time)
+# means it's guaranteed to exist before Flask-SQLAlchemy ever tries to open
+# a connection, no matter which config class gets used.
+INSTANCE_DIR = BASE_DIR / "instance"
+INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
+
 
 class BaseConfig:
     SECRET_KEY = os.getenv("SECRET_KEY", "change-me-before-production")
@@ -28,9 +36,14 @@ class BaseConfig:
 
 class DevelopmentConfig(BaseConfig):
     DEBUG = True
+    # .as_posix() forces forward slashes even on Windows. sqlite/SQLAlchemy
+    # URIs require forward slashes; a raw Windows path with backslashes
+    # (e.g. C:\Users\...) gets mis-parsed and produces
+    # "unable to open database file" even though the file exists and is
+    # readable via sqlite3.connect() directly.
     SQLALCHEMY_DATABASE_URI = os.getenv(
         "DATABASE_URL",
-        f"sqlite:///{BASE_DIR / 'instance' / 'ttech_dev.db'}",
+        f"sqlite:///{(INSTANCE_DIR / 'ttech_dev.db').as_posix()}",
     )
 
 
@@ -38,7 +51,7 @@ class ProductionConfig(BaseConfig):
     DEBUG = False
     SQLALCHEMY_DATABASE_URI = os.getenv(
         "DATABASE_URL",
-        f"sqlite:///{BASE_DIR / 'instance' / 'ttech_prod.db'}",
+        f"sqlite:///{(INSTANCE_DIR / 'ttech_prod.db').as_posix()}",
     )
 
 

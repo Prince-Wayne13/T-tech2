@@ -194,10 +194,19 @@ export function JobTicketPrintLayout({ data }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '10px', marginBottom: '16px' }}>
           <div><strong>Due:</strong> {data.due || data.due_date || '-'}</div>
           <div><strong>Priority:</strong> {data.priority || 'medium'}</div>
-          <div><strong>Printer:</strong> {data.printer || data.machine_name || data.service_category || '-'}</div>
+          <div><strong>Assigned Machine:</strong> {data.printer || data.machine_name || data.service_category || '-'}</div>
           <div><strong>Status:</strong> {data.status || 'queued'}</div>
           <div><strong>Assigned Staff:</strong> {data.assignedStaffName || data.assigned_staff_name || '-'}</div>
           <div><strong>Progress:</strong> {totalCount > 0 ? `${completed} of ${totalCount}` : `${data.progress || 0}%`}</div>
+          <div><strong>Client Phone:</strong> {data.clientPhone || data.client_phone || '-'}</div>
+          <div>
+            <strong>Payment:</strong>{' '}
+            {(data.paymentStatus || (balance > 0 ? (paid > 0 ? 'partial' : 'not_paid') : 'paid')) === 'paid'
+              ? 'Paid'
+              : (data.paymentStatus || (paid > 0 ? 'partial' : 'not_paid')) === 'partial'
+                ? 'Partial'
+                : 'Unpaid'}
+          </div>
         </div>
         <div style={{ fontSize: '10px', marginBottom: '8px' }}><strong>Specs:</strong> {data.specs?.join(', ') || `${data.pages || 0} pages, ${data.copies || 1} copies`}</div>
         <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px' }}>
@@ -243,17 +252,22 @@ export function ReportPrintLayout({ title, rows = [], footer }) {
   );
 }
 
-export function PrintPreviewModal({ type, title, data, onClose }) {
+export function PrintPreviewModal({ type, title, data, onClose, actions }) {
   if (!data) return null;
   const Layout = type === 'proposal' ? ProposalPrintLayout : type === 'job' ? JobTicketPrintLayout : type === 'report' ? ReportPrintLayout : InvoicePrintLayout;
   const reportRows = Array.isArray(data.rows) ? data.rows : [];
 
+  // `actions` lets a caller (e.g. Jobs.jsx) inject its own quick-action
+  // buttons into the preview header, so "Preview -> Edit" doesn't require
+  // closing this shared modal first. Optional and type-agnostic: invoice/
+  // proposal/report previews simply don't pass it and get the old header.
   return (
     <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', padding: '18px', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={onClose}>
       <section className="card no-print" style={{ width: 'min(920px, 96vw)', maxHeight: '90vh', overflow: 'auto', borderTop: '2px solid var(--primary)' }} onClick={event => event.stopPropagation()}>
         <div className="card-header" style={{ marginBottom: '12px' }}>
           <h3 className="card-title">{title || 'Preview'}</h3>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {actions}
             <button className="filter-btn active" onClick={onClose}>Close</button>
           </div>
         </div>

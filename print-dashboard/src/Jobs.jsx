@@ -65,6 +65,11 @@ const mapJob = job => ({
   invoice: job.invoice,
   line_items: job.invoice?.line_items || job.line_items || [],
   discount_amount: job.invoice?.discount_amount ?? job.discount_amount ?? 0,
+  // Question 4 ("Can we release it?"): payment status, read from the
+  // backend's own derived invoice status (not_paid/partial/paid) rather
+  // than recomputed here from totals — invoice_status_from_totals() in
+  // services/invoices.py is the single source of truth for this label.
+  paymentStatus: job.invoice?.status || (Number(job.totals?.balance) > 0 ? 'not_paid' : job.totals ? 'paid' : 'not_paid'),
 });
 
 function jobPayload(form, fallback = {}) {
@@ -117,6 +122,26 @@ function ProgressCell({ job, onOpenProgress }) {
   );
 }
 
+// Question 4 ("Can we release it?"): Paid/Partial/Unpaid badge. Same
+// vocabulary and status-badge CSS classes Invoices.jsx already uses for the
+// same underlying not_paid/partial/paid values, so this reads consistently
+// with the rest of the app rather than inventing a second payment-status
+// visual language just for Jobs.
+const PAYMENT_STATUS_CONFIG = {
+  not_paid: { label: 'Unpaid', cls: 'overdue' },
+  partial: { label: 'Partial', cls: 'pending' },
+  paid: { label: 'Paid', cls: 'paid' },
+};
+
+function PaymentStatusBadge({ status }) {
+  const cfg = PAYMENT_STATUS_CONFIG[status] || PAYMENT_STATUS_CONFIG.not_paid;
+  return <span className={`status-badge ${cfg.cls}`}>{cfg.label}</span>;
+}
+
+// The row is laid out around the five questions the Jobs page must answer,
+// left to right: what we're making, what's happening, who it's for, and
+// (Can we release it?) payment status + balance. "What can I do next?"
+// stays as the action buttons at the end, unchanged in spirit from before.
 function JobRow({ job, onPreview, onEdit, onPayment, onOpenProgress, onMarkFinished }) {
   const statusConfig = {
     in_session: { label: 'In Session', cls: 'active', accent: 'var(--primary)' },
@@ -124,26 +149,54 @@ function JobRow({ job, onPreview, onEdit, onPayment, onOpenProgress, onMarkFinis
     cancelled: { label: 'Cancelled', cls: 'overdue', accent: 'var(--text-muted)' },
   };
   const cfg = statusConfig[job.status] || statusConfig.in_session;
+  const balance = Number(job.totals?.balance || 0);
+
   return (
-    <div className="vendor-item" style={{ position: 'relative', paddingLeft: '14px' }}>
+    <div className="vendor-item" style={{ position: 'relative', paddingLeft: '14px', flexWrap: 'wrap', rowGap: '8px' }}>
       <div style={{ position: 'absolute', left: 0, top: '10px', bottom: '10px', width: '2px', background: cfg.accent, borderRadius: '2px' }} />
       <div className="vendor-avatar" style={{ background: 'var(--primary-dim)', color: 'var(--primary)' }}>{String(job.id).split('-')[1] || 'JOB'}</div>
+
+      {/* Q1: What are we making? Services / quantity / notes indicator. */}
       <div className="vendor-info">
         <div className="vendor-name">{job.title}</div>
-        <div className="vendor-cat">{job.client} - {job.pages}pp x {job.copies}</div>
+        <div className="vendor-cat">
+          {job.totalCount > 0 ? `${job.totalCount} units` : `${job.pages}pp x ${job.copies}`}
+          {job.notes ? ' - has notes' : ''}
+        </div>
       </div>
+
+      {/* Q2: What is happening? Status, progress, machine, operator. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '150px', flexShrink: 0 }}>
+        <span className={`status-badge ${cfg.cls}`} style={{ width: 'fit-content' }}>{cfg.label}</span>
+        <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{job.machine_name || 'No machine assigned'}</div>
+        <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{job.assignedStaffName || 'Unassigned'}</div>
+      </div>
+
       <ProgressCell job={job} onOpenProgress={onOpenProgress} />
-      <div className="vendor-right">
-        <span className={`status-badge ${cfg.cls}`}>{cfg.label}</span>
-        <div className="activity-time" style={{ marginTop: '4px' }}>{job.due}</div>
+
+      {/* Q3: Who is it for? Customer, phone, due date. */}
+      <div className="vendor-right" style={{ minWidth: '130px' }}>
+        <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-body)' }}>{job.client}</div>
+        <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{job.clientPhone || 'No phone on file'}</div>
+        <div className="activity-time" style={{ marginTop: '2px' }}>Due {job.due}</div>
       </div>
+
+      {/* Q4: Can we release it? Payment status + remaining balance. */}
+      <div style={{ textAlign: 'right', minWidth: '110px', flexShrink: 0 }}>
+        <PaymentStatusBadge status={job.paymentStatus} />
+        <div style={{ fontSize: '10px', color: balance > 0 ? 'var(--red)' : 'var(--teal)', marginTop: '4px', fontWeight: 600 }}>
+          {balance > 0 ? `MK ${balance.toLocaleString()} owed` : 'Fully paid'}
+        </div>
+      </div>
+
+      {/* Q5: What can I do next? */}
       <button className="notif-btn" style={{ width: '24px', height: '24px', color: 'black' }} title="Preview" onClick={() => onPreview(job)}>
         <Icon d={D.more} size={12} />
       </button>
       <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Edit" onClick={() => onEdit(job)}>
         Edit
       </button>
-      <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Update Payment" onClick={() => onPayment(job)}>
+      <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Record Payment" onClick={() => onPayment(job)}>
         Payment
       </button>
       {job.status === 'in_session' && (
@@ -364,7 +417,22 @@ export default function Jobs() {
         onClose={() => { setShowEntry(false); setEditRecord(null); }}
         onSave={handleSave}
       />
-      <PrintPreviewModal type="job" title={preview ? `Job Preview: ${preview.id}` : ''} data={preview} onClose={() => setPreview(null)} />
+      <PrintPreviewModal
+        type="job"
+        title={preview ? `Job Preview: ${preview.id}` : ''}
+        data={preview}
+        onClose={() => setPreview(null)}
+        actions={preview && (
+          <>
+            <button className="filter-btn" onClick={() => setProgressJob(preview)}>Update Progress</button>
+            <button className="filter-btn" onClick={() => setPaymentRecord(preview)}>Record Payment</button>
+            <button className="filter-btn" onClick={() => setEditRecord(preview)}>Edit Job</button>
+            {preview.status === 'in_session' && (
+              <button className="filter-btn" style={{ color: 'var(--teal)' }} onClick={() => { handleMarkFinished(preview); setPreview(null); }}>Mark Finished</button>
+            )}
+          </>
+        )}
+      />
       <RecordPaymentModal
         isOpen={Boolean(paymentRecord)}
         initialData={paymentRecord}

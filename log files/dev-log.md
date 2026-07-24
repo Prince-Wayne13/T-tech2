@@ -803,5 +803,88 @@ required touching it, since both modals' external prop signatures (`isOpen`/`onC
 * Everything previously listed as still-open in prior entries (Vendor.balance migration decision,
   booked-vs-cash `build_financial_report()` fields, etc.) is unchanged by this session.
 
+## 2026-07-24 17:37 UTC — Jobs page restructured around the user's five-question spec
+Author: Sam Claude
+Date: 2026-07-24
+Scope: Implementation session against a fresh clone of github.com/Prince-Wayne13/T-tech2 (the
+canonical repo, not just project files). User gave a final, decisive answer to the "Dashboard nav
+entry" / general Jobs-page-shape open question from the prior session: the Jobs page must answer
+exactly five questions, no more — (1) What are we making? (services/quantity/notes), (2) What is
+happening? (status/progress/machine/operator), (3) Who is it for? (customer/phone/due date), (4)
+Can we release it? (payment status/remaining balance), (5) What can I do next? (Update Progress /
+Record Payment / Edit Job / Mark Finished / Print To-Do List). Payment info (amount owed, Update
+Payment) explicitly requested to be visible directly on the Jobs page itself, not just inside
+Invoices.
+
+**Repo discovery, flagged before making any change:** two `Jobs.jsx` files exist in the repo —
+`src/Jobs.jsx` (382 lines) and `src/pages/Jobs.jsx` (141 lines, older/shorter). Confirmed via
+`App.jsx`'s import (`import Jobs from './Jobs'`) that only `src/Jobs.jsx` is live; `pages/Jobs.jsx`
+is orphaned, not imported anywhere, not touched this session. All edits below are against the real,
+live file.
+
+**Files changed:** `src/Jobs.jsx`, `src/components/PrintLayouts.jsx` (only the `JobTicketPrintLayout`
+and `PrintPreviewModal` pieces — invoice/proposal/report preview paths untouched).
+
+**`Jobs.jsx` changes:**
+* `mapJob()`: added a derived `paymentStatus` field, read from `job.invoice.status`
+  (`not_paid`/`partial`/`paid` — the backend's own `invoice_status_from_totals()` output via
+  `serialize_invoice()`), with a totals-based fallback only for the rare case a job has no invoice
+  object at all yet. Not recomputed independently on the frontend — reuses the existing backend
+  source of truth, same value Invoices.jsx already reads for the same underlying invoices.
+* `JobRow` restructured into five visually distinct groups matching the five questions exactly,
+  left to right: title/quantity/notes-flag -> status badge/machine/operator -> progress bar
+  (unchanged `ProgressCell`) -> customer/phone/due date -> **new: payment status badge + remaining
+  balance** -> action buttons (Preview/Edit/Payment/Mark Finished, unchanged from before). This is
+  the main change the user asked for: payment status and "how much they owe us" are now visible
+  directly on every row, not just aggregated in the top stats card.
+* Added `PaymentStatusBadge` + `PAYMENT_STATUS_CONFIG`, reusing the exact same `status-badge`
+  CSS classes and Paid/Partial/Unpaid label vocabulary `Invoices.jsx` already uses for
+  paid/partial/not_paid, so this doesn't introduce a second inconsistent visual language for the
+  same concept.
+* Preview modal's action buttons ("Edit", "Payment") relabelled in the row to match the user's
+  named action set exactly ("Record Payment" tooltip, was "Update Payment").
+
+**`PrintPreviewModal` (`PrintLayouts.jsx`) — new optional `actions` prop:**
+* This modal is shared across invoice/proposal/job/report previews, so job-specific buttons
+  couldn't be hardcoded into it without affecting the other three preview types. Added an
+  `actions` prop rendered into the header next to Close; left `undefined` by every other caller
+  (Invoices.jsx/Proposals.jsx/Reports.jsx untouched, unaffected).
+* `Jobs.jsx` now passes Update Progress / Record Payment / Edit Job / Mark Finished buttons into
+  the Job preview's header via this prop — addresses the still-open item from the 2026-07-23 audit
+  ("Edit isn't reachable from inside Preview"). Staff can now go Preview -> notice an issue -> Edit
+  -> Save -> Preview updates, without closing the modal first, matching the original spec
+  document's explicitly stated preference for that flow.
+
+**`JobTicketPrintLayout` (the Job Preview content itself):**
+* Relabelled "Printer" to "Assigned Machine" to match the spec's own terminology exactly (was
+  previously the same underlying field, `machine_name`, just labelled differently).
+* Added an explicit "Client Phone" line and a "Payment: Paid/Partial/Unpaid" line to the preview's
+  detail grid — previously this information existed in the totals block at the bottom (paid/
+  balance/total figures) but had no plain-language Paid/Partial/Unpaid label anywhere in the
+  preview itself, unlike the row-level badge added this session.
+
+**Explicitly not changed this session:**
+* Backend (`services/jobs.py`, `routes/jobs.py`, `models.py`) — no changes needed. All data this
+  session's frontend work needed (`job.invoice.status`, `client_phone`, `machine_name`,
+  `assigned_staff_name`, `totals.balance`) was already exposed by the existing serializer, per
+  inspection before writing any code.
+* `JobProgressModal`, `RecordPaymentModal`, `NewJobModal` internals — unchanged; only how they're
+  triggered (from the row and now also from Preview) changed.
+* `pages/Jobs.jsx` (orphaned duplicate) — confirmed unused, not touched, not deleted (deletion
+  wasn't requested this session).
+
+**Verification performed:**
+* Installed `@babel/core` + `@babel/preset-react` + `@babel/preset-env` fresh this session (network
+  egress to npm was available) and ran a real AST parse against both edited files
+  (`src/Jobs.jsx`, `src/components/PrintLayouts.jsx`) — both parse cleanly, no syntax errors.
+* Not run against a live server this session — static/code-level confirmation only, consistent
+  with this log's established convention for sessions without an attached execution environment.
+
+**Still open (unchanged from prior entries, not touched this session):**
+* Everything previously listed as still-open (`Vendor.balance` migration decision, booked-vs-cash
+  `build_financial_report()` fields, `Proposal.priority`/`assigned_staff_id` backend columns +
+  `accept_proposal()` wiring, `seed.py` not seeding any `Proposal` records, `pages/Jobs.jsx`
+  orphaned-file cleanup decision) is unchanged by this session.
+
 <!-- New entries go above this line, most recent first -->
 <!-- New entries go above this line, most recent first -->
