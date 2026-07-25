@@ -121,6 +121,72 @@ class PricingItem(TimestampMixin, SerializableMixin, db.Model):
     machine = db.relationship("ProductionMachine", backref="pricing_items")
 
 
+# Wayne's ask ("we got this much vinyl, we've used this much, made this much,
+# projected profit, estimate of when it may end") needs a real ledger, not a
+# single mutable quantity column. A single "quantity_on_hand" field can drift
+# from reality (double-writes, missed updates) and gives no purchase/usage
+# history to compute a burn rate from. So this is two tables: Material (the
+# stock item itself - name, unit, reorder point) and MaterialTransaction
+# (every purchase or usage event). Current stock = sum(purchases) -
+# sum(usages), computed live - same "derive, don't store" convention already
+# used for Vendor balances in services/vendors.py, for the same reason: a
+# derived number can't silently drift out of sync with its source rows.
+class Material(TimestampMixin, SerializableMixin, db.Model):
+    __tablename__ = "materials"
+
+    id = db.Column(db.Integer, primary_key=True)
+    material_ref = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(160), nullable=False, index=True)
+    # Optional link to the machine this material is mainly consumed by (e.g.
+    # vinyl -> the vinyl cutter). Nullable because some materials (ink,
+    # laminate) can feed more than one machine - category is the fallback
+    # grouping for those, mirroring how PricingItem/Job already use
+    # machine_id as optional with a category string alongside it.
+    machine_id = db.Column(db.Integer, db.ForeignKey("production_machines.id"), nullable=True, index=True)
+    category = db.Column(db.String(80), index=True)
+    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=True, index=True)
+    unit = db.Column(db.String(40), nullable=False, default="unit")
+    unit_cost = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+    # Optional manual reorder threshold (in `unit`s). Used only to flag low
+    # stock in the API response - does not gate or block anything.
+    reorder_point = db.Column(db.Numeric(14, 2), nullable=True)
+    active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    notes = db.Column(db.Text)
+
+    machine = db.relationship("ProductionMachine", backref="materials")
+    vendor = db.relationship("Vendor", backref="materials")
+
+
+class MaterialTransaction(TimestampMixin, SerializableMixin, db.Model):
+    __tablename__ = "material_transactions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    material_id = db.Column(db.Integer, db.ForeignKey("materials.id"), nullable=False, index=True)
+    # "purchase" adds to stock (new delivery); "usage" subtracts from stock
+    # (consumed on a job). "adjustment" covers manual corrections (stock
+    # count, waste, damage) without pretending it was a purchase or a job.
+    transaction_type = db.Column(db.String(20), nullable=False, index=True)
+    quantity = db.Column(db.Numeric(14, 3), nullable=False)
+    # Purchases: what was actually paid, if known - lets Material.unit_cost
+    # stay a simple "current price" while individual purchases can vary.
+    # Usages: left null; revenue for a usage row comes from the linked job's
+    # invoice instead (a material doesn't have its own selling price, the
+    # job it goes into does).
+    unit_cost = db.Column(db.Numeric(14, 2), nullable=True)
+    transaction_date = db.Column(db.Date, nullable=False, default=date.today)
+    # Usage rows can optionally link to the job that consumed the material,
+    # which is what makes "how much revenue has this material generated"
+    # answerable - revenue is read from job.invoice, not stored here, so it
+    # can never drift out of sync with the actual invoice total the same way
+    # Vendor.balance was a stale, separately-written duplicate (see
+    # services/vendors.py's comment on that).
+    job_id = db.Column(db.Integer, db.ForeignKey("jobs.id"), nullable=True, index=True)
+    notes = db.Column(db.Text)
+
+    material = db.relationship("Material", backref="transactions")
+    job = db.relationship("Job", backref="material_usages")
+
+
 class Job(TimestampMixin, SerializableMixin, db.Model):
     __tablename__ = "jobs"
 

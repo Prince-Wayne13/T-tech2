@@ -7,7 +7,7 @@ from flask_cors import CORS
 
 from .config import config_by_name
 from .extensions import db, migrate
-from .models import Invoice, Job, PricingItem, ProductionMachine, Vendor
+from .models import Invoice, Job, Material, MaterialTransaction, PricingItem, ProductionMachine, Vendor
 from .routes import register_blueprints
 from .services.invoices import serialize_invoice
 
