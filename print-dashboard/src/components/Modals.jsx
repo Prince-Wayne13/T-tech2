@@ -983,7 +983,11 @@ export function AddExpenseModal({ isOpen, onClose, onSave, initialData = null })
       <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={
           <div style={{ padding: '20px', display: 'grid', gap: '12px', alignContent: 'start', overflowY: 'auto', flex: 1 }}>
-            <div><label style={labelStyle}>Category</label><div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>{['Fuel', 'Paper', 'Maintenance', 'Utilities', 'Staff', 'Other'].map(c => <button key={c} onClick={() => setForm({ ...form, category: c, vendor_id: null })} style={pillBtnStyle(form.category === c)}>{c}</button>)}</div></div>
+            <div><label style={labelStyle}>Category</label><div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {categories.length > 0
+                ? categories.map(c => <button key={c.id} onClick={() => setForm({ ...form, category: c.name, vendor_id: null })} style={pillBtnStyle(form.category === c.name)}>{c.name}</button>)
+                : <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>No categories found — check the backend connection, or seed data may be missing.</span>}
+            </div></div>
             {isVendorRelated && (
               <div>
                 <label style={labelStyle}>Vendor</label>
