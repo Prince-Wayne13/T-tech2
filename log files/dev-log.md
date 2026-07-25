@@ -886,5 +886,95 @@ and `PrintPreviewModal` pieces — invoice/proposal/report preview paths untouch
   `accept_proposal()` wiring, `seed.py` not seeding any `Proposal` records, `pages/Jobs.jsx`
   orphaned-file cleanup decision) is unchanged by this session.
 
+## 2026-07-25 12:20 UTC — Invoice/Proposal PDF download redesign (rounded borders, navy/steel palette, proposal split from invoice) — sekinna claude
+
+**Signing note:** prior entries in this file are signed "zcodex claude" — this session's user
+gave an explicit standing instruction to sign as "sekinna claude" instead. Following the user's
+current instruction over the file's older convention, flagged here rather than silently switching
+without explanation.
+
+**Source of truth for this session:** user referenced a "redesign invoice and proposal" folder
+that did not exist at session start. Repo was checked (`git status`/`git log`) and found clean,
+`origin/main` at `0dd46ee`. User then pushed a new commit (`86c2bd9`, "design invoice and
+proposal") containing a Figma Make export at
+`log files/Redesign Invoice and Quotation (2)/src/components/InvoiceDocument.tsx` and
+`QuotationDocument.tsx` — pulled and read in full before writing any code, per this project's
+established process requirement.
+
+**What changed — `print-dashboard/src/components/InvoicePDF.jsx` (full rewrite):**
+* Translated the Figma Make reference (Tailwind/HTML, browser-print-based) into
+  `@react-pdf/renderer` primitives (`View`/`Text`/`StyleSheet`), since the real app's download
+  path uses `pdf(...).toBlob()`, not `window.print()` — the reference could not be copied
+  verbatim and was re-implemented against the actual rendering library already in use here.
+* New palette matching the reference exactly: navy `#2d3748` (badges/headings), steel `#4a6882`
+  (top rule/accent), slate `#3d4f5c` (table header/balance bar), replacing the old
+  navy/blue/lightBlue scheme.
+* Rounded borders added selectively, matching the restraint already present in the reference's
+  own logo mark (`rx="9"` badge, `rx="2"` paper stack, circular T-badge) rather than rounding
+  everything: logo badge (`borderRadius: 9`), document badge (`INVOICE`/`QUOTATION` pill),
+  bill-to/prepared-by box, items-table wrapper corners, totals/balance-due bar, and the new
+  "agree and send deposit" box. The ledger table rows themselves were kept sharp-edged
+  (no per-row rounding) — this matches the reference file directly, which uses zero `rounded-*`
+  Tailwind classes on the table body itself, only on containers/badges. Confirmed against real
+  file, not inferred.
+* **`downloadProposalPDF` no longer aliases `downloadInvoicePDF`.** Previously
+  `export async function downloadProposalPDF(proposal) { return downloadInvoicePDF(proposal); }`
+  — proposals downloaded literally as an "INVOICE"-badged PDF with invoice field names. Per
+  explicit user confirmation this session, proposal now renders through its own
+  `QuotationDocument` component: "QUOTATION" badge, "Estimate Details"/"Quotation No." meta
+  fields (vs. "Payment Terms"/"Invoice No."), "Prepared For" instead of "Bill To", a Discount
+  row, "ESTIMATE TOTAL" instead of "BALANCE DUE", and a "Valid until {date}" footnote — mirroring
+  the reference `QuotationDocument.tsx` field set. Field names read from real call site
+  (`Proposals.jsx`'s `prop.proposal_ref`, `prop.client_name`, `prop.title`, `prop.valid_until`,
+  `prop.totals`) before writing, confirmed against real file.
+* `downloadJobPDF` left unchanged (still aliases `downloadInvoicePDF`) — out of scope, not part
+  of this session's request, not touched.
+* Export names unchanged (`downloadInvoicePDF`, `downloadProposalPDF`, `downloadJobPDF`, default
+  export) — confirmed both call sites (`Invoices.jsx` line 6/129, `Proposals.jsx` line 9/68)
+  still resolve correctly against the new file with no import changes needed.
+
+**Explicitly not changed this session:**
+* `PrintLayouts.jsx` (the on-screen preview modal, distinct from the PDF download) — untouched.
+  This session's redesign only covers the downloaded-PDF path per the user's request ("invoice
+  and proposal download thingies"), not the in-app preview modal.
+* The full `proposal-job-invoice-restructure-prompt.md` backend restructure (payment ledger,
+  Job status vocabulary, Proposal→Job→Invoice flow) — user was asked explicitly whether this
+  session should include that scope; user's response ("do git status...") did not select it, and
+  no backend/model/route files were touched.
+* `Vendors.jsx`, date-formatting audit, download-button-inside-preview-modal cleanup, and the
+  eye-icon consistency fix from `proposal-job-invoice-restructure-prompt.md` — none of these were
+  requested this session, none touched.
+* `Jobs.jsx`, `models.py`, `routes/*.py`, `services/*.py` — no backend or Jobs-page changes made.
+
+**Verification performed:**
+* No JS/JSX AST parser (`@babel/parser`, `@babel/core`, esbuild, swc) was available in this
+  session's environment and npm registry access was not reachable to install one (confirmed via
+  failed `npx vite build` and failed `npm install` attempts — this environment's network allowlist
+  did not resolve the install). Full AST-level parse was **not** performed this session, unlike
+  the 2026-07-24 session which had npm egress available — stating this honestly rather than
+  claiming a parse that didn't happen.
+* Manual structural check performed instead: a Python script walked the file character-by-character
+  (skipping string/template-literal and comment contents) confirming every `(`/`[`/`{` has a
+  matching, correctly-ordered close, and a regex-based JSX open/close tag count came back matched.
+  This is a heuristic, not a substitute for a real parse — genuine confidence level is "structurally
+  balanced, not independently AST-verified."
+* Confirmed both `downloadInvoicePDF`/`downloadProposalPDF` import sites in `Invoices.jsx` and
+  `Proposals.jsx` reference function names that still exist, by direct grep against both files.
+* Not run against a live dev server or the actual `@react-pdf/renderer` render pipeline this
+  session — no dev server was started, so no runtime/visual confirmation was performed, only
+  static-code-level confirmation. Recommend running `npm run dev` and downloading one real
+  invoice and one real proposal PDF to visually confirm before treating this as fully verified.
+
+**Still open (unchanged from prior entries, not touched this session):**
+* Everything previously listed as still-open (`Vendor.balance` migration decision, booked-vs-cash
+  `build_financial_report()` fields, `Proposal.priority`/`assigned_staff_id` backend columns +
+  `accept_proposal()` wiring, `seed.py` not seeding any `Proposal` records, `pages/Jobs.jsx`
+  orphaned-file cleanup decision) is unchanged by this session.
+* The full Proposal→Job→Invoice backend restructure (payment ledger, computed invoice status,
+  backfill migration) from `proposal-job-invoice-restructure-prompt.md` remains entirely
+  unimplemented — this session covered PDF visual design only, per explicit scope confirmation.
+* `InvoicePDF.jsx`'s new design has not been visually confirmed against a rendered PDF output —
+  see verification note above.
+
 <!-- New entries go above this line, most recent first -->
 <!-- New entries go above this line, most recent first -->
