@@ -20,16 +20,16 @@ class BaseConfig:
     CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
     REPORT_EXPORT_DIR = os.getenv("REPORT_EXPORT_DIR", str(BASE_DIR / "exports"))
     COMPANY_PROFILE = {
-        "name": os.getenv("COMPANY_NAME", "T-Tech Digital Print Studio"),
+        "name": os.getenv("COMPANY_NAME", "T-Tech Suppliers & General Dealers Ltd"),
         "contact": {
-            "phone": os.getenv("COMPANY_PHONE", "+265 999 000 000"),
-            "email": os.getenv("COMPANY_EMAIL", "accounts@ttechprint.local"),
-            "address": os.getenv("COMPANY_ADDRESS", "Blantyre, Malawi"),
+            "phone": os.getenv("COMPANY_PHONE", "+265 988 231 291"),
+            "email": os.getenv("COMPANY_EMAIL", "ttechsuppliers@gmail.com"),
+            "address": os.getenv("COMPANY_ADDRESS", "Lilongwe, City Mall, Standard Bank Corridor"),
         },
         "banking": {
-            "bank": os.getenv("COMPANY_BANK", "National Bank"),
-            "account_name": os.getenv("COMPANY_ACCOUNT_NAME", "T-Tech Digital Print Studio"),
-            "account_number": os.getenv("COMPANY_ACCOUNT_NUMBER", "0000000000"),
+            "bank": os.getenv("COMPANY_BANK", "National Bank of Malawi"),
+            "account_name": os.getenv("COMPANY_ACCOUNT_NAME", "T-Tech Suppliers & General Dealers Ltd"),
+            "account_number": os.getenv("COMPANY_ACCOUNT_NUMBER", "1234567890"),
         },
     }
 

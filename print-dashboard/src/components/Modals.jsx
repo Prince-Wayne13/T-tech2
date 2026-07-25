@@ -730,12 +730,13 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
    member is assigned to run it.
 ═══════════════════════════════════════ */
 export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ client: '', title: '', items: [], specs: [], priority: 'medium', due: '', dueDays: '', printer: '', assignedStaffId: '', notes: '', discount: 0 });
+  const [form, setForm] = useState({ client: '', title: '', items: [], specs: [], priority: 'medium', due: '', dueDays: '', machineId: '', assignedStaffId: '', notes: '', discount: 0 });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
   const [showPreview, setShowPreview] = useState(false);
   const [clients, setClients] = useState([]);
   const [staffList, setStaffList] = useState([]);
+  const [machineList, setMachineList] = useState([]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -760,6 +761,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
       due: existingDue,
       dueDays: derivedDays,
       printer: initialData?.printer || initialData?.service_category || initialData?.machine_name || '',
+      machineId: initialData?.machineId || initialData?.machine_id || '',
       assignedStaffId: initialData?.assignedStaffId || initialData?.assigned_staff_id || '',
       notes: initialData?.notes || '',
       discount: Number(initialData?.discount_amount || initialData?.discount || 0),
@@ -769,6 +771,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
     // load — this modal must still open and work even if either call fails.
     api.clients('?per_page=500').then(data => setClients(data.items || [])).catch(() => setClients([]));
     api.staff('?active=true').then(data => setStaffList(data.items || [])).catch(() => setStaffList([]));
+    api.machines('?per_page=500').then(data => setMachineList(data.items || [])).catch(() => setMachineList([]));
   }, [isOpen, initialData]);
 
   const toggleSpec = s => setForm(p => ({ ...p, specs: p.specs.includes(s) ? p.specs.filter(x => x !== s) : [...p.specs, s] }));
@@ -827,7 +830,13 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
                 </div>
               )}
             </div>
-            <div><label style={labelStyle}>Assigned Printer</label><input style={inputStyle} value={form.printer} onChange={e => setForm({ ...form, printer: e.target.value })} /></div>
+            <div>
+              <label style={labelStyle}>Assigned Machine</label>
+              <select style={{ ...inputStyle, cursor: 'pointer' }} value={form.machineId} onChange={e => setForm({ ...form, machineId: e.target.value })}>
+                <option value="">— Unassigned —</option>
+                {machineList.map(m => <option key={m.id} value={m.id}>{m.name}{m.category ? ` (${m.category})` : ''}</option>)}
+              </select>
+            </div>
             <div>
               <label style={labelStyle}>Assigned Staff</label>
               <select style={{ ...inputStyle, cursor: 'pointer' }} value={form.assignedStaffId} onChange={e => setForm({ ...form, assignedStaffId: e.target.value })}>

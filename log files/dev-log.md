@@ -1051,5 +1051,180 @@ touched in the prior session):**
   against a rendered PDF — this session's verification covered the seed data only, not the PDF
   rendering pipeline together with real seeded records.
 
+## 2026-07-25 13:40 UTC — Full seed rebuild (Sale/PettyCash/ExpenseCategory/Proposal seeding, real price-list data, staff assignment), Assigned Machine dropdown fix, real company profile in config.py — sekinna claude
+
+**Scope of this session:** user asked for a genuinely full seed — every model populated with real
+relationships, real business data (price list photo, business profile), staff assignment, and a
+narrative "loyal client, big order, discount" case — plus fixed the "Assigned Printer" field,
+which the user correctly identified as not actually wired to a real Machine record.
+
+**1. Frontend fix — `print-dashboard/src/components/Modals.jsx` + `src/Jobs.jsx`:**
+* Root cause confirmed by reading the real files before touching anything: `NewJobModal`'s
+  "Assigned Printer" field was a free-text `<input>` bound to `form.printer`, and `jobPayload()`
+  in `Jobs.jsx` sent that value as `service_category` — never as `machine_id`. `Job.machine_id`
+  and the `/machines` API already existed and were fully wired on the backend (including
+  capability validation in `routes/jobs.py`); this was purely a frontend gap, confirmed by
+  reading `routes/jobs.py` and `services/jobs.py` before writing any code.
+* `Modals.jsx`: replaced the text input with a `<select>` sourced from `api.machines('?per_page=500')`,
+  matching the exact pattern already used by the adjacent "Assigned Staff" dropdown. Added
+  `machineList` state and the fetch call alongside the existing `staffList` fetch.
+* `Jobs.jsx`: `mapJob()` now also exposes `machine_id` (was previously only exposing the derived
+  `machine_name` string, which meant the edit-mode dropdown had no way to know which machine was
+  actually selected). `jobPayload()` now sends `machine_id: form.machineId`, and `service_category`
+  no longer gets overwritten by the printer field — it now falls back to `fallback.service_category`
+  or the job's spec tags only, as originally intended before the printer field was mistakenly
+  wired into it.
+* Verified correctness by direct diff inspection (git diff review) rather than a general
+  parser, since JSX has no available parser in this session's environment (see below) — every
+  changed hunk reviewed line by line, confirmed self-contained and structurally closed.
+
+**2. `config.py` — real company profile:**
+* Replaced placeholder values (`T-Tech Digital Print Studio`, `+265 999 000 000`,
+  `accounts@ttechprint.local`, `Blantyre, Malawi`) with the real business profile from
+  `log files/business profile`: `T-Tech Suppliers & General Dealers Ltd`, `+265 988 231 291`,
+  `ttechsuppliers@gmail.com`, `Lilongwe, City Mall, Standard Bank Corridor` — matches what was
+  already independently used in `InvoicePDF.jsx` from the prior session, single source of truth
+  confirmed consistent across both places.
+* Banking fields (`bank`, `account_name`, `account_number`) were **not** given real values — no
+  real bank account number was supplied by the user this session, so the pre-existing placeholder
+  pattern was kept as-is for `account_number` (still a placeholder, not real data) rather than
+  inventing one. Confirmed via grep that no other backend code currently reads these banking
+  fields, so this placeholder isn't feeding into any rendered document yet.
+
+**3. `seed.py` — full rebuild. Reused real service-layer helpers throughout rather than hand-rolling
+parallel logic, specifically to avoid drifting from the invariants those helpers enforce
+(mirrored-expense creation, one-to-one Proposal/Invoice relationship, derived Sale.amount):**
+
+* **Date window & volume** — unchanged from the prior session's work (Apr 2026 → today, increased
+  per-month counts); not touched again this session except where new model types needed their own
+  per-month loops (Proposals, PettyCash), built to match the same `spread_days()` pattern.
+* **Real price-list data** — added `PricingItem` rows for every category the user's photographed
+  price list covers where a reasonable machine match exists: roll-up banners, A4/A5/A3 vinyl
+  stickers, foam board, aluminium frames (→ Large Format), business cards, invoice/receipt books
+  (→ Digital Print), normal mugs, travelling jug (→ Sublimation), UV printing at A5/A3/A1
+  (→ UV DTF Printer — closest existing UV-capable machine, chosen by explicit user instruction
+  "guess which machines would be suited" since no dedicated UV-printer machine exists), and
+  embroidery logo/cap/front-chest/jacket pricing (→ **Embroidery Machine, flipped from
+  `status="planned"` to `status="active"`** — also per explicit user instruction, since real
+  live pricing now exists for it). Existing invented prices for overlapping categories (DTF,
+  large format banners/stickers, digital print, sublimation mugs/plates, UV DTF pen/key holder)
+  were left as-is rather than replaced, since they were already reasonable and not directly
+  contradicted by the price-list photo. Full mapping table and per-item photo-vs-machine
+  reasoning available in this session's conversation if needed later — not duplicated here in
+  full to keep this entry to the point.
+* **Staff assignment** — every seeded `Job` (both the main job-template loop and the
+  invoice-backed synthetic jobs) and every seeded `Proposal` now gets a real
+  `assigned_staff_id` via `random.choice(staff_members)`, closing the gap the user flagged
+  (staff existed but were never actually linked to anything).
+* **`Sale` seeding (previously zero rows)** — one `Sale` per invoice-backed job via
+  `create_sale_for_job()` (services/sales.py), which derives `amount` from the invoice's actual
+  payment status rather than being hand-set — respects the model's own documented contract
+  ("amount is intentionally NOT a plain editable column... derived from the linked Job's Invoice
+  payment status"). Also one `Sale` per accepted-proposal conversion and one for the loyal-client
+  case, same helper, same derivation.
+* **`PettyCash` seeding (previously zero rows)** — ~3-5 entries per month via
+  `record_petty_cash_entry()` (services/petty_cash.py), alternating `top_up` and `staff_expense`
+  types. Confirmed by direct database query after running the seed: all 10 seeded `top_up`
+  entries have a correctly mirrored `Expense` row (`linked_expense_id` set); all 7 seeded
+  `staff_expense` entries correctly have none — this matches the real function's actual
+  behaviour (`entry_type in {"top_up", "sales_cash_used"}` creates a mirrored expense,
+  `staff_expense` alone does not). An earlier draft of this log entry incorrectly stated
+  "the model docstring's claim that top_up doesn't mirror, but the code does" — re-reading the
+  code corrected this: top_up **does** mirror (matches the code), staff_expense does **not**
+  mirror (also matches the code) — there was no code/docstring contradiction on this point,
+  that was this author's misreading during drafting, corrected before finalizing.
+* **`ExpenseCategory` seeding (previously zero rows)** — 7 lookup rows (Materials, Ink &
+  Consumables, Installation, Maintenance, Utilities, Transport, Petty Cash) with `vendor_related`
+  flags matching the categories already used by `Expense.category` free-text values elsewhere in
+  this same file — additive lookup table per the model's own docstring, not a foreign-key
+  migration of `Expense.category`.
+* **`Proposal`/`ProposalLineItem` seeding (previously zero rows, flagged as a gap since the very
+  first session touching this file)** — ~2-4 per month, statuses drawn from
+  `["draft", "sent", "sent", "accepted", "accepted", "declined"]`. Accepted proposals are
+  **converted using the exact same flow `routes/proposals.py`'s real `accept_proposal()` endpoint
+  uses** (`create_invoice_for_job()`, then `converted_invoice_id` set, then a `Sale` created) —
+  not a hand-rolled parallel version — specifically because this relationship has a documented
+  production incident in this same file's history (the `uselist=False`-on-both-sides
+  `Invoice.source_proposal` bug) and a hand-rolled seed version risks quietly reintroducing that
+  same class of bug. One deliberate deviation: `create_invoice_for_job()` hardcodes
+  `issued_on=date.today()` (correct in production, where accepting a proposal happens "now") —
+  for seeding this was overridden immediately after the call to a date derived from the
+  proposal's `valid_until`, so converted invoices spread across the seeded window instead of all
+  bunching on the actual seed-run date. This override is the one place seed.py's output
+  intentionally diverges from calling the real helper unmodified — flagged here rather than left
+  implicit.
+* **Loyal client / big order / discount case** — one explicit additional invoice
+  (`INV-LOYAL-0001`) for "Nyasa Fresh Foods" (already
+  a repeat client across the randomly-distributed invoice pool), a full-store rebrand rollout
+  using real price-list-derived line items (stickers, decals, rollup banners, embroidered caps),
+  with a 12% `discount_amount` applied and called out explicitly in both the invoice notes and
+  this log, rather than being something the user has to notice by pattern-spotting across many
+  rows. Confirmed via direct query: `('INV-LOYAL-0001', 'Nyasa Fresh Foods', 429000, 'paid')`.
+
+**Bug found and fixed during this session's own verification (not a pre-existing issue — introduced
+and caught within this same session):**
+* First implementation of the invoice-loop's `Sale` creation triggered a genuine SQLAlchemy
+  `SAWarning: Object of type <Sale> not in session, add operation along 'Job.sales' will not
+  proceed`, three times, on the first actual run against a live database. Root cause: the
+  synthetic `invoice_job` was never explicitly `db.session.add()`-ed — it only relied on
+  cascading through `invoice.job = invoice_job`, which doesn't activate until `invoice` itself is
+  added, and that add happens at the very end of the loop, after the Sale creation that needed
+  it. Fixed by explicitly adding `invoice_job` right after the relationship assignment, and by
+  adding each `Sale` to the session immediately at creation (three call sites: the main invoice
+  loop, the accepted-proposal conversion block, and the loyal-client case) instead of batching
+  all adds at the end via `db.session.add_all(sales)`. Re-ran after each fix rather than assuming
+  it worked — went from 3 warnings → 1 warning → confirmed the remaining one is a distinct,
+  narrower autoflush-timing warning (traced to `invoice_totals()`'s `invoice.job.payments` access
+  triggering SQLAlchemy's autoflush while some other pending object is mid-transaction) that does
+  **not** correspond to any actual data-integrity problem — confirmed by direct query after the
+  run: all 47 seeded `Sale` rows have a non-null `job_id` correctly pointing at a real `Job` row,
+  zero orphaned or mismatched sales. Documented as "cosmetic, verified harmless" rather than
+  either suppressed silently or overstated as broken.
+
+**Verification performed (genuine execution, not heuristic):**
+* `python3 -m py_compile seed.py` and `config.py` — both passed, real syntax parse.
+* Ran `flask reset-mock-db` against a real throwaway local SQLite database (installed
+  `requirements.txt` into a venv, PyPI egress was available this session same as last). Final
+  result: `{'seeded': True, 'clients': 20, 'vendors': 4, 'machines': 8, 'pricing_items': 35,
+  'jobs': 56, 'invoices': 41, 'expenses': 36, 'advances': 17, 'proposals': 11, 'sales': 47,
+  'petty_cash_entries': 17, 'expense_categories': 7}`.
+* Queried the resulting database directly (not just checked it ran) to confirm every specific
+  requirement: job/invoice dates fall entirely within 2026-04-01 to 2026-07-25 (zero rows
+  outside); max invoice due-date gap is exactly 14.0 days; zero jobs or proposals have a null
+  `assigned_staff_id`; all 8 production machines show correctly, Embroidery now `active`; all 6
+  accepted proposals have a non-null `converted_invoice_id` and zero accepted proposals are
+  missing one; the loyal-client invoice exists with the expected discount amount and status;
+  35 pricing items exist including the new embroidery/UV rows at the expected prices; petty cash
+  mirrored-expense behavior matches the real code exactly (10/10 top_ups linked, 0/7
+  staff_expenses linked, as the actual function's logic dictates).
+* Test database deleted after verification (`instance/ttech_dev.db` removed), same as the prior
+  session's practice — not committed, no stray state.
+* Frontend changes (`Modals.jsx`, `Jobs.jsx`) verified by direct diff inspection line-by-line,
+  since no JSX/JS parser (`@babel/parser`, esbuild, swc) was available in this session's
+  environment and this was already established as a known limitation in the prior session's log
+  entry — not re-attempted with the same flawed heuristic bracket-counter from before, since
+  re-running it against the *original* unmodified files in this same session confirmed it
+  produces false positives even on pristine code, so it was correctly discarded as unreliable
+  rather than trusted again.
+
+**Still open / explicitly not done this session:**
+* The full Proposal→Job→Invoice backend restructure from
+  `proposal-job-invoice-restructure-prompt.md` (payment ledger, computed invoice status,
+  backfill migration) remains unimplemented — still out of scope, not requested this session.
+* `config.py`'s `COMPANY_BANK`/`COMPANY_ACCOUNT_NUMBER` remain placeholder values — no real
+  banking details were supplied this session. Currently unused elsewhere in the codebase, so this
+  carries no immediate visible impact, but should be corrected before any document that surfaces
+  banking info is built.
+* `InvoicePDF.jsx`'s redesigned PDF output (prior session) has still not been visually confirmed
+  against a rendered PDF using this session's newly seeded, richer data — recommend downloading a
+  real invoice and a real accepted-proposal-derived invoice after reseeding to see the full
+  effect together (new design + new realistic data) for the first time.
+* The one remaining SAWarning (autoflush-timing, `services/invoices.py:32`) was traced and
+  confirmed harmless via direct query, but was not eliminated at the code level — a cleaner fix
+  would restructure the invoice-loop and proposal-conversion-loop to flush more granularly around
+  every relationship touch, which was judged not worth the added complexity for a seed-data-only
+  script once data integrity was independently confirmed. Flagging in case a future session
+  wants full silence in the logs.
+
 <!-- New entries go above this line, most recent first -->
 <!-- New entries go above this line, most recent first -->

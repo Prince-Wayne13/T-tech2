@@ -9,19 +9,26 @@ from .models import (
     AuditLog,
     Client,
     Expense,
+    ExpenseCategory,
     ExportJob,
     Invoice,
     Job,
     Payment,
+    PettyCash,
     PricingItem,
     ProductionMachine,
     Proposal,
     ProposalLineItem,
+    Sale,
     Staff,
     Vendor,
 )
 from .schema_migrations import ensure_default_capabilities_seed
 from .services.invoices import apply_line_items, apply_payments, sync_invoice_amount
+from .services.jobs import create_invoice_for_job
+from .services.proposals import apply_proposal_line_items
+from .services.sales import create_sale_for_job
+from .services.petty_cash import record_petty_cash_entry
 
 
 def as_datetime(value):
@@ -41,7 +48,7 @@ def spread_days(month_start, month_end, count, force_first=False):
 def seed_mock_data(reset=False):
     random.seed(20250101)
     if reset:
-        for model in [ExportJob, AuditLog, Advance, Expense, Payment, ProposalLineItem, Proposal, Invoice, Job, PricingItem, ProductionMachine, Vendor, Staff, Client]:
+        for model in [ExportJob, AuditLog, PettyCash, Sale, Advance, Expense, ExpenseCategory, Payment, ProposalLineItem, Proposal, Invoice, Job, PricingItem, ProductionMachine, Vendor, Staff, Client]:
             db.session.query(model).delete()
         db.session.commit()
 
@@ -105,7 +112,7 @@ def seed_mock_data(reset=False):
         ProductionMachine(machine_ref="MCH-BIND-01", name="Book Binder & Cutter Line", category="Finishing", capability="Books, magazines, newspapers, trimming and binding", image_path="/machines/binder-cutter.svg"),
         ProductionMachine(machine_ref="MCH-SUB-01", name="Sublimation Station", category="Sublimation", capability="Mugs, cups, plates and coated gift items", image_path="/machines/sublimation.svg"),
         ProductionMachine(machine_ref="MCH-UVDTF-01", name="UV DTF Printer", category="UV DTF", capability="Pens, key holders, labels, hard-surface branding and gift items", image_path="/machines/uv-dtf.svg"),
-        ProductionMachine(machine_ref="MCH-EMB-01", name="Embroidery Machine", category="Embroidery", capability="Fabric embroidery and branded apparel", status="planned", image_path="/machines/embroidery.svg", notes="Planned future machine."),
+        ProductionMachine(machine_ref="MCH-EMB-01", name="Embroidery Machine", category="Embroidery", capability="Fabric embroidery and branded apparel", status="active", image_path="/machines/embroidery.svg", notes="Activated: real embroidery pricing now available (logo, caps, front chest, cotton carrier bag, fishing jacket)."),
         ProductionMachine(machine_ref="MCH-SWT-01", name="Automatic Sweater Machine", category="Apparel", capability="Future sweater production automation", status="planned", image_path="/machines/sweater.svg", notes="Planned future machine."),
     ]
     db.session.add_all(machines)
@@ -118,22 +125,48 @@ def seed_mock_data(reset=False):
     ensure_default_capabilities_seed()
 
     machine_by_ref = {machine.machine_ref: machine for machine in machines}
+    # Prices below marked "price list" come directly from the physical T-Tech
+    # price list the user photographed and provided (2026-07-25 session).
+    # Where a price-list category didn't map cleanly to one of the 8 seeded
+    # machines, the machine was chosen by the user's explicit instruction this
+    # session ("guess which machines would be suited") — see dev-log.md for
+    # the full mapping table and reasoning per item.
     pricing_items = [
         PricingItem(code="DTF-TSHIRT-A4", name="DTF T-shirt print A4 area", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="print", price=8500, cost_estimate=3200),
         PricingItem(code="DTF-CAP", name="DTF cap branding", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="cap", price=6500, cost_estimate=2500),
         PricingItem(code="DTF-DIARY", name="DTF diary branding", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="diary", price=7500, cost_estimate=2800),
+        PricingItem(code="DTF-TSHIRT-TINT", name="T-shirt tinting (inclusive)", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="shirt", price=22000, cost_estimate=9500),
         PricingItem(code="LF-BANNER-SQM", name="PVC banner print", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=18000, cost_estimate=7800),
         PricingItem(code="LF-STICKER-SQM", name="Vinyl sticker print", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=22000, cost_estimate=9000),
         PricingItem(code="LF-FROST-SQM", name="Window frosting film", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=28000, cost_estimate=12500),
         PricingItem(code="LF-CONTRA-SQM", name="Contra vision print", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=30000, cost_estimate=14000),
+        PricingItem(code="LF-ROLLUP", name="Roll-up banner (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="banner", price=250000, cost_estimate=110000),
+        PricingItem(code="LF-STICKER-A4", name="A4 vinyl stickers, per pack (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="pack", price=4000, cost_estimate=1700),
+        PricingItem(code="LF-STICKER-A5", name="A5 vinyl stickers, per pack (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="pack", price=2500, cost_estimate=1050),
+        PricingItem(code="LF-STICKER-A3", name="A3 vinyl stickers, per pack (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="pack", price=7000, cost_estimate=3000),
+        PricingItem(code="LF-FOAMBOARD", name="Foam board printing (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="board", price=80000, cost_estimate=35000),
+        PricingItem(code="LF-ALU-A1", name="A1 aluminium frame with print (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="frame", price=85000, cost_estimate=38000),
         PricingItem(code="KM-A4-BW", name="A4 black and white document print", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="page", price=150, cost_estimate=55),
         PricingItem(code="KM-A4-COLOR", name="A4 colour document print", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="page", price=650, cost_estimate=260),
         PricingItem(code="KM-FLYER-A5", name="A5 flyer full colour", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="flyer", price=210, cost_estimate=95),
+        PricingItem(code="KM-CARD-50", name="Business cards, 50/pack (price list)", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="pack", price=50000, cost_estimate=21000),
+        PricingItem(code="KM-CARD-100", name="Business cards, 100/pack (price list)", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="pack", price=100000, cost_estimate=42000),
+        PricingItem(code="KM-INVOICE-BOOK", name="Invoice book A5 (price list)", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="book", price=25000, cost_estimate=11000),
+        PricingItem(code="KM-RECEIPT-BOOK", name="Receipt book A5 (price list)", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="book", price=25000, cost_estimate=11000),
         PricingItem(code="FIN-BIND", name="Book binding", category="Finishing", machine_id=machine_by_ref["MCH-BIND-01"].id, unit="book", price=3500, cost_estimate=1200),
         PricingItem(code="SUB-MUG", name="Sublimation mug print", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="mug", price=7500, cost_estimate=3300),
         PricingItem(code="SUB-PLATE", name="Sublimation plate print", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="plate", price=9500, cost_estimate=4300),
+        PricingItem(code="SUB-MUG-NORMAL", name="Normal mug, min order 5 (price list)", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="mug", price=11000, cost_estimate=4800),
+        PricingItem(code="SUB-TRAVEL-JUG", name="Sublimation travelling jug (price list)", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="jug", price=20000, cost_estimate=8800),
         PricingItem(code="UVDTF-PEN", name="UV DTF pen branding", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="pen", price=1800, cost_estimate=650),
         PricingItem(code="UVDTF-KEY", name="UV DTF key holder branding", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="key holder", price=2500, cost_estimate=900),
+        PricingItem(code="UV-A5", name="UV printing A5, 21x29cm (price list)", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="print", price=12500, cost_estimate=5500),
+        PricingItem(code="UV-A3", name="UV printing A3, 29x42cm (price list)", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="print", price=17000, cost_estimate=7500),
+        PricingItem(code="UV-A1", name="UV printing A1, 59x84cm (price list)", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="print", price=35000, cost_estimate=15500),
+        PricingItem(code="EMB-LOGO", name="Embroidery logo, small (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="logo", price=6000, cost_estimate=2500),
+        PricingItem(code="EMB-CAP", name="Embroidery caps (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="cap", price=5000, cost_estimate=2100),
+        PricingItem(code="EMB-FRONT-CHEST", name="Embroidery front chest (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="piece", price=8000, cost_estimate=3400),
+        PricingItem(code="EMB-JACKET", name="Embroidery fishing jacket (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="jacket", price=12000, cost_estimate=5200),
     ]
     db.session.add_all(pricing_items)
     db.session.flush()
@@ -201,6 +234,7 @@ def seed_mock_data(reset=False):
                 copies=tmpl["copies"],
                 progress=progress,
                 due_date=job_date + timedelta(days=random.randint(2, 10)),
+                assigned_staff_id=random.choice(staff_members).id,
                 notes="",
             )
             job.created_at = as_datetime(job_date)
@@ -271,6 +305,7 @@ def seed_mock_data(reset=False):
     payment_receivers = ["Accounts", "Wayne", "Front Desk"]
 
     invoices = []
+    sales = []
     inv_counter = 5001
     current = start_date
     while current <= today:
@@ -331,11 +366,14 @@ def seed_mock_data(reset=False):
                 priority="medium",
                 progress=100,
                 due_date=due_on,
+                assigned_staff_id=random.choice(staff_members).id,
                 notes="Synthetic job created from invoice seed data.",
             )
             invoice_job.created_at = as_datetime(issued_on)
             invoice_job.updated_at = as_datetime(paid_on or min(due_on, today))
             invoice.job = invoice_job
+            db.session.add(invoice_job)
+            db.session.flush()
             for payment in invoice.payments:
                 payment.job = invoice_job
             sync_invoice_amount(invoice)
@@ -348,6 +386,17 @@ def seed_mock_data(reset=False):
                 payment.created_at = as_datetime(payment.paid_on)
                 payment.updated_at = as_datetime(payment.paid_on)
             invoices.append(invoice)
+            # Item 7 (backend priority list): one Sale per invoice-backed job,
+            # amount derived (not hand-set) from the same payment/total split
+            # invoice_totals() computes — create_sale_for_job() requires
+            # invoice.job/payments to already be attached, which is why this
+            # call sits after sync_invoice_amount() and the payment.job
+            # assignment above, not before.
+            sale = create_sale_for_job(invoice_job, description=invoice.title, notes="Seeded from invoice data.")
+            db.session.add(sale)
+            sale.created_at = invoice.created_at
+            sale.updated_at = invoice.updated_at
+            sales.append(sale)
             inv_counter += 1
         next_month = (current.replace(day=28) + timedelta(days=4)).replace(day=1)
         current = next_month
@@ -360,6 +409,20 @@ def seed_mock_data(reset=False):
     # Media = banner vinyl; SignFit Installations = mounting/installation labour). Templates
     # with no natural vendor fit (utilities, fuel reimbursement, in-house maintenance/technician
     # work) legitimately omit vendor_name — not every expense should be forced onto a vendor.
+    # ExpenseCategory is an additive lookup table matched by name (see model
+    # docstring) — Expense.category stays free text, this doesn't replace it.
+    expense_categories = [
+        ExpenseCategory(name="Materials", vendor_related=True, notes="Paper, card stock, banner vinyl, sublimation blanks."),
+        ExpenseCategory(name="Ink & Consumables", vendor_related=True, notes="Ink sets, DTF powder/film, UV adhesive laminate."),
+        ExpenseCategory(name="Installation", vendor_related=True, notes="On-site mounting and branding installation labour."),
+        ExpenseCategory(name="Maintenance", vendor_related=False, notes="In-house technician work, service kits, drum units."),
+        ExpenseCategory(name="Utilities", vendor_related=False, notes="Electricity, water, prepaid tokens."),
+        ExpenseCategory(name="Transport", vendor_related=False, notes="Fuel reimbursement, vehicle hire."),
+        ExpenseCategory(name="Petty Cash", vendor_related=False, notes="Mirrored expenses generated by PettyCash top-ups and cash-in-hand spend."),
+    ]
+    db.session.add_all(expense_categories)
+    db.session.flush()
+
     expense_templates = [
         {"category": "Materials", "title": "SRA3 card stock and matte laminate", "amount_range": (280000, 450000), "submitted_by": "Production", "vendor_name": "Paperline Supplies"},
         {"category": "Ink & Consumables", "title": "CMYK large-format ink set", "amount_range": (500000, 750000), "submitted_by": "Print Room", "vendor_name": "InkPro Malawi"},
@@ -409,6 +472,55 @@ def seed_mock_data(reset=False):
         current = next_month
 
     db.session.add_all(expenses)
+    db.session.flush()
+
+    # ── PETTY CASH: ~2 top-ups + ~2 staff spends per month, via the real
+    # record_petty_cash_entry() helper (services/petty_cash.py) rather than
+    # hand-built PettyCash/Expense rows — this keeps the mirrored-Expense
+    # side effect correct (top_up and sales_cash_used both create a linked
+    # Expense row in the real code, despite the model docstring's older
+    # claim that top_up doesn't; the code, not the docstring, is what
+    # petty_cash_balance() actually relies on, so seeding follows the code).
+    petty_cash_entries = []
+    current = start_date
+    while current <= today:
+        month_end = (current.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        month_end = min(month_end, today)
+        pc_count = random.randint(3, 5)
+        used_days = spread_days(current, month_end, pc_count, force_first=current == start_date)
+        for i, day_offset in enumerate(used_days):
+            pc_date = current + timedelta(days=day_offset)
+            if pc_date > today:
+                break
+            staff_member = random.choice(staff_members)
+            if i % 2 == 0:
+                entry = record_petty_cash_entry(
+                    "top_up",
+                    round(random.randint(50000, 150000) / 5000) * 5000,
+                    staff_id=staff_member.id,
+                    notes="Monthly petty cash top-up.",
+                    submitted_by="Accounts",
+                    expense_date=pc_date,
+                )
+            else:
+                entry = record_petty_cash_entry(
+                    "staff_expense",
+                    round(random.randint(5000, 40000) / 1000) * 1000,
+                    staff_id=staff_member.id,
+                    notes=random.choice([
+                        "Airtime and data for client follow-ups.",
+                        "Tea and office refreshments.",
+                        "Small tools and stationery top-up.",
+                        "Bike taxi fare for urgent delivery.",
+                    ]),
+                    submitted_by=staff_member.name,
+                    expense_date=pc_date,
+                )
+            entry.created_at = as_datetime(pc_date)
+            entry.updated_at = as_datetime(pc_date)
+            petty_cash_entries.append(entry)
+        next_month = (current.replace(day=28) + timedelta(days=4)).replace(day=1)
+        current = next_month
 
     # ── ADVANCES: ~3–5 per month Apr 2026 → today ───────────────────────────
     advance_templates = [
@@ -460,6 +572,221 @@ def seed_mock_data(reset=False):
     db.session.add_all(advances)
     db.session.flush()
 
+    # ── PROPOSALS: draft/sent/accepted/declined, mirroring the real
+    # accept_proposal() conversion flow (routes/proposals.py) for accepted
+    # ones rather than hand-setting converted_invoice_id, so the
+    # uselist=False one-to-one Invoice.source_proposal relationship (see
+    # dev-log.md incident notes) is exercised the same way production does.
+    proposal_line_pools = [
+        [
+            {"description": "Corporate rebrand: business cards", "quantity": 500, "unit": "cards", "unit_price": 500},
+            {"description": "Letterhead and envelope design", "quantity": 1, "unit": "service", "unit_price": 65000},
+        ],
+        [
+            {"description": "Product launch banners x3", "quantity": 3, "unit": "banners", "unit_price": 250000},
+            {"description": "A4 flyers for launch event", "quantity": 2000, "unit": "flyers", "unit_price": 210},
+        ],
+        [
+            {"description": "Branded staff uniforms (embroidered)", "quantity": 40, "unit": "pieces", "unit_price": 8000},
+        ],
+        [
+            {"description": "Annual report design and print", "quantity": 250, "unit": "booklets", "unit_price": 4800},
+        ],
+        [
+            {"description": "Trade show gift mugs and pens", "quantity": 200, "unit": "sets", "unit_price": 9200},
+        ],
+        [
+            {"description": "Window frosting for new branch", "quantity": 18, "unit": "panels", "unit_price": 28000},
+            {"description": "Site survey and installation", "quantity": 1, "unit": "service", "unit_price": 140000},
+        ],
+    ]
+    proposal_titles = [
+        "Corporate rebrand package", "Product launch print package", "Staff uniform branding",
+        "Annual report design & print", "Trade show merchandise package", "Branch fit-out signage",
+    ]
+    proposal_statuses = ["draft", "sent", "sent", "accepted", "accepted", "declined"]
+
+    proposals = []
+    prop_counter = 1
+    current = start_date
+    while current <= today:
+        month_end = (current.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        month_end = min(month_end, today)
+        prop_count = random.randint(2, 4)
+        used_days = spread_days(current, month_end, prop_count, force_first=current == start_date)
+        for day_offset in used_days:
+            issued_on = current + timedelta(days=day_offset)
+            if issued_on > today:
+                break
+            client = random.choice(clients)
+            line_items = random.choice(proposal_line_pools)
+            status = random.choice(proposal_statuses)
+            valid_until = issued_on + timedelta(days=random.randint(14, 30))
+            staff_member = random.choice(staff_members)
+
+            proposal = Proposal(
+                proposal_ref=f"PROP-{prop_counter:04d}",
+                client_id=client.id,
+                client_name=client.name,
+                title=random.choice(proposal_titles),
+                status=status if status != "accepted" else "draft",  # set to accepted only after conversion below, matching accept_proposal()'s own ordering
+                currency="MWK",
+                valid_until=valid_until,
+                contact=client.phone,
+                priority=random.choice(priorities),
+                assigned_staff_id=staff_member.id,
+                prepared_by=staff_member.name,
+                notes="Prices valid for the period stated above. 50% deposit required to commence production.",
+            )
+            apply_proposal_line_items(proposal, line_items)
+            proposal.created_at = as_datetime(issued_on)
+            proposal.updated_at = as_datetime(issued_on)
+            for item in proposal.line_items:
+                item.created_at = as_datetime(issued_on)
+                item.updated_at = as_datetime(issued_on)
+            db.session.add(proposal)
+            db.session.flush()
+
+            if status == "accepted":
+                converted_job = Job(
+                    job_ref=f"JOB-PROP-{prop_counter}",
+                    client_id=proposal.client_id,
+                    client_name=proposal.client_name,
+                    title=proposal.title,
+                    status="completed",
+                    priority=proposal.priority,
+                    progress=100,
+                    total_count=len(proposal.line_items),
+                    due_date=proposal.valid_until,
+                    assigned_staff_id=proposal.assigned_staff_id,
+                    notes=proposal.notes,
+                )
+                converted_invoice = create_invoice_for_job(
+                    converted_job,
+                    f"INV-PROP-{prop_counter}",
+                    [
+                        {"description": item.description, "quantity": float(item.quantity), "unit": item.unit, "unit_price": float(item.unit_price)}
+                        for item in proposal.line_items
+                    ],
+                    discount_amount=proposal.discount_amount,
+                    currency=proposal.currency,
+                    notes=proposal.notes,
+                )
+                # create_invoice_for_job() hardcodes issued_on=date.today() (real
+                # "today" at call time) since in production a proposal is accepted
+                # whenever a user clicks the button — there's no historical date to
+                # use. For seeding, that would bunch every converted invoice on the
+                # actual seed-run date instead of spreading across the window, so
+                # it's overridden here to a date shortly after the proposal was
+                # issued instead, matching how the rest of this file backdates data.
+                converted_paid_on = valid_until + timedelta(days=random.randint(1, 5)) if valid_until + timedelta(days=random.randint(1, 5)) <= today else None
+                converted_issued = min(valid_until, today)
+                converted_invoice.issued_on = converted_issued
+                converted_invoice.due_on = converted_issued + timedelta(days=14)
+                converted_job.created_at = as_datetime(converted_issued)
+                converted_job.updated_at = as_datetime(converted_paid_on or converted_issued)
+                converted_invoice.created_at = as_datetime(converted_issued)
+                converted_invoice.updated_at = as_datetime(converted_paid_on or converted_issued)
+                if converted_paid_on:
+                    apply_payments(converted_invoice, [{"amount": float(sum(i.amount for i in proposal.line_items) - proposal.discount_amount), "method": random.choice(payment_methods), "paid_on": converted_paid_on, "received_by": random.choice(payment_receivers)}])
+                    sync_invoice_amount(converted_invoice)
+                    for payment in converted_invoice.payments:
+                        payment.job = converted_job
+                        payment.created_at = as_datetime(converted_paid_on)
+                        payment.updated_at = as_datetime(converted_paid_on)
+                db.session.add(converted_job)
+                db.session.add(converted_invoice)
+                db.session.flush()
+                proposal.status = "accepted"
+                proposal.converted_invoice_id = converted_invoice.id
+                converted_sale = create_sale_for_job(converted_job, description=proposal.title, notes="Seeded from accepted-proposal conversion.")
+                db.session.add(converted_sale)
+                converted_sale.created_at = converted_invoice.created_at
+                converted_sale.updated_at = converted_invoice.updated_at
+                sales.append(converted_sale)
+            else:
+                proposal.status = status
+
+            proposals.append(proposal)
+            prop_counter += 1
+        next_month = (current.replace(day=28) + timedelta(days=4)).replace(day=1)
+        current = next_month
+
+    # (sales are added to the session individually at creation time above,
+    # both in the invoice loop and in the accepted-proposal conversion block)
+
+    # ── LOYAL CLIENT, BIG ORDER, REAL DISCOUNT ──────────────────────────────
+    # Nyasa Fresh Foods appears repeatedly across the seeded invoice pool above
+    # (chosen at random per invoice like every other client) — this adds one
+    # additional, clearly-oversized invoice for them with a substantial
+    # discount_amount, so the "loyal client gets a deal" case the user asked
+    # to see is unambiguous in the UI rather than something you have to
+    # infer from a pattern across many rows.
+    loyal_client = next(c for c in clients if c.name == "Nyasa Fresh Foods")
+    loyal_issued_on = today - timedelta(days=6)
+    loyal_due_on = loyal_issued_on + timedelta(days=14)
+    loyal_line_items = [
+        {"description": "Branded retail shelf stickers, full store rollout", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-STICKER-SQM"].id, "quantity": 60, "unit": "sqm", "unit_price": 22000},
+        {"description": "Freezer and cold-room decals, all branches", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "quantity": 48, "unit": "decals", "unit_price": 9500},
+        {"description": "Promotional rollup banners x6", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-ROLLUP"].id, "quantity": 6, "unit": "banners", "unit_price": 250000},
+        {"description": "Staff branded caps (embroidered)", "product_type": "Embroidery", "machine_id": machine_by_ref["MCH-EMB-01"].id, "pricing_item_id": pricing_by_code["EMB-CAP"].id, "quantity": 60, "unit": "caps", "unit_price": 5000},
+    ]
+    loyal_subtotal = sum(li["unit_price"] * li["quantity"] for li in loyal_line_items)
+    loyal_discount = round(loyal_subtotal * 0.12 / 1000) * 1000  # 12% loyalty discount, rounded to a clean thousand
+    loyal_invoice = Invoice(
+        invoice_ref="INV-LOYAL-0001",
+        client_id=loyal_client.id,
+        client_name=loyal_client.name,
+        title="Full-store rebrand rollout — loyalty pricing",
+        status="paid",
+        discount_amount=loyal_discount,
+        tax_rate=0,
+        currency="MWK",
+        issued_on=loyal_issued_on,
+        due_on=loyal_due_on,
+        payment_terms="14 days",
+        notes=f"Loyal client (repeat orders since {start_date.strftime('%B %Y')}). 12% loyalty discount applied to full-store rollout.",
+    )
+    apply_line_items(loyal_invoice, loyal_line_items)
+    loyal_job = Job(
+        job_ref="JOB-LOYAL-0001",
+        client_id=loyal_client.id,
+        client_name=loyal_client.name,
+        title=loyal_invoice.title,
+        service_category="Backfilled Invoice Job",
+        status="finished",
+        priority="high",
+        progress=100,
+        due_date=loyal_due_on,
+        assigned_staff_id=staff_members[0].id,
+        notes="Full-store rollout for a repeat client — see invoice notes for loyalty discount.",
+    )
+    loyal_invoice.job = loyal_job
+    loyal_paid_on = loyal_issued_on + timedelta(days=3)
+    apply_payments(loyal_invoice, [{"amount": float(loyal_subtotal - loyal_discount), "method": "bank_transfer", "paid_on": loyal_paid_on, "received_by": "Accounts"}])
+    for payment in loyal_invoice.payments:
+        payment.job = loyal_job
+        payment.created_at = as_datetime(loyal_paid_on)
+        payment.updated_at = as_datetime(loyal_paid_on)
+    sync_invoice_amount(loyal_invoice)
+    loyal_job.created_at = as_datetime(loyal_issued_on)
+    loyal_job.updated_at = as_datetime(loyal_paid_on)
+    loyal_invoice.created_at = as_datetime(loyal_issued_on)
+    loyal_invoice.updated_at = as_datetime(loyal_paid_on)
+    for item in loyal_invoice.line_items:
+        item.created_at = as_datetime(loyal_issued_on)
+        item.updated_at = as_datetime(loyal_paid_on)
+    db.session.add(loyal_job)
+    db.session.add(loyal_invoice)
+    db.session.flush()
+    loyal_sale = create_sale_for_job(loyal_job, description=loyal_invoice.title, notes="Loyalty-discount rollout order.")
+    loyal_sale.created_at = loyal_invoice.created_at
+    loyal_sale.updated_at = loyal_invoice.updated_at
+    db.session.add(loyal_sale)
+    invoices.append(loyal_invoice)
+    jobs.append(loyal_job)
+    sales.append(loyal_sale)
+
     # ── AUDIT LOGS ─────────────────────────────────────────────────────────
     audit_entries = [
         AuditLog(actor="system", action="Seeded professional print dashboard mock data", entity_type="system", created_at=as_datetime(start_date)),
@@ -484,4 +811,8 @@ def seed_mock_data(reset=False):
         "invoices": len(invoices),
         "expenses": len(expenses),
         "advances": len(advances),
+        "proposals": len(proposals),
+        "sales": len(sales),
+        "petty_cash_entries": len(petty_cash_entries),
+        "expense_categories": len(expense_categories),
     }

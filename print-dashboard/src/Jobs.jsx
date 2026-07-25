@@ -49,6 +49,7 @@ const mapJob = job => ({
   due_date: job.due_date,
   priority: job.priority || 'medium',
   machine_name: job.machine_name,
+  machine_id: job.machine_id,
   service_category: job.service_category,
   // Item 7/8 (Prompt 7): real staff assignment. Backend field
   // (Job.assigned_staff_id -> Staff.name) is being added alongside this
@@ -87,7 +88,8 @@ function jobPayload(form, fallback = {}) {
     title: form.title || fallback.title || 'New print job',
     priority: form.priority || fallback.priority || 'medium',
     due_date: form.due || fallback.due_date || null,
-    service_category: form.printer || fallback.service_category || form.specs?.[0],
+    machine_id: form.machineId || fallback.machine_id || null,
+    service_category: fallback.service_category || form.specs?.[0],
     assigned_staff_id: form.assignedStaffId || fallback.assignedStaffId || null,
     notes: [form.notes, form.specs?.join(', ')].filter(Boolean).join('\n'),
     line_items: lineItems,
