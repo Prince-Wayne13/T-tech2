@@ -49,7 +49,7 @@ def seed_mock_data(reset=False):
         return {"seeded": False, "message": "Mock data already exists."}
 
     today = date.today()
-    start_date = date(2025, 1, 1)
+    start_date = date(2026, 4, 1)
 
     clients = [
         Client(name="Mwai Events", phone="+265 888 214 100", email="events@mwai.example", address="Blantyre CBD"),
@@ -139,7 +139,7 @@ def seed_mock_data(reset=False):
     db.session.flush()
     pricing_by_code = {item.code: item for item in pricing_items}
 
-    # ── JOBS: ~4–6 per month Jan 2025 → today ──────────────────────────────
+    # ── JOBS: ~10–16 per month Apr 2026 → today ─────────────────────────────
     job_templates = [
         {"title": "Event posters and stage backdrop", "machine_ref": "MCH-LF-01", "category": "Large Format", "pages": 1, "copies": 250},
         {"title": "Retail shelf stickers and freezer decals", "machine_ref": "MCH-LF-01", "category": "Large Format", "pages": 4, "copies": 1800},
@@ -173,7 +173,7 @@ def seed_mock_data(reset=False):
     while current <= today:
         month_end = (current.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
         month_end = min(month_end, today)
-        jobs_this_month = random.randint(4, 6)
+        jobs_this_month = random.randint(10, 16)
         used_days = spread_days(current, month_end, jobs_this_month, force_first=current == start_date)
         for day_offset in used_days:
             job_date = current + timedelta(days=day_offset)
@@ -212,7 +212,7 @@ def seed_mock_data(reset=False):
 
     db.session.add_all(jobs)
 
-    # ── INVOICES: ~3–5 per month Jan 2025 → today ──────────────────────────
+    # ── INVOICES: ~8–13 per month Apr 2026 → today ──────────────────────────
     invoice_line_pools = [
         [
             {"description": "A4 full-colour event posters", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-A4-COLOR"].id, "quantity": 250, "unit": "prints", "unit_price": 1850},
@@ -276,7 +276,7 @@ def seed_mock_data(reset=False):
     while current <= today:
         month_end = (current.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
         month_end = min(month_end, today)
-        invoices_this_month = random.randint(3, 5)
+        invoices_this_month = random.randint(8, 13)
         used_days = spread_days(current, month_end, invoices_this_month, force_first=current == start_date)
         for day_offset in used_days:
             issued_on = current + timedelta(days=day_offset)
@@ -354,7 +354,7 @@ def seed_mock_data(reset=False):
 
     db.session.add_all(invoices)
 
-    # ── EXPENSES: ~3–5 per month Jan 2025 → today ──────────────────────────
+    # ── EXPENSES: ~8–12 per month Apr 2026 → today ──────────────────────────
     # vendor_name maps each template to one of the 4 seeded Vendor rows by category fit
     # (Paperline Supplies = paper/card stock; InkPro Malawi = ink/consumables; FlexMaster
     # Media = banner vinyl; SignFit Installations = mounting/installation labour). Templates
@@ -382,7 +382,7 @@ def seed_mock_data(reset=False):
     while current <= today:
         month_end = (current.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
         month_end = min(month_end, today)
-        exps_this_month = random.randint(3, 5)
+        exps_this_month = random.randint(8, 12)
         used_days = spread_days(current, month_end, exps_this_month, force_first=current == start_date)
         for day_offset in used_days:
             exp_date = current + timedelta(days=day_offset)
@@ -410,7 +410,7 @@ def seed_mock_data(reset=False):
 
     db.session.add_all(expenses)
 
-    # ── ADVANCES: ~1–2 per month Jan 2025 → today ──────────────────────────
+    # ── ADVANCES: ~3–5 per month Apr 2026 → today ───────────────────────────
     advance_templates = [
         {"recipient": "Field Team", "notes": "Transport and installation consumables."},
         {"recipient": "Design Lead", "notes": "Client proofing materials."},
@@ -426,7 +426,7 @@ def seed_mock_data(reset=False):
     while current <= today:
         month_end = (current.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
         month_end = min(month_end, today)
-        adv_count = random.randint(1, 2)
+        adv_count = random.randint(3, 5)
         used_days = spread_days(current, month_end, adv_count, force_first=current == start_date)
         for day_offset in used_days:
             issued_on = current + timedelta(days=day_offset)

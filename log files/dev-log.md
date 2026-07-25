@@ -976,5 +976,80 @@ established process requirement.
 * `InvoicePDF.jsx`'s new design has not been visually confirmed against a rendered PDF output —
   see verification note above.
 
+## 2026-07-25 12:55 UTC — seed.py: mock data window moved to Apr 2026 → today, per-month volume increased — sekinna claude
+
+**What changed — `print-dashboard/backend/app/seed.py`:**
+* `start_date` changed from `date(2025, 1, 1)` to `date(2026, 4, 1)` — user wanted seeded data to
+  "spread from april 2026 till date" so they could see the new invoice/proposal PDF redesign
+  (previous session, same day) against realistic-looking data. `today = date.today()` was already
+  the existing end bound, unchanged.
+* Per-month record counts increased across all four seeded generators, since the window shrank
+  from ~19 months to ~4 months and the user explicitly asked for volume to be scaled up rather
+  than shrink proportionally (asked directly, user chose "increase volume so dashboard still
+  looks busy" over "keep same per-month rate"):
+  - Jobs: `random.randint(4, 6)` → `random.randint(10, 16)` per month
+  - Invoices: `random.randint(3, 5)` → `random.randint(8, 13)` per month
+  - Expenses: `random.randint(3, 5)` → `random.randint(8, 12)` per month
+  - Advances: `random.randint(1, 2)` → `random.randint(3, 5)` per month
+* Stale section-header comments (`# ── JOBS: ~4–6 per month Jan 2025 → today`, etc.) updated to
+  match the new date range and counts on all four sections — these are documentation-only, no
+  behavioural effect, but were wrong after the date/volume change and would have misled the next
+  session reading this file.
+* Due-date-max-14-days requirement: **no code change needed here.** Invoice generation already had
+  `due_on = issued_on + timedelta(days=14)` hardcoded before this session — read and confirmed
+  against the real file before touching anything, this logic was already correct and untouched.
+
+**Explicitly not changed this session (user was asked directly, declined):**
+* Proposal/ProposalLineItem seeding remains entirely absent from `seed.py` — `Proposal` and
+  `ProposalLineItem` are imported at the top of the file but never instantiated anywhere, meaning
+  `Proposal.query.first()` will return nothing after a fresh seed. This was flagged explicitly and
+  the user chose "No, just fix the date range on existing data" — so the new Quotation/Proposal
+  PDF design from the prior session's commit cannot currently be exercised against seeded data,
+  only against manually-created proposals through the UI. Flagging again here as still-open below.
+* `random.seed(20250101)` left unchanged — this is an RNG determinism seed constant (produces
+  reproducible random output), not a reference to the old Jan-2025 date window, so it does not
+  need to track `start_date`.
+* No model/route/service files touched — this was a pure seed-data change.
+
+**Reference material used:** user attached a photo of a real physical T-Tech invoice/receipt book
+page (name: "T-TECH SUPPLIERS & GENERAL DEALERS LTD", fields: Date, Name, Address, line items,
+Sub Total, signature) — used only to confirm the seeded/rendered business name and general
+document shape already in use elsewhere in this codebase are consistent with the real business's
+actual paperwork; no new fields or structural changes were derived from it for this seed-data
+task, since it was supplied after the PDF redesign (previous session) had already matched that
+same business name independently.
+
+**Verification performed (genuine, not heuristic — this file is plain Python, unlike the JSX file
+touched in the prior session):**
+* `python3 -m py_compile seed.py` — passed, real syntax parse, not a bracket-balance heuristic.
+* Installed the project's actual `requirements.txt` into a fresh venv (network egress to PyPI was
+  available this session) and ran `flask reset-mock-db` against a real throwaway local SQLite
+  database — full end-to-end execution, not just a static check. Result:
+  `{'seeded': True, 'clients': 20, 'vendors': 4, 'machines': 8, 'pricing_items': 15, 'jobs': 48,
+  'invoices': 43, 'expenses': 44, 'advances': 17}` — ran without error.
+* Queried the resulting database directly to confirm the actual requirement, not just that it ran:
+  job `created_at` range was exactly `2026-04-01` to `2026-07-25`; invoice `issued_on` range was
+  `2026-04-01` to `2026-07-23`; zero jobs or invoices fell outside the `2026-04-01`–`2026-07-25`
+  window; every invoice's `due_on - issued_on` gap was exactly 14 days (checked the top 5 by gap
+  size, all exactly 14.0, none higher). This is confirmed-against-real-execution, the strongest
+  confidence level available.
+* Test database deleted after verification (`instance/ttech_dev.db` removed) — not committed, no
+  stray state left in the repo.
+
+**Still open (carried forward, not touched this session):**
+* Everything previously listed as still-open (`Vendor.balance` migration decision, booked-vs-cash
+  `build_financial_report()` fields, `Proposal.priority`/`assigned_staff_id` backend columns +
+  `accept_proposal()` wiring, `pages/Jobs.jsx` orphaned-file cleanup decision) is unchanged.
+* **`seed.py` still seeds zero `Proposal` rows** — explicitly declined this session, carried
+  forward from the prior entry's still-open list. The new Quotation PDF design (prior session)
+  has no seeded proposal data to render against; only manually-created proposals via the UI will
+  exercise it until this is addressed.
+* The full Proposal→Job→Invoice backend restructure from
+  `proposal-job-invoice-restructure-prompt.md` remains entirely unimplemented, unchanged from
+  the prior entry.
+* `InvoicePDF.jsx`'s redesigned output (prior session) still has not been visually confirmed
+  against a rendered PDF — this session's verification covered the seed data only, not the PDF
+  rendering pipeline together with real seeded records.
+
 <!-- New entries go above this line, most recent first -->
 <!-- New entries go above this line, most recent first -->
