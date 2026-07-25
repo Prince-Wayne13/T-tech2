@@ -74,8 +74,35 @@ export default function Sales() {
       .finally(() => setLoading(false));
   };
 
+  // Background refresh used by the polling interval below — deliberately
+  // does NOT touch `loading`, since RegisterCard swaps the entire row list
+  // for a "Loading records..." placeholder whenever loading is true. Doing
+  // that every 45 seconds would make the whole list flash/disappear during
+  // a routine background refresh, which is worse than the staleness this
+  // is meant to fix. Errors are swallowed quietly here too — a transient
+  // failed background poll shouldn't put a visible error banner over data
+  // that was loading fine a moment ago; loadSales() above still surfaces
+  // errors normally for the actual initial page load.
+  const refreshSalesQuietly = () => {
+    api.sales('?per_page=200')
+      .then(data => setSales((data.items || []).map(mapSale)))
+      .catch(() => {});
+  };
+
   useEffect(() => {
     loadSales();
+  }, []);
+
+  // Sales.amount is derived server-side from each linked Job's Invoice
+  // payment status (services/sales.py) and only re-syncs when a payment is
+  // recorded/edited from the Jobs page — a separate page/component with no
+  // shared state. Without polling, this page would keep showing whatever it
+  // loaded on mount even after a payment changes a Sale's amount elsewhere.
+  // Same setInterval/clearInterval pattern as App.jsx/Reports.jsx's slide
+  // rotation, just refetching instead of rotating.
+  useEffect(() => {
+    const i = setInterval(refreshSalesQuietly, 45000);
+    return () => clearInterval(i);
   }, []);
 
   const filtered = sales.filter(sale => {

@@ -426,9 +426,9 @@ export default function Jobs() {
         onClose={() => setPreview(null)}
         actions={preview && (
           <>
-            <button className="filter-btn" style={{ background: '#3A506B', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => setProgressJob(preview)}>Update Progress</button>
-            <button className="filter-btn" style={{ background: '#3A506B', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => setPaymentRecord(preview)}>Record Payment</button>
-            <button className="filter-btn" style={{ background: '#3A506B', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => setEditRecord(preview)}>Edit Job</button>
+            <button className="filter-btn" style={{ background: '#3A506B', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => { setProgressJob(preview); setPreview(null); }}>Update Progress</button>
+            <button className="filter-btn" style={{ background: '#3A506B', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => { setPaymentRecord(preview); setPreview(null); }}>Record Payment</button>
+            <button className="filter-btn" style={{ background: '#3A506B', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => { setEditRecord(preview); setPreview(null); }}>Edit Job</button>
             {preview.status === 'in_session' && (
               <button className="filter-btn" style={{ background: '#3A506B', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => { handleMarkFinished(preview); setPreview(null); }}>Mark Finished</button>
             )}

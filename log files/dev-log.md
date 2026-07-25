@@ -1226,5 +1226,73 @@ and caught within this same session):**
   script once data integrity was independently confirmed. Flagging in case a future session
   wants full silence in the logs.
 
+## 2026-07-25 15:20 UTC — Jobs page: preview modal stayed open behind Edit/Progress/Payment modals — sekinna claude
+
+**Bug reported by user:** clicking "Edit Job" from the Job Preview modal didn't close the preview
+— it stayed open underneath the edit modal.
+
+**Root cause, confirmed by reading `Jobs.jsx` before touching anything:** the preview modal's
+action buttons were inconsistent. "Mark Finished" correctly did
+`{ handleMarkFinished(preview); setPreview(null); }` — closing the preview after acting. "Update
+Progress", "Record Payment", and "Edit Job" only called their respective `setXRecord(preview)`
+and never `setPreview(null)` — so all three left the preview open, not just the one the user
+happened to notice.
+
+**Fix — `print-dashboard/src/Jobs.jsx`:** added `setPreview(null)` to all three buttons, matching
+the existing "Mark Finished" pattern exactly.
+
+**Checked for the same bug elsewhere before calling this done:** `Proposals.jsx`'s Edit button
+lives directly on the row (`onEdit={setEditRecord}` passed to `ProposalRow`), not inside its
+preview modal's action bar, so it was never affected. `Invoices.jsx`'s preview modal has no
+`actions` prop with an Edit button at all. Confirmed via grep — this bug was specific to
+`Jobs.jsx`'s preview modal only, now fixed.
+
+**Verification:** reviewed the exact diff line-by-line (3 lines changed, isolated, no other code
+touched) — no JS/JSX parser available in this environment, same known limitation as prior
+sessions' entries, so direct diff inspection was used instead, same as those entries' approach.
+
+## 2026-07-25 20:25 UTC — Sales page didn't reflect payments recorded from the Jobs page — sekinna claude
+
+**User report:** updating a payment on a job didn't show up on the Sales page.
+
+**Investigated the backend first, confirmed it was already correct before touching anything:**
+`POST /api/jobs/<id>/payments` and `PUT /api/jobs/<id>/payments/<id>` (routes/jobs.py) both call
+`add_job_payment`/`update_job_payment` (services/jobs.py), which already call
+`_sync_linked_sale(job)` internally, and the route response already returns the freshly-synced
+`sales` array. No backend bug — `Sale.amount` was already being correctly re-derived on every
+payment change.
+
+**Actual root cause: `sales.jsx` (the Sales page) only fetches data once, in a `useEffect` with an
+empty dependency array, on mount.** It has no way of knowing a payment was recorded from the Jobs
+page — a separate, unconnected component with no shared state or event between them. It was
+simply showing whatever it loaded the last time someone visited the page.
+
+**User was asked directly** whether they wanted: refetch-on-page-visit only, periodic background
+polling, or both. Chose periodic polling (~30-60s window) — implemented at 45 seconds.
+
+**Fix — `print-dashboard/src/sales.jsx`:**
+* Added a `setInterval`/`clearInterval` polling `useEffect`, same pattern already used in
+  `App.jsx` and `Reports.jsx` for their slide-rotation timers — checked both before writing this,
+  matched the existing convention rather than introducing a new one.
+* Deliberately did **not** reuse the existing `loadSales()` function for the poll tick. `loadSales`
+  sets `loading: true` at the start of every call, and `RegisterCard` (components/ModuleStandard.jsx)
+  fully replaces the visible row list with a "Loading records..." placeholder whenever `loading`
+  is true. Polling with `loadSales` directly would have made the entire sales list flash/disappear
+  every 45 seconds during normal use — worse than the staleness bug being fixed. Added a separate
+  `refreshSalesQuietly()` that updates `sales` state without touching `loading`, and swallows
+  fetch errors silently (a single failed background poll shouldn't put an error banner over data
+  that was displaying fine a moment before) — `loadSales()` is still used for the actual initial
+  page load and still surfaces errors normally there.
+
+**Verification:** reviewed the full diff — additive only, nothing else in the file touched, no
+JSX parser available in this environment (same known limitation as prior entries), so confirmed
+by direct read-through rather than an automated parse.
+
+**Still open:** this is polling, not push-based real-time sync — a payment recorded on the Jobs
+page won't appear on an already-open Sales page for up to ~45 seconds, not instantly. If the user
+later wants instant cross-page sync, that would need a shared state store, a websocket/SSE
+channel, or a "refetch on window focus" listener — none of which were requested or built this
+session; flagging as a reasonable future improvement, not a gap in the requested fix.
+
 <!-- New entries go above this line, most recent first -->
 <!-- New entries go above this line, most recent first -->
