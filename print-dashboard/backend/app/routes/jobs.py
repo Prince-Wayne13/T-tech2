@@ -11,7 +11,9 @@ from ..services.jobs import (
     serialize_job,
     update_job_payment,
     update_job_progress,
+    validate_job_machine_assignment,
 )
+from ..services.machines import IncompatibleMachineError
 from ..services.invoices import apply_line_items, serialize_invoice, sync_invoice_amount
 from ..services.sales import serialize_sale
 from ..utils import parse_date
@@ -38,11 +40,17 @@ def list_jobs():
 @bp.post("")
 def create_job():
     data = request.get_json() or {}
+    try:
+        validate_job_machine_assignment(data.get("machine_id"), data.get("required_capability_id"))
+    except IncompatibleMachineError as error:
+        return jsonify({"error": str(error)}), 400
+
     job = Job(
         job_ref=data.get("job_ref") or next_job_ref(),
         machine_id=data.get("machine_id"),
         client_id=data.get("client_id"),
         service_category=data.get("service_category"),
+        required_capability_id=data.get("required_capability_id"),
         client_name=data["client_name"],
         title=data["title"],
         status=normalise_job_status(data.get("status", ACTIVE_STATUS)),
@@ -83,7 +91,20 @@ def get_job(job_id):
 def update_job(job_id):
     job = Job.query.get_or_404(job_id)
     data = request.get_json() or {}
-    for field in ["machine_id", "service_category", "client_name", "title", "status", "priority", "pages", "copies", "progress", "completed_count", "total_count", "assigned_staff_id", "notes"]:
+
+    # Priority 2: validate against whichever machine_id/required_capability_id
+    # will be in effect after this update - falling back to the job's current
+    # values for whichever side isn't being changed in this request, so e.g.
+    # changing only the machine still gets checked against the job's existing
+    # required capability.
+    effective_machine_id = data.get("machine_id", job.machine_id)
+    effective_capability_id = data.get("required_capability_id", job.required_capability_id)
+    try:
+        validate_job_machine_assignment(effective_machine_id, effective_capability_id)
+    except IncompatibleMachineError as error:
+        return jsonify({"error": str(error)}), 400
+
+    for field in ["machine_id", "service_category", "required_capability_id", "client_name", "title", "status", "priority", "pages", "copies", "progress", "completed_count", "total_count", "assigned_staff_id", "notes"]:
         if field in data:
             setattr(job, field, normalise_job_status(data[field]) if field == "status" else data[field])
     if "due_date" in data:

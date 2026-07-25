@@ -243,6 +243,98 @@ def ensure_proposal_line_item_quantity_schema():
     return changed
 
 
+def ensure_machine_capability_schema():
+    """Priority 2 (Machine Management): capabilities table, the
+    machine_capabilities join table, ProductionMachine.available/
+    unavailable_reason, and Job.required_capability_id.
+
+    db.create_all() already creates the wholly-new tables (capabilities,
+    machine_capabilities) on a fresh database, same as it does for
+    staff/expense_categories/etc in ensure_prompt4_schema()'s docstring -
+    what it can't do is ALTER an existing production_machines/jobs table to
+    add the new columns, which is what this function covers, following the
+    same idempotent column-check pattern as the rest of this file.
+    """
+    changed = []
+    machine_columns = _columns("production_machines")
+    job_columns = _columns("jobs")
+
+    if "available" not in machine_columns:
+        _add_column("production_machines", "available BOOLEAN NOT NULL DEFAULT 1")
+        changed.append("production_machines.available")
+
+    if "unavailable_reason" not in machine_columns:
+        _add_column("production_machines", "unavailable_reason VARCHAR(255)")
+        changed.append("production_machines.unavailable_reason")
+
+    if "required_capability_id" not in job_columns:
+        _add_column("jobs", "required_capability_id INTEGER REFERENCES capabilities(id)")
+        changed.append("jobs.required_capability_id")
+
+    db.session.commit()
+    return changed
+
+
+def ensure_default_capabilities_seed():
+    """Seed the capability set from the workshop's actual machine lineup
+    (Large Format = vinyl stickers/banners, DTF = apparel transfers, etc.),
+    matching what's already in seed.py's DEFAULT_MACHINES/machines list, and
+    attach each machine to its matching capability by category so existing
+    databases don't end up with machines that have zero capabilities once
+    this migration runs.
+    """
+    from .models import Capability, ProductionMachine
+
+    defaults = [
+        ("Colour Printing", "Digital Print"),
+        ("Duplex Printing", "Digital Print"),
+        ("A3 Printing", "Digital Print"),
+        ("Document Printing", "Digital Print"),
+        ("Stapling", "Finishing"),
+        ("Book Binding", "Finishing"),
+        ("Cutting & Trimming", "Finishing"),
+        ("Vinyl Stickers", "Large Format"),
+        ("Banner Printing", "Large Format"),
+        ("Contra Vision", "Large Format"),
+        ("Window Frosting", "Large Format"),
+        ("Photo Printing", "Sublimation"),
+        ("Glossy Printing", "Sublimation"),
+        ("Mug & Plate Sublimation", "Sublimation"),
+        ("DTF Apparel Transfer", "DTF Apparel"),
+        ("Cap Branding", "DTF Apparel"),
+        ("UV DTF Hard Surface", "UV DTF"),
+        ("Fabric Embroidery", "Embroidery"),
+    ]
+    existing = {cap.name.lower(): cap for cap in Capability.query.all()}
+    created = []
+    for name, category in defaults:
+        if name.lower() not in existing:
+            capability = Capability(name=name, category=category)
+            db.session.add(capability)
+            existing[name.lower()] = capability
+            created.append(name)
+    db.session.flush()
+
+    # Attach machines to capabilities by category, best-effort - a machine
+    # whose category has no matching default capability above is simply
+    # left alone rather than guessed at.
+    category_to_capabilities = {}
+    for capability in existing.values():
+        category_to_capabilities.setdefault(capability.category, []).append(capability)
+
+    attached = 0
+    for machine in ProductionMachine.query.all():
+        if machine.capabilities:
+            continue
+        candidates = category_to_capabilities.get(machine.category, [])
+        if candidates:
+            machine.capabilities = candidates
+            attached += 1
+
+    db.session.commit()
+    return {"capabilities_created": created, "machines_attached": attached}
+
+
 def ensure_core_staff_seed():
     """Ensure the core staff names exist on databases that predate staff seed data."""
     names = ["Vivienne", "Victor", "Adam", "Chisomo", "Galfken"]
@@ -339,6 +431,12 @@ def run_full_upgrade():
     core_staff = ensure_core_staff_seed()
     job_invoice_schema = ensure_job_invoice_schema()
     payment_invoice_nullable = ensure_payment_invoice_nullable_schema()
+    # Priority 2 (Machine Management): must run after db.create_all() (so the
+    # capabilities/machine_capabilities tables exist) and before any ORM
+    # query touches Job.required_capability_id or ProductionMachine.available,
+    # same ordering requirement documented above for prompt4/staff_assignment.
+    machine_capability_schema = ensure_machine_capability_schema()
+    default_capabilities = ensure_default_capabilities_seed()
     normalized = normalize_legacy_job_statuses()
     backfilled = backfill_invoice_jobs()
     return {
@@ -348,6 +446,8 @@ def run_full_upgrade():
         "proposal_line_item_quantity_schema_changes": proposal_line_item_quantity,
         "core_staff_seeded": core_staff,
         "payment_invoice_nullable_schema_changes": payment_invoice_nullable,
+        "machine_capability_schema_changes": machine_capability_schema,
+        "default_capabilities_seed": default_capabilities,
         "job_invoice_flow": {
             "schema_changes": job_invoice_schema,
             "statuses_normalized": normalized,

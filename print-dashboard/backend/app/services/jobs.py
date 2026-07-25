@@ -1,8 +1,9 @@
 #services/jobs.py
 from datetime import date
 
-from ..models import Invoice, Job, Payment
+from ..models import Invoice, Job, Payment, ProductionMachine
 from ..services.invoices import apply_line_items, decimal_money, next_payment_ref, serialize_invoice, sync_invoice_amount
+from ..services.machines import assert_machine_compatible
 from ..utils import parse_date
 
 # Job fields that stay editable at any status, per prompt item 6
@@ -28,11 +29,28 @@ def job_total(job):
     return decimal_money(job.invoice.amount if job.invoice else 0)
 
 
+def validate_job_machine_assignment(machine_id, required_capability_id):
+    """Priority 2: only compatible machines may be assigned to a Job. If the
+    job carries no required_capability_id (legacy jobs, or jobs created
+    before this system existed), the check is skipped entirely - this only
+    enforces compatibility where the job has actually declared what it
+    needs. Raises IncompatibleMachineError (from services.machines) if the
+    chosen machine doesn't advertise that capability.
+    """
+    if not machine_id:
+        return
+    machine = ProductionMachine.query.get(machine_id)
+    if machine is None:
+        return
+    assert_machine_compatible(machine, required_capability_id)
+
+
 def serialize_job(job):
     data = job.to_dict()
     data["status"] = normalise_job_status(job.status)
     data["machine_name"] = job.machine.name if job.machine else None
     data["machine_category"] = job.machine.category if job.machine else job.service_category
+    data["required_capability_name"] = job.required_capability.name if job.required_capability else None
     # Item 7 (Prompt 7): same null-safe join pattern as machine_name above.
     # This was missing even after Job.assigned_staff_id/assigned_staff were
     # added to the model — Jobs.jsx's mapJob() already reads

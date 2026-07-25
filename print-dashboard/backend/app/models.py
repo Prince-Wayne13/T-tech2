@@ -52,6 +52,29 @@ class Vendor(TimestampMixin, SerializableMixin, db.Model):
     status = db.Column(db.String(30), default="current", index=True)
 
 
+# Priority 2 (Machine Management): a machine can advertise many capabilities,
+# and the same capability (e.g. "Vinyl Stickers") can be offered by several
+# machines - this is a reusable lookup table joined through
+# machine_capabilities, rather than a free-text field repeated per machine.
+# Keeping capability names as rows (not strings scattered across machines)
+# is what makes "which machines can do X" and job-compatibility checks a
+# simple, typo-proof query instead of fuzzy string matching.
+class Capability(TimestampMixin, SerializableMixin, db.Model):
+    __tablename__ = "capabilities"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), unique=True, nullable=False, index=True)
+    category = db.Column(db.String(80), index=True)
+    notes = db.Column(db.Text)
+
+
+machine_capabilities = db.Table(
+    "machine_capabilities",
+    db.Column("machine_id", db.Integer, db.ForeignKey("production_machines.id"), primary_key=True),
+    db.Column("capability_id", db.Integer, db.ForeignKey("capabilities.id"), primary_key=True),
+)
+
+
 class ProductionMachine(TimestampMixin, SerializableMixin, db.Model):
     __tablename__ = "production_machines"
 
@@ -61,8 +84,23 @@ class ProductionMachine(TimestampMixin, SerializableMixin, db.Model):
     category = db.Column(db.String(80), nullable=False, index=True)
     capability = db.Column(db.String(255))
     status = db.Column(db.String(30), default="active", index=True)
+    # Priority 2: lifecycle state (active/planned/retired) already lived on
+    # `status`. `available` is a separate, shorter-lived flag - a machine can
+    # be status="active" but temporarily unavailable (down for maintenance,
+    # out of consumables) without changing its lifecycle state. Kept as its
+    # own boolean rather than overloading `status`, so "is this usable right
+    # now" never gets confused with "does this machine exist in our fleet".
+    available = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    unavailable_reason = db.Column(db.String(255))
     image_path = db.Column(db.String(255))
     notes = db.Column(db.Text)
+
+    capabilities = db.relationship(
+        "Capability",
+        secondary=machine_capabilities,
+        backref=db.backref("machines", lazy="dynamic"),
+        lazy="joined",
+    )
 
 
 class PricingItem(TimestampMixin, SerializableMixin, db.Model):
@@ -114,11 +152,20 @@ class Job(TimestampMixin, SerializableMixin, db.Model):
     # level, it can't teach the ORM model about an attribute that was never
     # declared on the class.
     assigned_staff_id = db.Column(db.Integer, db.ForeignKey("staff.id"), nullable=True, index=True)
+    # Priority 2 (Machine Management): the capability this job actually needs
+    # (e.g. "Vinyl Stickers"), independent of which specific machine ends up
+    # running it. This is what lets machine assignment be validated - a job
+    # can only be assigned to a machine whose capabilities include this one -
+    # and what lets one machine stand in for another that's unavailable,
+    # since compatibility is checked against the capability, not a specific
+    # machine_id.
+    required_capability_id = db.Column(db.Integer, db.ForeignKey("capabilities.id"), nullable=True, index=True)
     notes = db.Column(db.Text)
 
     client = db.relationship("Client", backref="jobs")
     machine = db.relationship("ProductionMachine", backref="jobs")
     assigned_staff = db.relationship("Staff", backref="assigned_jobs")
+    required_capability = db.relationship("Capability", backref="jobs")
     invoice = db.relationship(
         "Invoice",
         back_populates="job",

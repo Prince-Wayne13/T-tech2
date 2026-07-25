@@ -20,6 +20,7 @@ from .models import (
     Staff,
     Vendor,
 )
+from .schema_migrations import ensure_default_capabilities_seed
 from .services.invoices import apply_line_items, apply_payments, sync_invoice_amount
 
 
@@ -109,6 +110,12 @@ def seed_mock_data(reset=False):
     ]
     db.session.add_all(machines)
     db.session.flush()
+
+    # Priority 2 (Machine Management): reuse the same capability defaults
+    # and category-based attachment used by schema_migrations.py's upgrade
+    # path, rather than duplicating a second capability list here that could
+    # drift out of sync with it.
+    ensure_default_capabilities_seed()
 
     machine_by_ref = {machine.machine_ref: machine for machine in machines}
     pricing_items = [
