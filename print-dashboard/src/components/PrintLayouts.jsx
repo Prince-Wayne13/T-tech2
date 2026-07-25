@@ -175,59 +175,68 @@ export function JobTicketPrintLayout({ data }) {
   const subtotal = calculateTotal(items);
   const discount = Number(data.discount ?? data.discount_amount ?? data.invoice?.discount_amount ?? 0);
   const total = data.totals?.total ?? data.invoice?.totals?.total ?? Math.max(subtotal - discount, 0);
-  const paid = data.totals?.paid ?? data.invoice?.totals?.paid ?? 0;
-  const balance = data.totals?.balance ?? data.invoice?.totals?.balance ?? total;
-  const completed = data.completedCount ?? data.completed_count ?? 0;
-  const totalCount = data.totalCount ?? data.total_count ?? 0;
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: printStyles }} />
-      <div className="print-layout" style={{ fontFamily: 'Inter, sans-serif', maxWidth: '620px', margin: '0 auto', padding: '20px', background: '#fff', border: '2px dashed #6B8E7B' }}>
-        <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-          <div style={{ fontSize: '16px', fontWeight: 700, color: '#6B8E7B' }}>PRODUCTION TICKET</div>
-          <div style={{ fontSize: '12px', color: '#4A5568' }}>#{data.id || data.job_ref || 'JOB-0000'}</div>
+      <div className="print-layout" style={{ fontFamily: 'Inter, sans-serif', maxWidth: '640px', margin: '0 auto', padding: '24px', background: '#fff', borderRadius: '14px', boxShadow: '0 18px 50px rgba(0,0,0,0.08)' }}>
+        <div style={{ textAlign: 'center', marginBottom: '18px' }}>
+          <div style={{ fontSize: '18px', fontWeight: 700, color: '#6B8E7B' }}>JOB PREVIEW</div>
+          <div style={{ fontSize: '11px', color: '#8B9BB0', marginTop: '4px' }}>#{data.id || data.job_ref || 'JOB-0000'}</div>
         </div>
-        <div style={{ marginBottom: '12px', padding: '10px', background: '#F1F4F8', borderRadius: '6px' }}>
-          <div style={{ fontSize: '11px', fontWeight: 600, color: '#2D3748', marginBottom: '2px' }}>{data.client || data.client_name || '-'}</div>
-          <div style={{ fontSize: '12px', color: '#4A5568' }}>{data.title || 'Job Title'}</div>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '10px', marginBottom: '16px' }}>
-          <div><strong>Due:</strong> {data.due || data.due_date || '-'}</div>
-          <div><strong>Priority:</strong> {data.priority || 'medium'}</div>
-          <div><strong>Assigned Machine:</strong> {data.printer || data.machine_name || data.service_category || '-'}</div>
-          <div><strong>Status:</strong> {data.status || 'queued'}</div>
-          <div><strong>Assigned Staff:</strong> {data.assignedStaffName || data.assigned_staff_name || '-'}</div>
-          <div><strong>Progress:</strong> {totalCount > 0 ? `${completed} of ${totalCount}` : `${data.progress || 0}%`}</div>
-          <div><strong>Client Phone:</strong> {data.clientPhone || data.client_phone || '-'}</div>
-          <div>
-            <strong>Payment:</strong>{' '}
-            {(data.paymentStatus || (balance > 0 ? (paid > 0 ? 'partial' : 'not_paid') : 'paid')) === 'paid'
-              ? 'Paid'
-              : (data.paymentStatus || (paid > 0 ? 'partial' : 'not_paid')) === 'partial'
-                ? 'Partial'
-                : 'Unpaid'}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '16px', fontSize: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px', alignItems: 'center' }}>
+            <span style={{ color: '#8B9BB0' }}>Client</span>
+            <strong style={{ textAlign: 'right' }}>{data.client || data.client_name || '-'}</strong>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px', alignItems: 'center' }}>
+            <span style={{ color: '#8B9BB0' }}>Due</span>
+            <strong style={{ textAlign: 'right' }}>{data.due || data.due_date || '-'}</strong>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px', alignItems: 'center' }}>
+            <span style={{ color: '#8B9BB0' }}>Priority</span>
+            <strong style={{ textAlign: 'right', textTransform: 'capitalize' }}>{data.priority || 'medium'}</strong>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px', alignItems: 'center' }}>
+            <span style={{ color: '#8B9BB0' }}>Specs</span>
+            <strong style={{ textAlign: 'right' }}>{data.specs?.join(', ') || `${data.pages || 0} pages, ${data.copies || 1} copies`}</strong>
           </div>
         </div>
-        <div style={{ fontSize: '10px', marginBottom: '8px' }}><strong>Specs:</strong> {data.specs?.join(', ') || `${data.pages || 0} pages, ${data.copies || 1} copies`}</div>
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px' }}>
-          <thead><tr><th>Service / Item</th><th style={{ textAlign: 'center' }}>Qty</th><th style={{ textAlign: 'right' }}>Rate</th><th style={{ textAlign: 'right' }}>Amount</th></tr></thead>
+        <div style={{ fontSize: '10px', color: '#8B9BB0', marginBottom: '10px' }}>Services</div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '18px', fontSize: '10px' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', padding: '10px 0', borderBottom: 'none', color: '#8B9BB0' }}>Service</th>
+              <th style={{ textAlign: 'center', padding: '10px 0', borderBottom: 'none', color: '#8B9BB0', width: '60px' }}>Qty</th>
+              <th style={{ textAlign: 'right', padding: '10px 0', borderBottom: 'none', color: '#8B9BB0', width: '90px' }}>Amount</th>
+            </tr>
+          </thead>
           <tbody>
             {items.map((item, index) => {
               const amount = Number(item.amount ?? Number(item.qty || 1) * Number(item.rate || 0));
-              return <tr key={index}><td>{item.desc}</td><td style={{ textAlign: 'center' }}>{item.qty || 1}</td><td style={{ textAlign: 'right' }}>{asMoney(item.rate)}</td><td style={{ textAlign: 'right' }}>{asMoney(amount)}</td></tr>;
+              return (
+                <tr key={index}>
+                  <td style={{ padding: '12px 0', borderBottom: '1px solid #F1F4F8', color: '#2D3748' }}>{item.desc || item.description || 'Service'}</td>
+                  <td style={{ padding: '12px 0', textAlign: 'center', borderBottom: '1px solid #F1F4F8' }}>{item.qty || 1}</td>
+                  <td style={{ padding: '12px 0', textAlign: 'right', borderBottom: '1px solid #F1F4F8', fontWeight: 600, color: '#2D3748' }}>{asMoney(amount)}</td>
+                </tr>
+              );
             })}
+            {items.length === 0 && (
+              <tr>
+                <td colSpan={3} style={{ padding: '16px 0', textAlign: 'center', color: '#8B9BB0' }}>No services added yet.</td>
+              </tr>
+            )}
           </tbody>
         </table>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '14px' }}>
-          <div style={{ width: '220px', fontSize: '11px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}><span>Subtotal</span><span>{asMoney(subtotal)}</span></div>
-            {discount > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', color: '#8B9BB0' }}><span>Discount</span><span>-{asMoney(discount)}</span></div>}
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}><span>Paid</span><span>{asMoney(paid)}</span></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#6B8E7B', borderTop: '1px solid #E5E8ED', paddingTop: '6px' }}><span>Balance / Total</span><span>{asMoney(balance)} / {asMoney(total)}</span></div>
-          </div>
+        <div style={{ display: 'grid', gap: '8px', justifyContent: 'end', fontSize: '10px', marginBottom: '18px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#8B9BB0' }}>Subtotal</span><strong>{asMoney(subtotal)}</strong></div>
+          {discount > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#8B9BB0' }}>Discount</span><strong>-{asMoney(discount)}</strong></div>}
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#6B8E7B' }}><span>Total</span><strong>{asMoney(total)}</strong></div>
         </div>
-        <div style={{ fontSize: '10px', padding: '8px', border: '1px solid #E5E8ED', borderRadius: '4px', minHeight: '40px' }}><strong>Notes:</strong> {data.notes || 'None'}</div>
-        <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '9px', color: '#8B9BB0' }}>T-Tech Printing Solutions - Area 47, Lilongwe - {businessDefault.phone}</div>
+        <div style={{ padding: '14px', background: '#F7FAFC', borderRadius: '10px', fontSize: '10px', color: '#4A5568', lineHeight: 1.6 }}>
+          <div style={{ fontWeight: 600, marginBottom: '6px' }}>Notes</div>
+          <div>{data.notes || 'None'}</div>
+        </div>
       </div>
     </>
   );

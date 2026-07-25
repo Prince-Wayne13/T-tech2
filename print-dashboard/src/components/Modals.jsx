@@ -339,55 +339,78 @@ function ProposalPreviewFrame({ data, total }) {
 }
 
 function JobPreviewFrame({ data, total }) {
-  // Job/Proposal parity: Job now supports scoped items + discount, same as
-  // Invoice/Proposal previews. Assigned Staff/Printer are intentionally NOT
-  // shown here even though they're real internal fields on the form — this
-  // preview mirrors what would print on the physical Production Ticket
-  // handed to production, and staff assignment isn't part of that document
-  // (it belongs to the internal queue view only, per this session's scope).
   const items = data.items || [];
   const subtotal = calculateTotal(items);
   const discount = Number(data.discount || 0);
-  const hasItems = items.length > 0;
   return (
     <PaperPreview accentColor="#6B8E7B">
-      <div style={{ textAlign: 'center', marginBottom: '16px', borderBottom: '2px dashed #6B8E7B', paddingBottom: '10px' }}>
-        <div style={{ fontSize: '13px', fontWeight: 700, color: '#6B8E7B' }}>PRODUCTION TICKET</div>
-        <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>#{data.id || 'DRAFT'}</div>
+      <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+        <div style={{ fontSize: '13px', fontWeight: 700, color: '#6B8E7B' }}>JOB PREVIEW</div>
+        <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>#{data.id || data.job_ref || 'DRAFT'}</div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '10px', marginBottom: '12px' }}>
-        <div><span style={{ color: 'var(--text-muted)' }}>Client:</span> {data.client || '—'}</div>
-        <div><span style={{ color: 'var(--text-muted)' }}>Due:</span> {data.due || '—'}</div>
-        <div><span style={{ color: 'var(--text-muted)' }}>Priority:</span> <span style={{ textTransform: 'capitalize' }}>{data.priority || 'medium'}</span></div>
-        <div><span style={{ color: 'var(--text-muted)' }}>Specs:</span> {data.specs?.join(', ') || '—'}</div>
-      </div>
-      {hasItems && (
-        <>
-          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '12px', fontSize: '10px' }}>
-            <thead><tr>
-              <th style={{ textAlign: 'left', padding: '6px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-muted)' }}>Item</th>
-              <th style={{ textAlign: 'right', padding: '6px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-muted)' }}>Amt</th>
-            </tr></thead>
-            <tbody>{items.map((it, i) => (
-              <tr key={i}>
-                <td style={{ padding: '6px 0', borderBottom: '1px solid var(--border-faint)' }}>{it.desc}</td>
-                <td style={{ padding: '6px 0', textAlign: 'right', borderBottom: '1px solid var(--border-faint)' }}>MK {(it.qty * it.rate).toLocaleString()}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-end', marginBottom: '12px' }}>
-            {discount > 0 && (
-              <>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Subtotal: MK {subtotal.toLocaleString()}</div>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Discount: -MK {discount.toLocaleString()}</div>
-              </>
-            )}
-            <div style={{ fontWeight: 700, fontSize: '13px', color: '#6B8E7B' }}>Total: MK {(total ?? subtotal).toLocaleString()}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '10px', marginBottom: '14px' }}>
+        <div style={{ display: 'grid', gap: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+            <span style={{ color: 'var(--text-muted)' }}>Client</span>
+            <strong>{data.client || data.client_name || '—'}</strong>
           </div>
-        </>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+            <span style={{ color: 'var(--text-muted)' }}>Priority</span>
+            <strong style={{ textTransform: 'capitalize' }}>{data.priority || 'medium'}</strong>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gap: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+            <span style={{ color: 'var(--text-muted)' }}>Due</span>
+            <strong>{data.due || data.due_date || '—'}</strong>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+            <span style={{ color: 'var(--text-muted)' }}>Specs</span>
+            <strong>{data.specs?.join(', ') || '—'}</strong>
+          </div>
+        </div>
+      </div>
+      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '10px' }}>Services</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px', fontSize: '10px' }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left', padding: '8px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-muted)' }}>Service</th>
+            <th style={{ textAlign: 'center', padding: '8px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-muted)', width: '56px' }}>Qty</th>
+            <th style={{ textAlign: 'right', padding: '8px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-muted)', width: '96px' }}>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((it, i) => (
+            <tr key={i}>
+              <td style={{ padding: '10px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-head)' }}>{it.desc || it.description || 'Service'}</td>
+              <td style={{ padding: '10px 0', textAlign: 'center', borderBottom: '1px solid var(--border-faint)' }}>{it.qty || it.quantity || 1}</td>
+              <td style={{ padding: '10px 0', textAlign: 'right', borderBottom: '1px solid var(--border-faint)', fontWeight: 600 }}>MK {((Number(it.qty || it.quantity || 1) * Number(it.rate || it.unit_price || it.amount || 0)) || 0).toLocaleString()}</td>
+            </tr>
+          ))}
+          {items.length === 0 && (
+            <tr>
+              <td colSpan={3} style={{ padding: '14px 0', textAlign: 'center', color: 'var(--text-muted)' }}>No services added yet.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '12px' }}>
+        <span>Subtotal</span>
+        <strong>MK {subtotal.toLocaleString()}</strong>
+      </div>
+      {discount > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '12px' }}>
+          <span>Discount</span>
+          <strong>-MK {discount.toLocaleString()}</strong>
+        </div>
       )}
-      <div style={{ padding: '10px', background: 'var(--bg-canvas)', borderRadius: '6px', fontSize: '9px', lineHeight: 1.4 }}>
-        <strong style={{ display: 'block', marginBottom: '4px' }}>Notes:</strong> {data.notes || 'None'}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', fontWeight: 700, color: '#6B8E7B', marginBottom: '14px' }}>
+        <span>Total</span>
+        <strong>MK {(total ?? Math.max(subtotal - discount, 0)).toLocaleString()}</strong>
+      </div>
+      <div style={{ padding: '12px', background: 'var(--bg-canvas)', borderRadius: '6px', fontSize: '10px', lineHeight: 1.4 }}>
+        <div style={{ fontWeight: 600, marginBottom: '6px' }}>Notes</div>
+        <div>{data.notes || 'None'}</div>
       </div>
     </PaperPreview>
   );
