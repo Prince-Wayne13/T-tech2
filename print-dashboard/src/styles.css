@@ -614,6 +614,31 @@ svg { display: block; flex-shrink: 0; }
 }
 .filter-btn:hover:not(.active) { color: var(--text-head); }
 
+/* .chart-filters/.filter-btn were designed assuming a light bg-card parent
+   (see the "Business Pulse" chart header, where this still looks correct).
+   A few call sites — Materials.jsx's Directory/Month-End Report switcher,
+   Reports.jsx's top-level Cashflow/Income Statement/Analytics tabs, and its
+   nested Analytics section switcher — render this same button directly on
+   .main-canvas instead of inside a .card, so after the wash/z-index fix
+   they sit straight on the dark wash: the light --bg-canvas pill and the
+   pure-white .active state both read as a jarring, low-contrast mismatch
+   there. .on-canvas is an additive modifier for exactly those direct-on-
+   canvas call sites — it does not touch the base .filter-btn or
+   .chart-filters rules, so the in-card version is untouched. */
+.chart-filters.on-canvas {
+  background: var(--bg-sidebar);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.filter-btn.on-canvas {
+  color: rgba(255, 255, 255, 0.65);
+}
+.filter-btn.on-canvas:hover:not(.active) { color: #fff; }
+.filter-btn.on-canvas.active {
+  background: var(--secondary);
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
 /* Shared dropdown style for report/analytics filters (month, service type,
    etc.) — previously these used bare inline styles per-instance with a
    1px border and white background, which reads as an unstyled/disabled

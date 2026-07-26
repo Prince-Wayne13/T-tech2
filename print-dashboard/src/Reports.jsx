@@ -720,7 +720,16 @@ function MaterialsSection() {
           type="month"
           value={month}
           onChange={e => setMonth(e.target.value)}
-          style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: '#fff', fontSize: '11px', outline: 'none' }}
+          style={{
+            padding: '6px 10px',
+            borderRadius: '6px',
+            border: '1px solid var(--border-faint)',
+            background: '#fff',
+            color: 'var(--text-head)',
+            colorScheme: 'light',
+            fontSize: '11px',
+            outline: 'none',
+          }}
         />
         {(unreconciledCount > 0 || varianceCount > 0) && !loading && (
           <span style={{ fontSize: '10px' }}>
@@ -787,9 +796,9 @@ function AnalyticsTab() {
   const [section, setSection] = useState(ANALYTICS_SECTIONS[0]);
   return (
     <>
-      <div className="chart-filters" style={{ marginBottom: '14px', width: 'fit-content', flexWrap: 'wrap' }}>
+      <div className="chart-filters on-canvas" style={{ marginBottom: '14px', width: 'fit-content', flexWrap: 'wrap' }}>
         {ANALYTICS_SECTIONS.map(s => (
-          <button key={s} className={`filter-btn ${section === s ? 'active' : ''}`} onClick={() => setSection(s)}>{s}</button>
+          <button key={s} className={`filter-btn on-canvas ${section === s ? 'active' : ''}`} onClick={() => setSection(s)}>{s}</button>
         ))}
       </div>
       {section === 'Vendor Spend' && <VendorSpendSection />}
@@ -877,9 +886,9 @@ export default function Reports() {
     <main className="main-canvas" style={{ display: 'block' }}>
       <ModuleHeader title="Reports" subtitle="Cashflow and income statement" actionLabel={null} />
 
-      <div className="chart-filters" style={{ marginBottom: '14px', width: 'fit-content' }}>
+      <div className="chart-filters on-canvas" style={{ marginBottom: '14px', width: 'fit-content' }}>
         {TABS.map(t => (
-          <button key={t} className={`filter-btn ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</button>
+          <button key={t} className={`filter-btn on-canvas ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</button>
         ))}
       </div>
 

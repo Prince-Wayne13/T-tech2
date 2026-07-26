@@ -2186,3 +2186,109 @@ has its own report view buried in it.
 * **Process note for next session:** confirm which copy of this dev log is authoritative going
   forward — this repo's `log files/dev-log.md`, or the Claude.ai project file — and keep only one
   updated, or the divergence that caused this session's confusion will happen again.
+## 2026-07-26 — Fixed dark-wash contrast on direct-on-canvas tab bars (Materials Directory/Month-End Report, Reports top tabs, Analytics section switcher) — sekinna claude
+
+**Process note resolved first:** the previous entry flagged uncertainty about which dev-log copy
+is authoritative. This session started by fetching `origin/main` directly and found it had
+diverged from this sandbox's local copy — the user had applied several of this assistant's
+earlier patches themselves (matching content, different commit hashes) and then added 5 more
+commits of their own real work on top (materials page, reports, cashflow fixes, the wash/z-index
+fix). Resolved by resetting the local sandbox to `origin/main` exactly (confirmed with the user
+first) rather than attempting to merge two histories describing the same underlying changes.
+**`log files/dev-log.md` on GitHub is the authoritative copy** — this sandbox only ever holds a
+working copy for the duration of one session and should be treated as disposable between
+sessions; there is no separate "Claude.ai project file" copy in play, this was a one-sided
+divergence caused by patches being applied without ever running a real `git pull` against this
+sandbox specifically.
+
+**Bug reported by user:** after the prior "fixing ui" commit's wash/z-index fix (which correctly
+made `.main-canvas` content sit above the new dark `body::before` wash), the tab/filter buttons
+had bad contrast — one state a jarring bright-white pill, the other barely legible dim-gray-on-
+dark-gray.
+
+**Root cause, confirmed by reading the actual render tree before touching anything:**
+`.chart-filters`/`.filter-btn` were designed assuming a light `--bg-card` parent — confirmed
+correct in that context by checking `App.jsx`'s and `Reports.jsx`'s "Business Pulse" chart
+headers, both of which wrap this button group in `.card` and were untouched by the wash fix at
+all (still on light-on-light, as designed). But three other call sites render the same classes
+**directly under `<main className="main-canvas">`, with no `.card` wrapper**:
+`Materials.jsx`'s Directory/Month-End Report view switcher, `Reports.jsx`'s top-level
+Cashflow/Income Statement/Analytics tab bar, and `Reports.jsx`'s nested `AnalyticsTab` section
+switcher. After the wash fix, these three now sit directly on the dark wash instead of a light
+card — so `.chart-filters`'s light `--bg-canvas` background and `.filter-btn.active`'s pure
+`#fff` both became a genuine, confirmed mismatch there, while the in-card instances were never
+affected.
+
+**Fix — `print-dashboard/src/styles.css`, `Materials.jsx`, `Reports.jsx`:** added an additive
+`.on-canvas` modifier (`.chart-filters.on-canvas`, `.filter-btn.on-canvas`,
+`.filter-btn.on-canvas.active`) using `--bg-sidebar` (the existing dark yacht-blue token, reused
+rather than inventing a new color) and `--secondary` for the active state — deliberately reusing
+tokens already established elsewhere in the palette rather than introducing new ones. Applied
+`on-canvas` at exactly the three confirmed direct-on-canvas call sites; the base `.chart-filters`/
+`.filter-btn` rules and the two in-card instances (`App.jsx` line 250, `Reports.jsx`'s
+"Business Pulse" header) were left completely untouched, confirmed still correct as-is.
+Also gave `Materials.jsx`'s tab wrapper the `.chart-filters` class for the first time (it
+previously used a bare unstyled `<div style={{ display: 'flex', gap: '6px' }}>` with no pill
+container at all) so it now gets the same rounded dark pill treatment as the other two fixed
+call sites, rather than leaving it as bare buttons with no visual grouping.
+
+**Checked for any other affected instance before calling this complete:** grepped every
+`chart-filters`/`filter-btn` usage across all page files. Every other `.filter-btn` use found
+(row-level Edit/Send/Delete/Decline buttons in Jobs, Proposals, Vendors, Expenses, PettyCash) is
+either inside a row/card context or already has its own explicit inline color override — none of
+those share this bug.
+
+**Verification:** reviewed the exact diff across all three files — no JS/JSX/CSS parser available
+in this environment (same known limitation as every prior entry in this log), confirmed via
+direct diff read-through instead. One drafting mistake caught and corrected before committing:
+an early version of the CSS comment referenced a class name that was never actually used in the
+code (`.filter-btn-canvas` instead of the real `.on-canvas`) — fixed before finalizing.
+
+**Still open / not done this session:**
+* This fix is purely visual/CSS — did not touch any of the reports/materials/cashflow business
+  logic added in the 5 commits this session picked up (`c0f5e50` through `4683a07`), all of which
+  are outside this session's scope (a contrast bug report only).
+* Did not run the app in a browser to visually confirm the fix renders as intended — no dev
+  server was started this session, same limitation noted in earlier entries when JS tooling
+  wasn't available; recommend the user visually confirms Materials → Directory/Month-End Report,
+  Reports → the three top tabs, and Reports → Analytics → the section switcher after deploying.
+
+## 2026-07-26 — Fixed invisible month/date-picker text on Materials Month-End Report and other native date inputs — sekinna claude
+
+**User report:** "the calendar thingy on month end report is just white...cant see the month."
+
+**Root cause:** native `<input type="month">`/`<input type="date">` elements have their own
+browser-rendered chrome (the calendar icon, the popup calendar UI, and — depending on the
+browser — the displayed month/year text itself) that is controlled by the CSS `color-scheme`
+property, separately from the ordinary `color` property used for regular text. `Materials.jsx`'s
+Month-End Report input, `Reports.jsx`'s duplicate Materials reconciliation month input, and
+`ActionModal.jsx`'s date input all had `background: '#fff'` but no `color-scheme` set at all —
+left to whatever the browser/OS default resolves to. Depending on the browser and the user's
+system dark-mode setting, that can resolve to a dark native-widget theme being applied to a
+white-background input, rendering the month/year text (and sometimes the picker icon) in a light
+color invisible against that white background. This is a different, more specific mechanism than
+the `.chart-filters` tab-bar contrast bug fixed earlier this session — that one was ordinary CSS
+`color` on regular text; this one is browser-native form-control chrome that `color` alone doesn't
+reach.
+
+**Fix — `Materials.jsx`, `Reports.jsx`, `components/ActionModal.jsx`, `components/Modals.jsx`:**
+added `colorScheme: 'light'` to all native date/month inputs, forcing the browser to render their
+built-in chrome using the light-mode palette regardless of OS/browser dark-mode state, plus an
+explicit `color` on the two month inputs that were missing one entirely (`Materials.jsx`,
+`Reports.jsx`) as a defensive backup. `components/Modals.jsx`'s shared `inputStyle` object (used
+by five separate `type="date"` fields across different modals — Due Date, Payment Date, Issued
+On, Transaction Date, etc.) was fixed once at its single shared definition rather than at each of
+the five call sites individually, since they all pull from the same object.
+
+**Checked for every other native date-type input before calling this complete:** grepped
+`type="date"|type="month"|type="time"|type="datetime"` across the entire `src` tree — confirmed
+exactly four files contain any such input (`Materials.jsx`, `Reports.jsx`,
+`components/ActionModal.jsx`, `components/Modals.jsx`), all four now fixed, none missed.
+
+**Verification:** reviewed the exact diff across all four files — small, additive-only changes,
+nothing else touched. No browser/JS environment available in this sandbox to visually confirm
+`color-scheme: light` actually resolves the reported invisibility on the user's specific
+browser/OS combination — this is the standard, correct fix for this exact class of bug, but
+recommend the user visually confirms the Month-End Report month picker (and the other date
+inputs, as a secondary check) render legibly after deploying, in case there's a second contributing
+factor specific to their environment that this doesn't fully address.

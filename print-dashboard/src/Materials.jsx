@@ -192,7 +192,16 @@ function MonthEndReport({ notify }) {
           type="month"
           value={month}
           onChange={e => setMonth(e.target.value)}
-          style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: '#fff', fontSize: '11px', outline: 'none' }}
+          style={{
+            padding: '6px 10px',
+            borderRadius: '6px',
+            border: '1px solid var(--border-faint)',
+            background: '#fff',
+            color: 'var(--text-head)',
+            colorScheme: 'light',
+            fontSize: '11px',
+            outline: 'none',
+          }}
         />
         {report && <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{report.period_start} to {report.period_end} - Periodic inventory method</span>}
       </div>
@@ -340,11 +349,11 @@ export default function Materials() {
         onAction={() => setShowEntry(true)}
       />
 
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '14px' }}>
+      <div className="chart-filters on-canvas" style={{ display: 'flex', gap: '6px', marginBottom: '14px', width: 'fit-content' }}>
         {VIEWS.map(v => (
           <button
             key={v}
-            className={`filter-btn ${view === v ? 'active' : ''}`}
+            className={`filter-btn on-canvas ${view === v ? 'active' : ''}`}
             style={{ padding: '6px 14px', fontSize: '11px', fontWeight: view === v ? 600 : 500 }}
             onClick={() => { setView(v); setSelected(null); }}
           >

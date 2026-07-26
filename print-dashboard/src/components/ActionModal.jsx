@@ -143,6 +143,7 @@ export default function ActionModal({ isOpen, onClose, title, children, buttons,
                 outline: 'none',
                 color: 'var(--text-body)',
                 background: '#fff',
+                colorScheme: 'light',
               }}
             />
           )}
