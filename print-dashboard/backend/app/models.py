@@ -163,10 +163,28 @@ class MaterialTransaction(TimestampMixin, SerializableMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     material_id = db.Column(db.Integer, db.ForeignKey("materials.id"), nullable=False, index=True)
     # "purchase" adds to stock (new delivery); "usage" subtracts from stock
-    # (consumed on a job). "adjustment" covers manual corrections (stock
-    # count, waste, damage) without pretending it was a purchase or a job.
+    # (consumed on a job). "adjustment" covers manual corrections (waste,
+    # damage, found stock) where no physical count was taken. "count" is a
+    # month-end physical stock count: it does NOT add to or subtract from
+    # on_hand like the other three types (material_stock_summary() in
+    # services/materials.py deliberately does not bucket "count" rows into
+    # purchased/used/adjusted) - it exists purely as a labelled snapshot for
+    # reconciliation reporting (services/reports.py's
+    # build_materials_reconciliation()), which compares the ledger-derived
+    # on_hand figure against the most recent "count" row's quantity and
+    # surfaces the gap as a variance instead of silently overwriting it.
     transaction_type = db.Column(db.String(20), nullable=False, index=True)
     quantity = db.Column(db.Numeric(14, 3), nullable=False)
+    # Set only on "usage" rows where the material was consumed to produce a
+    # countable output (e.g. "used 5 sq.m of vinyl" -> output_quantity=300,
+    # output_description="stickers"). This is what answers Wayne's boss's
+    # actual question - "from this much vinyl, we made this much stickers" -
+    # without needing a separate table: the yield is recorded at the same
+    # point the usage itself is logged. Left null for purchase/adjustment/
+    # count rows, and for usage rows where no countable output applies
+    # (e.g. ink used across many jobs with no single output to attribute it to).
+    output_quantity = db.Column(db.Numeric(14, 2), nullable=True)
+    output_description = db.Column(db.String(120), nullable=True)
     # Purchases: what was actually paid, if known - lets Material.unit_cost
     # stay a simple "current price" while individual purchases can vary.
     # Usages: left null; revenue for a usage row comes from the linked job's

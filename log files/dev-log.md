@@ -1890,3 +1890,202 @@ fix, and `build_job_throughput` — supersedes all earlier `reports.py` deliveri
 gap, not revisited); a full re-audit of this log's older "still open" claims against the live repo
 was proposed but not requested/done this session.
  
+## 2026-07-26 — Materials Month-End Reconciliation (Periodic Inventory Method)
+
+**Signed:** Myth Claude
+
+### Context
+Wayne asked for the "final report" using the periodic inventory method: count
+materials at month-end, reconcile against logged purchases/usage, and answer
+the boss's specific question — "for this much vinyl consumed, we made this
+much stickers." Repo access was pulled directly via
+`codeload.github.com/Prince-Wayne13/T-tech2/zip/refs/heads/main` this
+session (project file mount was empty; GitHub's page itself blocks
+automated fetch, but the zip download endpoint is allowed and worked).
+
+### Audit finding
+`Material` / `MaterialTransaction` already existed and were more complete
+than expected — full CRUD, a derived stock ledger (purchased − used +
+adjusted = on_hand), revenue attribution, and a burn-rate projection, all
+backend-only with no frontend wired yet. Three real gaps existed against
+Wayne's actual ask:
+1. No physical-count reconciliation (count vs. ledger variance)
+2. No material→output yield link
+3. No month-end reconciliation report endpoint
+
+### Changes made
+**models.py**
+- `MaterialTransaction.transaction_type` now documents/supports a 4th value,
+  `"count"` — a labelled physical-count snapshot, deliberately excluded from
+  the on_hand ledger math (not bucketed like purchase/usage/adjustment).
+- Added `MaterialTransaction.output_quantity` (Numeric) and
+  `.output_description` (String), nullable, set only on `usage` rows that
+  produced a countable output (e.g. 5 sq.m vinyl → 300 A6 stickers).
+
+**schema_migrations.py**
+- Added `ensure_material_yield_schema()` (idempotent ALTER TABLE for the two
+  new columns), wired into `run_full_upgrade()` after
+  `ensure_default_capabilities_seed()` and before any ORM query touches
+  `MaterialTransaction`.
+
+**services/materials.py**
+- `material_stock_summary()` docstring updated to state explicitly that
+  `"count"` rows are excluded from the ledger buckets.
+- Added `latest_count()` and `reconcile_material_count()` — compares the
+  ledger-derived on_hand (as of a count's date, or a supplied `as_of` date)
+  against the counted quantity, returns the variance. Returns `None` when no
+  count has ever been logged (treated as "not yet reconciled", not zero
+  variance).
+
+**routes/materials.py**
+- `create_material_transaction` now accepts `"count"` as a valid
+  `transaction_type`, plus `output_quantity`/`output_description` on usage
+  rows. Rejects a `count` row that includes `job_id` or `output_quantity`
+  (400) — a physical count doesn't consume/produce anything.
+- New `GET /<material_id>/reconciliation` (optional `?as_of=YYYY-MM-DD`) —
+  per-material count-vs-ledger check.
+
+**services/reports.py**
+- Added `build_materials_reconciliation(month=None)` — the actual
+  deliverable. For each material, derives Opening/Purchased/Consumed/
+  Adjusted/Closing for the given month (default: current month) straight
+  from the transaction ledger (no stored opening-balance column, same
+  derive-don't-store convention as the rest of the file), cross-checked two
+  ways: against a physical count if one was logged that month, and against
+  recorded output (summed `output_quantity` by `output_description` on that
+  month's usage rows) — this second part directly answers "for this much
+  material, we made this much of X."
+- Registered as `RPT-MATERIALS-RECON` in `build_report_library()`.
+- **Bug caught and fixed during this pass:** importing `materials.py`
+  functions at module level in `reports.py` created a circular import
+  (`materials.py` already imports `money` from `reports.py`). Fixed by
+  moving the import inside `build_materials_reconciliation()` — local
+  import, not a structural change to either file's public API.
+
+**routes/reports.py**
+- New `GET /api/reports/materials?month=YYYY-MM` → `build_materials_reconciliation()`.
+
+### Testing performed
+No existing test suite in the repo. Verified manually via `app.test_client()`
+against an isolated in-memory DB (`create_app('testing')`, not the dev SQLite
+file):
+- Full `run_full_upgrade()` runs clean end-to-end.
+- Reconciliation math verified by hand against a scripted scenario (opening
+  100 → +50 purchased − 40 consumed = 110 closing; formula_variance 0.0;
+  count of 112 correctly flagged as +2.0 variance; 380 units of output
+  correctly summed across two usage rows).
+- API-level test: material creation, purchase, usage-with-output, count
+  creation, and the `count` + `job_id` rejection (400) all behave correctly.
+- Regression check: pre-existing `/api/materials/summary` endpoint confirmed
+  unaffected by the ledger-summary docstring change.
+- **Caught my own testing mistake, not a code bug:** first regression-test
+  attempt wrote into the real `instance/ttech_dev.db` because
+  `app.config[...]` was set after `create_app()` had already bound the
+  engine. Re-ran using the repo's existing `TestingConfig` for true
+  isolation. Flagging for Wayne: `instance/ttech_dev.db` now has one stray
+  `MAT-0001` / "Vinyl" material with two test transactions from the first
+  attempt — worth deleting if it's not wanted in real data. I have no access
+  to reach into that file and clean it up myself from this session.
+
+### Known follow-ups (not built this session, backend-only scope as requested)
+- No frontend UI for entering a `count` transaction or viewing the
+  reconciliation report — matches the existing pattern where Materials is
+  backend-only pending a future UI pass.
+- `output_description` is free text (e.g. "Stickers (A6)" vs "A6 Stickers"
+  would be counted separately) — no controlled vocabulary yet. Worth a
+  lookup table if Wayne wants clean rollups across differently-worded entries.
+- Reconciliation only checks the most recent count on/before `period_end`;
+  if a material somehow gets two counts within the same month, only the
+  later one is used for the check.
+  ## 2026-07-26 — Materials Frontend (Directory, Transactions, Month-End Report)
+
+**Signed:** Myth Claude
+
+### Context
+Follow-up to this session's backend materials work (count reconciliation,
+material→output yield, month-end reconciliation report). Wayne asked for
+the frontend. No `Materials.jsx` existed — the backend from the earlier
+pass was explicitly backend-only ("no UI yet" per its own code comments).
+
+### Changes made
+**src/Materials.jsx (new)**
+New page with a segmented Directory / Month-End Report view, matching the
+existing page-shell convention (`ModuleHeader`, `StatsGrid`, `RegisterCard`
+from `components/ModuleStandard.jsx`).
+- **Directory**: material cards showing on-hand stock, low-stock flag,
+  burn-rate projection (reusing the existing `/materials/summary`
+  endpoint — this was backend-complete but had no UI consuming it before
+  now). Click a card to drill into its transaction history.
+- **Material detail**: transaction ledger, stat cards for on-hand/revenue/
+  profit, and a physical-count-check card reading the new
+  `/materials/:id/reconciliation` endpoint. "Log Transaction" opens the new
+  modal.
+- **Month-End Report**: month picker (`<input type="month">`) driving
+  `GET /reports/materials?month=YYYY-MM`. Table columns: Opening, Purchased,
+  Consumed, Adjusted, Closing, Output Produced, Count Variance — mirrors the
+  backend's periodic-inventory formula field-for-field. A banner surfaces
+  materials with a count variance or no count logged yet, pulled from the
+  report's `flags` object.
+
+**src/components/Modals.jsx**
+- Added `NewMaterialModal` — create/edit a material (name, category, unit,
+  unit cost, reorder point), following the same `ModalWrapper` + `SplitPane`
+  + `SimpleRecordPreview` structure as every other modal in this file (no
+  new shared component needed; local `labelStyle`/`inputStyle`/etc. in this
+  file are not exported, so new modals live here too, matching the existing
+  pattern rather than introducing a second styling source).
+- Added `RecordMaterialTransactionModal` — one form covering all four
+  transaction types (purchase/usage/adjustment/count) via a segmented
+  control, since the backend already handles all four through a single
+  endpoint. Output quantity/description fields only appear for "usage" (this
+  is the field that answers "for this much material, we made this much
+  stickers"). Job # and output fields are hidden entirely for "count",
+  matching the backend's rejection of those fields on count rows.
+
+**src/api/client.js**
+- Added `materialReconciliation(materialId, params)` →
+  `GET /materials/:id/reconciliation`
+- Added `materialsReconciliationReport(month)` → `GET /reports/materials`
+
+**src/App.jsx**
+- Added a `materials` icon, a `Materials` nav item (placed in the "More"
+  group next to Vendors — same operational-support category), the import,
+  and the render-switch case.
+
+### Testing performed
+- `npm run build` (Vite production build) run against the full frontend
+  after all changes — succeeded, all new/modified files transform and
+  bundle with zero errors.
+- **Pre-existing bug found, NOT caused by this session's changes**:
+  `App.jsx` imports `from './Sales'` and `from './PettyCash'`, but the
+  actual files on disk are `sales.jsx` and `pettycash.jsx` (lowercase).
+  This only surfaced because this sandbox's filesystem is case-sensitive
+  (Linux); it would silently work on a case-insensitive filesystem
+  (typical macOS/Windows dev setup), which is almost certainly why it
+  hasn't been caught yet. I patched a throwaway local copy of `App.jsx`
+  only to confirm my own Materials changes build clean, then restored the
+  original file exactly as delivered — **I did not rename your files or
+  change these two import lines** in the file provided to you, since that
+  wasn't part of what was asked and touches files outside this session's
+  scope. Flagging explicitly: this will break a production build the first
+  time it runs on a case-sensitive filesystem (most CI/CD and Linux hosting
+  is case-sensitive). Worth a fix — either rename `sales.jsx`/`pettycash.jsx`
+  to `Sales.jsx`/`PettyCash.jsx`, or fix the two import lines — your call
+  on which, but I did not do it myself here since it's a repo-wide
+  filename decision, not a materials-feature change.
+
+### Known follow-ups (not built this session)
+- `RecordMaterialTransactionModal`'s "Job #" field is a raw numeric ID
+  input — no job search/autocomplete. Every other job-linking flow in this
+  app appears to reference jobs by a friendlier lookup; matching that here
+  would need pulling in whatever job-search component Jobs.jsx/Invoices.jsx
+  use, which wasn't inspected this session.
+- No PDF/print export for the month-end reconciliation report — every other
+  report table in this app that gets printed goes through
+  `PrintLayouts.jsx`/`InvoicePDF.jsx`; the reconciliation table wasn't
+  wired into either.
+- No inline edit for a logged transaction (only delete, via the existing
+  `DELETE /materials/transactions/:id`, which isn't exposed in the UI
+  either yet) — matches "log corrections as a new transaction" being the
+  existing backend philosophy, but worth confirming that's what Wayne wants
+  operationally.

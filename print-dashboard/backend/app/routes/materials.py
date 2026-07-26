@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request
 
 from ..extensions import db
 from ..models import AuditLog, Material, MaterialTransaction
-from ..services.materials import next_material_ref, serialize_material, serialize_transaction
+from ..services.materials import next_material_ref, reconcile_material_count, serialize_material, serialize_transaction
 from ..utils import parse_date
 from .common import apply_search, list_response
 
@@ -61,6 +61,25 @@ def materials_summary():
 def get_material(material_id):
     material = Material.query.get_or_404(material_id)
     return jsonify(serialize_material(material))
+
+
+@bp.get("/<int:material_id>/reconciliation")
+def get_material_reconciliation(material_id):
+    """Compares the ledger-derived on_hand against the most recent physical
+    'count' transaction for this material. Optional ?as_of=YYYY-MM-DD to
+    reconcile against a specific month's count rather than the latest one
+    (used by the /api/reports/materials month-end report).
+    Returns {'reconciled': False} rather than a 404 when no count has ever
+    been logged - not having taken a count yet is a normal, expected state,
+    not an error.
+    """
+    Material.query.get_or_404(material_id)
+    as_of = parse_date(request.args.get("as_of")) if request.args.get("as_of") else None
+    result = reconcile_material_count(material_id, as_of=as_of)
+    if result is None:
+        return jsonify({"reconciled": False, "message": "No physical count has been recorded for this material yet."})
+    result["reconciled"] = True
+    return jsonify(result)
 
 
 @bp.post("")
@@ -127,11 +146,17 @@ def create_material_transaction(material_id):
     material = Material.query.get_or_404(material_id)
     data = request.get_json() or {}
     transaction_type = data.get("transaction_type")
-    if transaction_type not in {"purchase", "usage", "adjustment"}:
-        return jsonify({"error": "transaction_type must be 'purchase', 'usage', or 'adjustment'"}), 400
+    if transaction_type not in {"purchase", "usage", "adjustment", "count"}:
+        return jsonify({"error": "transaction_type must be 'purchase', 'usage', 'adjustment', or 'count'"}), 400
     quantity = data.get("quantity")
     if quantity is None:
         return jsonify({"error": "quantity is required"}), 400
+    # "count" rows represent an absolute physical count, not a movement -
+    # a job_id or output on a count row wouldn't mean anything (nothing was
+    # produced or consumed by taking a count), so both are rejected outright
+    # rather than silently accepted and ignored.
+    if transaction_type == "count" and (data.get("job_id") or data.get("output_quantity")):
+        return jsonify({"error": "'count' transactions cannot have a job_id or output_quantity"}), 400
 
     txn = MaterialTransaction(
         material_id=material.id,
@@ -140,6 +165,8 @@ def create_material_transaction(material_id):
         unit_cost=data.get("unit_cost"),
         transaction_date=parse_date(data.get("transaction_date")) or None,
         job_id=data.get("job_id"),
+        output_quantity=data.get("output_quantity"),
+        output_description=data.get("output_description"),
         notes=data.get("notes"),
     )
     db.session.add(txn)

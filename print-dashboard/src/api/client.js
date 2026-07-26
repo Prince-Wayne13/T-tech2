@@ -128,6 +128,8 @@ export const api = {
     body: JSON.stringify(payload),
   }),
   deleteMaterialTransaction: (id) => request(`/materials/transactions/${id}`, { method: 'DELETE' }),
+  materialReconciliation: (materialId, params = '') => request(`/materials/${materialId}/reconciliation${params}`),
+  materialsReconciliationReport: (month) => request(`/reports/materials${month ? `?month=${month}` : ''}`),
   advances: (params = '') => request(`/advances${params}`),
   createAdvance: (payload) => request('/advances', {
     method: 'POST',

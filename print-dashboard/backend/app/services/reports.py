@@ -4,9 +4,16 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
-from ..models import Expense, Invoice, Job, ProductionMachine
+from ..models import Expense, Invoice, Job, Material, MaterialTransaction, ProductionMachine
 from .invoices import invoice_status_from_totals, invoice_totals
 from .vendors import PAID_STATUSES
+
+# material_stock_summary/reconcile_material_count are imported inside
+# build_materials_reconciliation() below, not at module level here - this
+# file (reports.py) is itself imported BY services/materials.py (for the
+# shared money() helper), so a module-level import in this direction would
+# be a circular import. A local import inside the one function that needs
+# them avoids that without having to move money() out of this file.
 
 
 def money(value):
@@ -349,6 +356,132 @@ def build_job_throughput():
     }
 
 
+def _month_bounds(month_str):
+    """month_str is 'YYYY-MM'. Returns (period_start, period_end) as dates,
+    period_end being the last day of that month (inclusive)."""
+    year, month = (int(part) for part in month_str.split("-"))
+    period_start = date(year, month, 1)
+    period_end = add_months(period_start, 1) - timedelta(days=1)
+    return period_start, period_end
+
+
+def build_materials_reconciliation(month=None):
+    """The month-end periodic inventory report: for each material,
+    Opening + Purchased - Consumed = Closing (the formula Wayne described -
+    count what's on the shelf, work backward from what was bought and what's
+    left to find what was actually used), cross-checked in two ways:
+
+      1. Against a physical count, if one was logged for this material this
+         month (reconcile_material_count()) - flags a variance if the shelf
+         count disagrees with what the ledger says should be there.
+      2. Against recorded output ("this much vinyl became this much
+         stickers") - summed from MaterialTransaction.output_quantity on
+         usage rows dated within the month, which is exactly Wayne's boss's
+         question ("for this much vinyl, we made this much stickers").
+
+    `month` is 'YYYY-MM'; defaults to the current calendar month. Opening
+    stock for the month is derived the same way as closing stock - not
+    stored anywhere - by running material_stock_summary() over only the
+    transactions dated before the period starts, then again over
+    transactions dated up to and including the period end. This keeps the
+    report honest against the "derive, don't store" convention used
+    everywhere else in this file/services/materials.py: an opening-balance
+    column would be one more place a stale, hand-edited number could drift
+    from what the ledger actually shows.
+    """
+    from .materials import material_stock_summary, reconcile_material_count
+
+    if month is None:
+        month = date.today().strftime("%Y-%m")
+    period_start, period_end = _month_bounds(month)
+
+    materials = Material.query.order_by(Material.name.asc()).all()
+    rows = []
+    for material in materials:
+        all_transactions = MaterialTransaction.query.filter(
+            MaterialTransaction.material_id == material.id
+        ).all()
+
+        opening_transactions = [
+            txn for txn in all_transactions
+            if txn.transaction_date and txn.transaction_date < period_start
+        ]
+        closing_transactions = [
+            txn for txn in all_transactions
+            if txn.transaction_date and txn.transaction_date <= period_end
+        ]
+        month_transactions = [
+            txn for txn in all_transactions
+            if txn.transaction_date and period_start <= txn.transaction_date <= period_end
+        ]
+
+        opening_stock = material_stock_summary(material.id, opening_transactions)["on_hand"]
+        closing_summary = material_stock_summary(material.id, closing_transactions)
+        closing_stock = closing_summary["on_hand"]
+
+        purchased_this_month = sum(
+            (money(txn.quantity) for txn in month_transactions if txn.transaction_type == "purchase"),
+            0.0,
+        )
+        consumed_this_month = sum(
+            (money(txn.quantity) for txn in month_transactions if txn.transaction_type == "usage"),
+            0.0,
+        )
+        adjusted_this_month = sum(
+            (money(txn.quantity) for txn in month_transactions if txn.transaction_type == "adjustment"),
+            0.0,
+        )
+
+        # Formula check: opening + purchased - consumed + adjusted should
+        # equal closing. Any gap here means a transaction was dated outside
+        # [period_start, period_end] in a way that doesn't add up, or (more
+        # usually) simply confirms the two independent calculations agree -
+        # this is a sanity check on the report's own arithmetic, not a
+        # comparison against a physical count (that's count_variance below).
+        expected_closing = money(opening_stock) + purchased_this_month - consumed_this_month + adjusted_this_month
+        formula_variance = round(money(closing_stock) - expected_closing, 3)
+
+        output_rows = defaultdict(float)
+        for txn in month_transactions:
+            if txn.transaction_type == "usage" and txn.output_quantity:
+                label = txn.output_description or "Output"
+                output_rows[label] += money(txn.output_quantity)
+
+        count_check = reconcile_material_count(material.id, all_transactions, as_of=period_end)
+
+        rows.append({
+            "material_id": material.id,
+            "material_ref": material.material_ref,
+            "name": material.name,
+            "unit": material.unit,
+            "opening_stock": money(opening_stock),
+            "purchased": purchased_this_month,
+            "consumed": consumed_this_month,
+            "adjusted": adjusted_this_month,
+            "closing_stock": money(closing_stock),
+            "formula_variance": formula_variance,
+            "output_produced": dict(output_rows),
+            "physical_count_check": count_check,
+            "low_stock": bool(material.reorder_point is not None and money(closing_stock) <= money(material.reorder_point)),
+        })
+
+    return {
+        "month": month,
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
+        "method": "periodic",
+        "formula": "Opening Stock + Purchased - Consumed + Adjusted = Closing Stock",
+        "materials": rows,
+        "flags": {
+            "unreconciled_count": [row["material_ref"] for row in rows if row["physical_count_check"] is None],
+            "count_variance": [
+                row["material_ref"] for row in rows
+                if row["physical_count_check"] and abs(row["physical_count_check"]["variance"]) > 0.001
+            ],
+        },
+    }
+
+
 def build_report_library():
     financials = build_financial_report()
     dashboard = build_dashboard_summary()
@@ -392,5 +525,14 @@ def build_report_library():
             "generated_by": "System",
             "notes": "Revenue by DTF, large format, digital print, binding, sublimation, UV DTF and finishing machines.",
             "metrics": {"machine_revenue": financials["machine_revenue"]},
+        },
+        {
+            "id": "RPT-MATERIALS-RECON",
+            "name": "Monthly Materials Reconciliation",
+            "type": "Monthly",
+            "status": "ready",
+            "generated_by": "System",
+            "notes": "Periodic inventory method: opening stock, purchases, and closing stock reconcile to consumption per material, cross-checked against physical counts and against units produced. Call GET /api/reports/materials?month=YYYY-MM for the full table.",
+            "metrics": {},
         },
     ]

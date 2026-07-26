@@ -6,6 +6,7 @@ import Proposals from './Proposals';
 import Invoices from './Invoices';
 import Expenses from './Expenses';
 import Vendors from './Vendors';
+import Materials from './Materials';
 import Advances from './Advances';
 import Sales from './Sales';
 import PettyCash, { AddPettyCashModal } from './PettyCash';
@@ -60,6 +61,7 @@ const D = {
   advances:   'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
   sales:      'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
   pettyCash:  'M2 7h20v13H2z M2 7l3-4h14l3 4 M8 12h8',
+  materials:  'M20 7h-9M14 17H5M17 4l3 3-3 3M7 20l-3-3 3-3',
   reports:    'M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7',
   settings:   'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z',
   bell:       'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
@@ -101,6 +103,7 @@ const NAV_GROUPS = [
     label: 'More',
     items: [
       { id: 'Vendors',     icon: 'vendors'    },
+      { id: 'Materials',   icon: 'materials'  },
       { id: 'Advances',    icon: 'advances'   },
       { id: 'Audit Log',   icon: 'reports'    },
       { id: 'Archive',     icon: 'reports'    },
@@ -721,6 +724,7 @@ export default function App() {
       case 'Invoices': return <Invoices />;
       case 'Expenses': return <Expenses />;
       case 'Vendors': return <Vendors />;
+      case 'Materials': return <Materials />;
       case 'Advances': return <Advances />;
       case 'Sales': return <Sales />;
       case 'Petty Cash': return <PettyCash />;

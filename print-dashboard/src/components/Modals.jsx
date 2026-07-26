@@ -1066,6 +1066,138 @@ export function NewVendorModal({ isOpen, onClose, onSave, initialData = null }) 
   );
 }
 
+/* ═══════════════════════════════════════ MODAL: New Material ═══════════════════════════════════════ */
+export function NewMaterialModal({ isOpen, onClose, onSave, initialData = null }) {
+  const [form, setForm] = useState({ name: '', category: '', unit: 'unit', unit_cost: '', reorder_point: '', notes: '' });
+  const [showPreview, setShowPreview] = useState(false);
+  useEffect(() => {
+    if (!isOpen) return;
+    setForm({
+      name: initialData?.name || '',
+      category: initialData?.category || '',
+      unit: initialData?.unit || 'unit',
+      unit_cost: initialData?.unit_cost ?? '',
+      reorder_point: initialData?.reorder_point ?? '',
+      notes: initialData?.notes || '',
+    });
+    setShowPreview(false);
+  }, [isOpen, initialData]);
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title={initialData ? 'Edit Material' : 'New Material'} wide footer={<>
+      <button onClick={onClose} style={cancelButton}>Cancel</button>
+      <button onClick={() => onSave(form)} style={createButton}>{initialData ? 'Update' : 'Create'}</button>
+    </>}>
+      <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
+        formChildren={
+          <div style={{ padding: '20px', display: 'grid', gap: '12px', alignContent: 'start', overflowY: 'auto', flex: 1 }}>
+            <div><label style={labelStyle}>Name</label><input style={inputStyle} placeholder="e.g. Vinyl - White Gloss" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
+            <div><label style={labelStyle}>Category</label><input style={inputStyle} placeholder="e.g. Large Format" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} /></div>
+            <div><label style={labelStyle}>Unit</label><input style={inputStyle} placeholder="e.g. sq.m, L, roll" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} /></div>
+            <div><label style={labelStyle}>Unit Cost (MK)</label><input type="number" style={inputStyle} value={form.unit_cost} onChange={e => setForm({ ...form, unit_cost: e.target.value })} /></div>
+            <div><label style={labelStyle}>Reorder Point (optional)</label><input type="number" style={inputStyle} placeholder="Flag as low stock below this" value={form.reorder_point} onChange={e => setForm({ ...form, reorder_point: e.target.value })} /></div>
+            <div><label style={labelStyle}>Notes</label><textarea style={{ ...inputStyle, minHeight: '50px', resize: 'vertical' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
+          </div>
+        }
+        previewContent={<SimpleRecordPreview type="material" data={form} />}
+      />
+    </ModalWrapper>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: Record Material Transaction ═══════════════════════════════════════
+   Covers all four MaterialTransaction types (purchase / usage / adjustment /
+   count) in one modal, matching the backend's single-endpoint design
+   (POST /materials/:id/transactions with a transaction_type field) rather
+   than four separate forms. output_quantity/output_description only show
+   for "usage" — this is what answers "for this much material, we made this
+   much X", so it's surfaced right where the usage itself is logged, not as
+   a separate step. "count" hides quantity's purchase/usage framing (it's an
+   absolute shelf count, not a movement) and hides job/output entirely,
+   matching the backend's 400 rejection of job_id/output_quantity on count rows.
+═══════════════════════════════════════ */
+const TRANSACTION_TYPES = [
+  { value: 'purchase', label: 'Purchase' },
+  { value: 'usage', label: 'Usage' },
+  { value: 'adjustment', label: 'Adjustment' },
+  { value: 'count', label: 'Physical Count' },
+];
+
+export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, material }) {
+  const [form, setForm] = useState({
+    transaction_type: 'usage',
+    quantity: '',
+    unit_cost: '',
+    transaction_date: new Date().toISOString().split('T')[0],
+    job_id: '',
+    output_quantity: '',
+    output_description: '',
+    notes: '',
+  });
+  const [showPreview, setShowPreview] = useState(false);
+  useEffect(() => {
+    if (!isOpen) return;
+    setForm({
+      transaction_type: 'usage',
+      quantity: '',
+      unit_cost: '',
+      transaction_date: new Date().toISOString().split('T')[0],
+      job_id: '',
+      output_quantity: '',
+      output_description: '',
+      notes: '',
+    });
+    setShowPreview(false);
+  }, [isOpen, material]);
+
+  const isCount = form.transaction_type === 'count';
+  const isUsage = form.transaction_type === 'usage';
+  const isPurchase = form.transaction_type === 'purchase';
+
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title={material ? `Log Transaction: ${material.name}` : 'Log Transaction'} wide footer={<>
+      <button onClick={onClose} style={cancelButton}>Cancel</button>
+      <button onClick={() => onSave(form)} style={createButton}>Save</button>
+    </>}>
+      <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
+        formChildren={
+          <div style={{ padding: '20px', display: 'grid', gap: '12px', alignContent: 'start', overflowY: 'auto', flex: 1 }}>
+            <div>
+              <label style={labelStyle}>Transaction Type</label>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {TRANSACTION_TYPES.map(t => (
+                  <button key={t.value} onClick={() => setForm({ ...form, transaction_type: t.value })} style={pillBtnStyle(form.transaction_type === t.value)}>{t.label}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label style={labelStyle}>{isCount ? `Counted Quantity (${material?.unit || 'unit'})` : `Quantity (${material?.unit || 'unit'})`}</label>
+              <input type="number" style={inputStyle} value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} />
+            </div>
+            {isPurchase && (
+              <div><label style={labelStyle}>Unit Cost (MK, optional)</label><input type="number" style={inputStyle} placeholder="Defaults to material's current unit cost" value={form.unit_cost} onChange={e => setForm({ ...form, unit_cost: e.target.value })} /></div>
+            )}
+            <div><label style={labelStyle}>Date</label><input type="date" style={inputStyle} value={form.transaction_date} onChange={e => setForm({ ...form, transaction_date: e.target.value })} /></div>
+            {!isCount && (
+              <div><label style={labelStyle}>Job # (optional)</label><input style={inputStyle} placeholder="e.g. 12 (Job ID)" value={form.job_id} onChange={e => setForm({ ...form, job_id: e.target.value })} /></div>
+            )}
+            {isUsage && (
+              <>
+                <div style={{ borderTop: '1px dashed var(--border-faint)', paddingTop: '10px', fontSize: '9px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                  Output produced (optional) — "from this much material, we made this much..."
+                </div>
+                <div><label style={labelStyle}>Output Quantity</label><input type="number" style={inputStyle} placeholder="e.g. 300" value={form.output_quantity} onChange={e => setForm({ ...form, output_quantity: e.target.value })} /></div>
+                <div><label style={labelStyle}>Output Description</label><input style={inputStyle} placeholder="e.g. Stickers (A6)" value={form.output_description} onChange={e => setForm({ ...form, output_description: e.target.value })} /></div>
+              </>
+            )}
+            <div><label style={labelStyle}>Notes</label><textarea style={{ ...inputStyle, minHeight: '50px', resize: 'vertical' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
+          </div>
+        }
+        previewContent={<SimpleRecordPreview type="material transaction" data={form} />}
+      />
+    </ModalWrapper>
+  );
+}
+
 /* ═══════════════════════════════════════ MODAL: Record Payment ═══════════════════════════════════════ */
 export function RecordPaymentModal({ isOpen, onClose, onSave, initialData = null }) {
   const [form, setForm] = useState({ job: '', amount: '', date: new Date().toISOString().split('T')[0], method: 'bank', ref: '', notes: '' });
