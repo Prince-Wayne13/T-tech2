@@ -101,6 +101,28 @@ function ExpenseRow({ exp, onPreview, onStatus, onOutstandingTab, onEdit }) {
             Reimburse
           </button>
         )}
+        {/* Mark Paid: available once an expense is approved or reimbursed —
+            i.e. it's a real, sanctioned cost, just not yet recorded as cash
+            out the door. Deliberately excluded for 'pending'/'rejected': an
+            unapproved or rejected expense being marked paid would mean money
+            left the business for something never signed off on, which is a
+            different problem (approve it first) than this button solves. */}
+        {(exp.status === 'approved' || exp.status === 'reimbursed') && (
+          <button
+            className="filter-btn"
+            style={{ padding: '4px 8px', fontSize: '9px' }}
+            title="Record the date this was actually paid"
+            onClick={() => {
+              const today = new Date().toISOString().slice(0, 10);
+              const entered = window.prompt('Date paid (YYYY-MM-DD):', exp.paid_on || today);
+              if (entered === null) return; // cancelled
+              const paidOn = entered.trim() || today;
+              onStatus(exp, 'paid', { paid_on: paidOn });
+            }}
+          >
+            Mark Paid
+          </button>
+        )}
       </div>
     </div>
   );
@@ -227,9 +249,16 @@ export default function Expenses() {
     }
   };
 
-  const handleStatus = async (expense, status) => {
+  // Extended to accept an `extra` payload alongside status — needed for
+  // "Mark Paid", which must set paid_on in the same call as status: 'paid'.
+  // Reports.jsx's Cash Flow report reads Expense.paid_on directly (see
+  // services/reports.py, build_financial_report's expenses_by_month) - a
+  // status-only update would flip the badge to "Paid" but leave the expense
+  // invisible to that report, since paid_on would stay null. Existing callers
+  // (Approve/Reject/Reimburse) are unaffected — they simply don't pass extra.
+  const handleStatus = async (expense, status, extra = {}) => {
     try {
-      const saved = await api.updateExpense(expense.backendId, { status });
+      const saved = await api.updateExpense(expense.backendId, { status, ...extra });
       setPreview(saved);
       notify(`Expense marked ${status}`);
       loadExpenses();

@@ -17,7 +17,7 @@ import { ModuleHeader, StatsGrid } from './components/ModuleStandard';
 // this session's confirmed choice ("easy to get right on the first try, not
 // confusing" — a 7-tab bar was judged more likely to overwhelm a first-time
 // user than a single tab with clear sub-section headers).
-const TABS = ['Cashflow', 'Snapshot', 'Analytics'];
+const TABS = ['Cashflow', 'Income Statement', 'Analytics'];
 const ANALYTICS_SECTIONS = ['Vendor Spend', 'Client Performance', 'Projections', 'Sales vs Expenses', 'Machine Revenue'];
 
 function formatMonthLabel(month) {
@@ -171,6 +171,149 @@ function PulseChart({ financials }) {
         <div className="legend-item"><span className="legend-dot" style={{ background: '#3A506B' }} /> Revenue</div>
         <div className="legend-item"><span className="legend-dot" style={{ background: '#A06B6B' }} /> Expenses</div>
         <div className="legend-net">Net Profit <strong>{money(netProfit)}</strong><span className="trend-badge">Live</span></div>
+      </div>
+    </div>
+  );
+}
+
+// ── Monthly filter (Reports tab, Cashflow/Snapshot) ──────────────────────
+// financialReport() already returns 13 trailing months of revenue_by_month /
+// expenses_by_month in one call (services/reports.py::trailing_month_keys()).
+// That data was already being fetched and thrown away — only the latest
+// month was ever read. This is a pure frontend selector over data already
+// in memory, no new endpoint, no new backend call per month switch.
+function MonthSelector({ monthKeys, selectedMonth, setSelectedMonth }) {
+  if (!monthKeys.length) return null;
+  return (
+    <select
+      value={selectedMonth}
+      onChange={e => setSelectedMonth(e.target.value)}
+      style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: '#fff', fontSize: '10px', color: 'var(--text-body)', marginBottom: '14px' }}
+    >
+      {[...monthKeys].reverse().map(key => (
+        <option key={key} value={key}>{formatMonthLabel(key)}</option>
+      ))}
+    </select>
+  );
+}
+
+// ── Plain-English translation card ────────────────────────────────────────
+// Not a replacement for the stat boxes or the Business Pulse chart — sits
+// alongside them. Purpose: a one-line verdict plus a money-in / money-out /
+// left-over story, in everyday words, for a reader who doesn't want to parse
+// "revenue" vs "receivables" vs "booked" vs "cash-basis." Uses the same
+// selected month's moneyIn/moneyOut the stat boxes use, so the two can never
+// disagree with each other.
+function PlainEnglishCard({ moneyIn, moneyOut, netCashflow, monthLabel }) {
+  const madeMoney = netCashflow > 0;
+  const brokeEven = netCashflow === 0;
+  const verdict = brokeEven
+    ? "You broke even this month — what came in matched what went out."
+    : madeMoney
+    ? "You made money this month."
+    : "You spent more than you brought in this month.";
+
+  const verdictColor = brokeEven ? 'var(--text-muted)' : madeMoney ? 'var(--teal)' : 'var(--red)';
+
+  // Simple proportional bar: money out and what's left as shares of money in
+  // (or, if money out exceeded money in, the bar shows the shortfall instead
+  // of a share of nothing). Kept as one bar, not a pie or multi-series chart
+  // — the goal is "glance and understand," not another chart to interpret.
+  const total = Math.max(moneyIn, moneyOut, 1);
+  const outPct = Math.min(100, (moneyOut / total) * 100);
+  const leftPct = Math.max(0, 100 - outPct);
+
+  return (
+    <div className="card" style={{ gridColumn: '1 / -1', borderTop: '2px solid var(--secondary)' }}>
+      <div className="card-header" style={{ marginBottom: '8px' }}>
+        <div>
+          <h2 className="card-title">What This Means For The Business</h2>
+          <p className="card-sub">{monthLabel} — in plain terms</p>
+        </div>
+      </div>
+
+      <div style={{ fontSize: '16px', fontWeight: 700, color: verdictColor, marginBottom: '16px' }}>
+        {verdict}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-body)' }}>
+          Money that came in: <strong>{money(moneyIn)}</strong>
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text-body)' }}>
+          Money that went out: <strong>{money(moneyOut)}</strong>
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text-body)' }}>
+          That leaves you with: <strong style={{ color: verdictColor }}>{money(netCashflow)}</strong>
+        </div>
+      </div>
+
+      <div style={{ height: '20px', borderRadius: '10px', overflow: 'hidden', display: 'flex', background: 'var(--bg-canvas)' }}>
+        <div style={{ width: `${outPct}%`, background: 'var(--warning)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+        <div style={{ width: `${leftPct}%`, background: 'var(--teal)', display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+      </div>
+      <div style={{ display: 'flex', gap: '16px', marginTop: '8px', fontSize: '10px', color: 'var(--text-muted)' }}>
+        <span><span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '2px', background: 'var(--warning)', marginRight: '5px' }} />Spent</span>
+        <span><span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '2px', background: 'var(--teal)', marginRight: '5px' }} />Kept</span>
+      </div>
+
+      <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginTop: '14px', lineHeight: 1.5 }}>
+        This reflects cash actually received and paid out for {monthLabel.toLowerCase()} only. Amounts still owed to or by the business (unpaid invoices, unpaid bills) are shown separately in Unpaid Receivables / Unpaid Payables and are not part of this figure.
+      </div>
+    </div>
+  );
+}
+
+// ── Receivables / Payables translation card ───────────────────────────────
+// Separate from PlainEnglishCard on purpose: receivables/payables are
+// balances (what's owed right now), not a flow for a selected month, so they
+// need their own plain-English framing rather than being folded into the
+// money-in/money-out story above, which would blur two different questions
+// ("how did this month go" vs "where do I stand today").
+function ReceivablesPayablesCard({ receivables, payables }) {
+  const net = receivables - payables;
+  const owedMoreThanOwing = net > 0;
+  const evenOut = net === 0;
+
+  let verdict;
+  if (receivables === 0 && payables === 0) {
+    verdict = "Nobody owes you, and you don't owe anybody. Clean slate.";
+  } else if (evenOut) {
+    verdict = "What's owed to you and what you owe balance out exactly.";
+  } else if (owedMoreThanOwing) {
+    verdict = "Clients owe you more than you owe your vendors — money is on its way in.";
+  } else {
+    verdict = "You owe vendors more than clients owe you — keep an eye on when those bills are due.";
+  }
+  const verdictColor = evenOut ? 'var(--text-muted)' : owedMoreThanOwing ? 'var(--teal)' : 'var(--warning)';
+
+  return (
+    <div className="card" style={{ gridColumn: '1 / -1', borderTop: '2px solid var(--secondary)' }}>
+      <div className="card-header" style={{ marginBottom: '8px' }}>
+        <div>
+          <h2 className="card-title">What You're Owed vs. What You Owe</h2>
+          <p className="card-sub">Right now, not tied to a specific month</p>
+        </div>
+      </div>
+
+      <div style={{ fontSize: '16px', fontWeight: 700, color: verdictColor, marginBottom: '16px' }}>
+        {verdict}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '4px' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-body)' }}>
+          Clients still owe you (unpaid invoices): <strong>{money(receivables)}</strong>
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text-body)' }}>
+          You still owe vendors/bills (unpaid expenses): <strong>{money(payables)}</strong>
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text-body)' }}>
+          Difference: <strong style={{ color: verdictColor }}>{money(Math.abs(net))}</strong> {evenOut ? '' : owedMoreThanOwing ? 'more owed to you' : 'more owed by you'}
+        </div>
+      </div>
+
+      <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', marginTop: '14px', lineHeight: 1.5 }}>
+        This is not the same as cash in hand — it's money that hasn't moved yet in either direction. A large "owed to you" figure looks good on paper, but only helps if clients actually pay. A large "you owe" figure isn't a problem by itself, but it becomes one if those bills come due before enough client payments land.
       </div>
     </div>
   );
@@ -431,6 +574,10 @@ export default function Reports() {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Selected month for Cashflow/Snapshot. Starts empty; set to the latest
+  // available month once financials load (see effect below), then stays
+  // wherever the user leaves it if they pick an earlier one from the dropdown.
+  const [selectedMonth, setSelectedMonth] = useState('');
 
   useEffect(() => {
     setLoading(true);
@@ -446,6 +593,8 @@ export default function Reports() {
         setInvoiceStats(stats);
         setJobs(jobResponse.items || []);
         setExpenses(expenseResponse.items || []);
+        const keys = financialReport?.revenue_by_month ? Object.keys(financialReport.revenue_by_month) : [];
+        if (keys.length) setSelectedMonth(keys[keys.length - 1]);
       })
       .catch(() => setError('Could not load reports. Check the backend connection and try again.'))
       .finally(() => setLoading(false));
@@ -456,15 +605,17 @@ export default function Reports() {
   // top-level fields are booked-basis (a known, separate reconciliation issue
   // documented in reports.py) and would be inconsistent with this tab if mixed in.
   const monthKeys = financials?.revenue_by_month ? Object.keys(financials.revenue_by_month) : [];
-  const latestMonth = monthKeys[monthKeys.length - 1];
-  const moneyIn = latestMonth ? Number(financials.revenue_by_month[latestMonth] || 0) : 0;
-  const moneyOut = latestMonth ? Number(financials.expenses_by_month?.[latestMonth] || 0) : 0;
+  const activeMonth = selectedMonth || monthKeys[monthKeys.length - 1];
+  const isLatestMonth = activeMonth === monthKeys[monthKeys.length - 1];
+  const moneyIn = activeMonth ? Number(financials.revenue_by_month[activeMonth] || 0) : 0;
+  const moneyOut = activeMonth ? Number(financials.expenses_by_month?.[activeMonth] || 0) : 0;
   const netCashflow = moneyIn - moneyOut;
+  const monthLabel = formatMonthLabel(activeMonth);
 
   const cashflowStats = [
-    { label: 'Money In This Month', value: money(moneyIn), sub: 'Cash received', icon: D_CASH, color: 'teal' },
-    { label: 'Money Out This Month', value: money(moneyOut), sub: 'Cash paid out', icon: D_EXPENSES, color: 'warning' },
-    { label: 'Net Cashflow', value: money(netCashflow), sub: netCashflow >= 0 ? 'Positive this month' : 'Negative this month', icon: D_CASH, color: netCashflow >= 0 ? 'teal' : 'red' },
+    { label: 'Money In', value: money(moneyIn), sub: 'Cash received', icon: D_CASH, color: 'teal' },
+    { label: 'Money Out', value: money(moneyOut), sub: 'Cash paid out', icon: D_EXPENSES, color: 'warning' },
+    { label: 'Net Cashflow', value: money(netCashflow), sub: netCashflow >= 0 ? 'Positive' : 'Negative', icon: D_CASH, color: netCashflow >= 0 ? 'teal' : 'red' },
     { label: 'Months Tracked', value: String(monthKeys.length), sub: 'Trailing window', icon: D_INVOICES, color: 'secondary' },
   ];
 
@@ -473,16 +624,20 @@ export default function Reports() {
     .filter(expense => OUTSTANDING_EXPENSE_STATUSES.includes(expense.status))
     .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
 
+  // Unpaid Receivables/Payables are current outstanding balances, not tied to
+  // any single month (an invoice due today doesn't belong to "March"), so
+  // they deliberately do NOT change with the month selector — only the flow
+  // figures (money in/out, net cashflow) do. Labels reflect that.
   const snapshotStats = [
     { label: 'Jobs In Progress', value: String(activeJobsCount), sub: 'Queued or printing', icon: D_JOBS, color: 'primary' },
-    { label: 'Unpaid Receivables', value: money(invoiceStats?.outstanding || 0), sub: 'Owed to the business', icon: D_INVOICES, color: 'warning' },
-    { label: 'Unpaid Payables', value: money(outstandingPayablesTotal), sub: 'Owed by the business', icon: D_EXPENSES, color: 'red' },
-    { label: "This Month's Net Cashflow", value: money(netCashflow), sub: netCashflow >= 0 ? 'Positive' : 'Negative', icon: D_CASH, color: netCashflow >= 0 ? 'teal' : 'red' },
+    { label: 'Unpaid Receivables', value: money(invoiceStats?.outstanding || 0), sub: 'Owed to the business (current)', icon: D_INVOICES, color: 'warning' },
+    { label: 'Unpaid Payables', value: money(outstandingPayablesTotal), sub: 'Owed by the business (current)', icon: D_EXPENSES, color: 'red' },
+    { label: 'Net Cashflow', value: money(netCashflow), sub: netCashflow >= 0 ? 'Positive' : 'Negative', icon: D_CASH, color: netCashflow >= 0 ? 'teal' : 'red' },
   ];
 
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
-      <ModuleHeader title="Reports" subtitle="Cashflow and at-a-glance financial snapshot" actionLabel={null} />
+      <ModuleHeader title="Reports" subtitle="Cashflow and income statement" actionLabel={null} />
 
       <div className="chart-filters" style={{ marginBottom: '14px', width: 'fit-content' }}>
         {TABS.map(t => (
@@ -495,15 +650,28 @@ export default function Reports() {
 
       {!loading && !error && tab === 'Cashflow' && (
         <>
+          <MonthSelector monthKeys={monthKeys} selectedMonth={activeMonth} setSelectedMonth={setSelectedMonth} />
           <StatsGrid stats={cashflowStats} />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '14px' }}>
             <PulseChart financials={financials} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
+            <PlainEnglishCard moneyIn={moneyIn} moneyOut={moneyOut} netCashflow={netCashflow} monthLabel={monthLabel} />
           </div>
         </>
       )}
 
-      {!loading && !error && tab === 'Snapshot' && (
-        <StatsGrid stats={snapshotStats} />
+      {!loading && !error && tab === 'Income Statement' && (
+        <>
+          <MonthSelector monthKeys={monthKeys} selectedMonth={activeMonth} setSelectedMonth={setSelectedMonth} />
+          <StatsGrid stats={snapshotStats} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '14px' }}>
+            <PlainEnglishCard moneyIn={moneyIn} moneyOut={moneyOut} netCashflow={netCashflow} monthLabel={monthLabel} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
+            <ReceivablesPayablesCard receivables={invoiceStats?.outstanding || 0} payables={outstandingPayablesTotal} />
+          </div>
+        </>
       )}
 
       {tab === 'Analytics' && <AnalyticsTab />}

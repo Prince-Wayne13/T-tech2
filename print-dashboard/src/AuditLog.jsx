@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
 import { Icon, ModuleHeader, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid } from './components/ModuleStandard';
+import { downloadTablePDF } from './components/TablePDF';
 import { shortDate } from './utils/format';
 import UnifiedPreviewModal from './components/UnifiedPreviewModal';
 
@@ -93,17 +94,20 @@ export default function AuditLog() {
     { label: 'Active Users', value: String(new Set(auditData.map(log => log.user)).size), sub: 'This month', icon: D.reports, color: 'teal' },
   ];
 
-  const downloadAudit = () => {
-    const htmlContent = `<div class="top"><div><h1>T-Tech Audit Log</h1><div>${filtered.length} entries</div></div><div>${shortDate(new Date())}</div></div><table><thead><tr><th>User</th><th>Action</th><th>Target</th><th>Time</th></tr></thead><tbody>${filtered.map(log => `<tr><td>${log.user}</td><td>${log.action}</td><td>${log.target}</td><td>${log.time}</td></tr>`).join('')}</tbody></table>`;
-    const blob = new Blob([`<!doctype html><html><head><title>Audit Log</title><style>body { margin: 0; padding: 28px; font-family: Arial, sans-serif; color: #1f2937; background: #fff; } table { width: 100%; border-collapse: collapse; } th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 12px; } th { background: #f8fafc; color: #475569; }</style></head><body>${htmlContent}</body></html>`], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `audit-log-${new Date().toISOString().split('T')[0]}.html`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+  const downloadAudit = async () => {
+    await downloadTablePDF({
+      title: 'Audit Log',
+      subtitle: `${shortDate(new Date())} - ${filtered.length} entr${filtered.length !== 1 ? 'ies' : 'y'}`,
+      columns: [
+        { label: 'User', key: 'user', flex: 1.2 },
+        { label: 'Action', key: 'action', flex: 2.2 },
+        { label: 'Target', key: 'target', flex: 1.3 },
+        { label: 'Type', key: 'type', flex: 1 },
+        { label: 'Time', key: 'time', flex: 1.3 },
+      ],
+      rows: filtered.map(log => ({ ...log, __key: log.id })),
+      filename: `audit-log-${new Date().toISOString().split('T')[0]}.pdf`,
+    });
   };
 
   return (

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { PrintPreviewModal } from './components/PrintLayouts';
 import { NewJobModal, RecordPaymentModal, JobProgressModal } from './components/Modals';
+import { downloadTablePDF } from './components/TablePDF';
 import { api } from './api/client';
 import { shortDate } from './utils/format';
 import {
@@ -325,55 +326,36 @@ export default function Jobs() {
 
   // Item 8: Download Today's To-Do List — printable list of all in-session
   // jobs regardless of due date (per this session's confirmed scope), one
-  // staff field per job. Uses the same HTML print-dialog export mechanism
-  // as Audit Log/Archive/Petty Cash, for visual and mechanical consistency
-  // across the app's "download a register" actions rather than introducing
-  // a fourth different export approach.
-  const downloadTodoList = () => {
+  // staff field per job. Now a real .pdf via TablePDF.jsx (react-pdf) rather
+  // than an HTML file that only opened window.print() and called itself a
+  // PDF — Wayne's explicit ask this session.
+  const downloadTodoList = async () => {
     const activeJobs = jobs.filter(job => job.status === 'in_session');
-    // Item 6 (backend priority list): added client phone, amount to pay
-    // (total), amount paid so far, and quantity (completedCount/totalCount
-    // when tracked, else pages x copies) to the printable to-do list.
-    const rows = activeJobs.map(job => {
-      const total = Number(job.totals?.total || 0);
-      const paid = Number(job.totals?.paid || 0);
-      const quantity = job.totalCount > 0 ? `${job.completedCount} of ${job.totalCount}` : `${job.pages}pp x ${job.copies}`;
-      return `
-      <tr>
-        <td>${job.id}</td>
-        <td>${job.client}</td>
-        <td>${job.clientPhone || '-'}</td>
-        <td>${job.title}</td>
-        <td>${quantity}</td>
-        <td style="text-transform:capitalize">${job.priority}</td>
-        <td>${job.due}</td>
-        <td>MK ${total.toLocaleString()}</td>
-        <td>MK ${paid.toLocaleString()}</td>
-        <td>${job.assignedStaffName || '________________'}</td>
-      </tr>
-    `;
-    }).join('');
-    const htmlContent = `
-      <div class="top">
-        <div><h1>T-Tech Today's To-Do List</h1><div>${activeJobs.length} active job${activeJobs.length !== 1 ? 's' : ''}</div></div>
-        <div>${shortDate(new Date())}</div>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Job Ref</th><th>Client</th><th>Phone</th><th>Job Title</th><th>Qty</th><th>Priority</th><th>Due</th><th>Amount to Pay</th><th>Amount Paid</th><th>Assigned Staff</th></tr>
-        </thead>
-        <tbody>${rows || '<tr><td colspan="10" style="text-align:center;color:#94a3b8;">No active jobs right now.</td></tr>'}</tbody>
-      </table>
-    `;
-    const blob = new Blob([`<!doctype html><html><head><title>Today's To-Do List</title><style>body { margin: 0; padding: 28px; font-family: Arial, sans-serif; color: #1f2937; background: #fff; } table { width: 100%; border-collapse: collapse; } th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 12px; } th { background: #f8fafc; color: #475569; } .top { display: flex; justify-content: space-between; margin-bottom: 16px; }</style></head><body>${htmlContent}</body></html>`], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `todo-list-${new Date().toISOString().split('T')[0]}.html`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    // Item 6 (backend priority list): client phone, amount to pay (total),
+    // amount paid so far, and quantity (completedCount/totalCount when
+    // tracked, else pages x copies) on the printable to-do list.
+    const columns = [
+      { label: 'Job Ref', key: 'id', flex: 1.1 },
+      { label: 'Client', key: 'client', flex: 1.4 },
+      { label: 'Phone', key: 'clientPhone', flex: 1.1 },
+      { label: 'Job Title', key: 'title', flex: 1.6 },
+      {
+        label: 'Qty', flex: 1,
+        render: job => (job.totalCount > 0 ? `${job.completedCount} of ${job.totalCount}` : `${job.pages}pp x ${job.copies}`),
+      },
+      { label: 'Priority', flex: 0.8, render: job => job.priority?.charAt(0).toUpperCase() + job.priority?.slice(1) },
+      { label: 'Due', key: 'due', flex: 0.9 },
+      { label: 'Amount to Pay', flex: 1.1, align: 'right', render: job => `MK ${Number(job.totals?.total || 0).toLocaleString()}` },
+      { label: 'Amount Paid', flex: 1.1, align: 'right', render: job => `MK ${Number(job.totals?.paid || 0).toLocaleString()}` },
+      { label: 'Assigned Staff', flex: 1.3, render: job => job.assignedStaffName || '________________' },
+    ];
+    await downloadTablePDF({
+      title: "Today's To-Do List",
+      subtitle: `${shortDate(new Date())} - ${activeJobs.length} active job${activeJobs.length !== 1 ? 's' : ''}`,
+      columns,
+      rows: activeJobs.map(job => ({ ...job, __key: job.id })),
+      filename: `todo-list-${new Date().toISOString().split('T')[0]}.pdf`,
+    });
   };
 
   return (

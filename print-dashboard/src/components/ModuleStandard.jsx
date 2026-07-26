@@ -183,9 +183,9 @@ export function StatsCard({ label, value, sub, icon, color }) {
   );
 }
 
-export function StatsGrid({ stats }) {
+export function StatsGrid({ stats, columns = 4 }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '14px' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: '14px', marginBottom: '14px' }}>
       {stats.map(stat => <StatsCard key={stat.label} {...stat} />)}
     </div>
   );

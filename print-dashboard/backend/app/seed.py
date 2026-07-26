@@ -437,7 +437,15 @@ def seed_mock_data(reset=False):
         {"category": "Ink & Consumables", "title": "UV DTF ink and adhesive laminate", "amount_range": (250000, 500000), "submitted_by": "Print Room", "vendor_name": "InkPro Malawi"},
         {"category": "Transport", "title": "Site installation vehicle hire", "amount_range": (60000, 120000), "submitted_by": "Field Team", "vendor_name": "SignFit Installations"},
     ]
-    expense_statuses = ["approved", "approved", "approved", "reimbursed", "pending"]
+    # 'paid' added alongside the existing statuses (2026-07-26): previously
+    # absent from this list entirely, meaning no seeded expense ever had
+    # status='paid' or a paid_on date - the Cash Flow report's expenses_by_month
+    # (services/reports.py, keyed off Expense.paid_on) had nothing to read for
+    # expenses, ever, regardless of which month was selected. 'reimbursed' also
+    # never got a paid_on here despite representing real cash paid out - fixed
+    # below alongside 'paid', both using the same date-after-expense-date
+    # pattern already used for invoice payments elsewhere in this file.
+    expense_statuses = ["approved", "paid", "paid", "reimbursed", "pending"]
 
     expenses = []
     exp_counter = 2001
@@ -454,6 +462,14 @@ def seed_mock_data(reset=False):
             tmpl = random.choice(expense_templates)
             amount = random.randint(*tmpl["amount_range"])
             amount = round(amount / 1000) * 1000
+            status = random.choice(expense_statuses)
+            # paid_on only makes sense once money has actually moved - approved
+            # (not yet paid) and pending/rejected correctly get no paid_on,
+            # same "paid_on is the source of truth for cash movement" rule the
+            # Cash Flow report itself already relies on (see reports.py).
+            paid_on = None
+            if status in ("paid", "reimbursed"):
+                paid_on = min(exp_date + timedelta(days=random.randint(1, 10)), today)
             expense = Expense(
                 expense_ref=f"EXP-{exp_counter}",
                 vendor_id=vendor_by_name[tmpl["vendor_name"]].id if tmpl.get("vendor_name") else None,
@@ -461,11 +477,12 @@ def seed_mock_data(reset=False):
                 title=tmpl["title"],
                 amount=amount,
                 expense_date=exp_date,
-                status=random.choice(expense_statuses),
+                paid_on=paid_on,
+                status=status,
                 submitted_by=tmpl["submitted_by"],
             )
             expense.created_at = as_datetime(exp_date)
-            expense.updated_at = as_datetime(exp_date)
+            expense.updated_at = as_datetime(paid_on or exp_date)
             expenses.append(expense)
             exp_counter += 1
         next_month = (current.replace(day=28) + timedelta(days=4)).replace(day=1)

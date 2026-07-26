@@ -109,6 +109,25 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(payload),
   }),
+  // Materials/inventory - backend built this session, no UI wired to it yet.
+  materials: (params = '') => request(`/materials${params}`),
+  materialsSummary: () => request('/materials/summary'),
+  getMaterial: (id) => request(`/materials/${id}`),
+  createMaterial: (payload) => request('/materials', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  updateMaterial: (id, payload) => request(`/materials/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  deleteMaterial: (id) => request(`/materials/${id}`, { method: 'DELETE' }),
+  materialTransactions: (materialId, params = '') => request(`/materials/${materialId}/transactions${params}`),
+  createMaterialTransaction: (materialId, payload) => request(`/materials/${materialId}/transactions`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  deleteMaterialTransaction: (id) => request(`/materials/transactions/${id}`, { method: 'DELETE' }),
   advances: (params = '') => request(`/advances${params}`),
   createAdvance: (payload) => request('/advances', {
     method: 'POST',

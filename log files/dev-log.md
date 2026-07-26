@@ -1293,6 +1293,232 @@ page won't appear on an already-open Sales page for up to ~45 seconds, not insta
 later wants instant cross-page sync, that would need a shared state store, a websocket/SSE
 channel, or a "refetch on window focus" listener — none of which were requested or built this
 session; flagging as a reasonable future improvement, not a gap in the requested fix.
+## 2026-07-25 20:57 UTC — Vendor payment filter, real PDF exports, Reports rebuild, machine/service revenue split, materials backend — myth claude
 
-<!-- New entries go above this line, most recent first -->
+**Scope this session, in the order Wayne asked for (backend before frontend, major before minor):**
+
+### 1. Materials/inventory tracking — new backend, no UI yet (explicit scope for this session)
+
+Wayne asked for "how much vinyl we've got, how much we've used, how much revenue it made, and
+when it might run out." No inventory concept existed anywhere in the schema before this — checked
+`models.py` end to end to confirm before building anything.
+
+Two new tables, not one mutable quantity field:
+* **`Material`** (`backend/app/models.py`) — the stock item itself (name, unit, unit cost, optional
+  link to a `ProductionMachine` and/or `Vendor`, reorder point).
+* **`MaterialTransaction`** — every purchase, usage, or manual adjustment as its own row, optionally
+  linked to the `Job` it was consumed on.
+
+A single running-quantity column would drift out of sync with reality (double-writes, missed
+updates) and gives no history to compute a burn rate from. So current stock, cost, revenue, and
+projected days-remaining are **all derived live** from the transaction ledger every time —
+same "derive, don't store" convention already used for `Vendor.balance` in `services/vendors.py`,
+for the same reason.
+
+**New files:** `backend/app/services/materials.py` (stock/revenue/cost/projection logic,
+`serialize_material`), `backend/app/routes/materials.py` (full CRUD on `/api/materials`, plus
+`/api/materials/<id>/transactions` and a `/api/materials/summary` dashboard-ready endpoint).
+Registered in `routes/__init__.py`; `Material`/`MaterialTransaction` added to the explicit model
+imports in `app/__init__.py` so `db.create_all()` picks them up the same way `Vendor` etc. already do.
+
+Projection logic: average daily usage over the trailing 30 days, applied to current on-hand stock
+→ estimated days remaining + empty date. Explicitly framed in the code comments as a simple
+historical-pace estimate, not a forecasting model — same honesty-about-limits approach already
+used for the existing Projections analytics tab.
+
+`api/client.js` has the frontend functions ready (`materials`, `materialsSummary`,
+`createMaterial`, `createMaterialTransaction`, etc.) but **nothing in the UI calls them yet** —
+Wayne explicitly chose "backend + API now, UI next session" when asked.
+
+**Verified, not just written:** built a venv, installed `requirements.txt` clean, ran
+`db.create_all()` and confirmed both new tables appear via SQLAlchemy's inspector. Then ran a full
+`run_full_upgrade()` pass (the existing idempotent migration runner in `schema_migrations.py`) to
+confirm nothing about the new models broke any of the existing migration steps. Then hit the
+actual Flask routes end-to-end: created a material, recorded a purchase (100 units) and a usage
+(15 units), confirmed `on_hand` computed correctly (85), and confirmed the projection math
+(15 units / 30 days = 0.5/day → 85 / 0.5 = 170 days remaining) came back right. Also confirmed
+`low_stock` flips correctly against `reorder_point`.
+
+### 2. Vendors page — paid / partial / unpaid filter
+
+Replaced the category-based filter with a payment-status filter (`All / Unpaid / Partial / Paid`),
+per Wayne's explicit ask. No backend change needed — `services/vendors.py` was already computing
+`amount_owed`/`amount_paid` live per vendor from their `Expense` rows; the frontend just wasn't
+using those fields.
+
+"Partial" isn't an `Expense`-level status anywhere in this app (expenses are binary
+pending/paid) — it's necessarily a **vendor-level derived fact**: a vendor is `paid` when owed ≤ 0
+and something's been paid, `unpaid` when nothing's been paid, `partial` when both owed and paid
+are > 0. That derivation lives in `mapVendor()` in `Vendors.jsx`.
+
+Row UI updated to show amount owed and amount paid side by side, and the stats bar now shows
+"We Owe" / "Paid Out" / "Unpaid Vendors" instead of the old category-count stats.
+
+**Known data caveat, not a bug in this filter:** tested against the seed data generator
+(`seed.py`) and every seeded vendor comes back `unpaid`, even ones with `approved`/`reimbursed`
+expense statuses. Traced this to `seed.py`'s expense-seeding block never setting `Expense.paid_on` —
+and `services/expenses.py::sync_expense_status()` (and, by extension, `vendor_balance_summary()`'s
+paid-detection) correctly requires `paid_on` to be set, not just `status`. This is a real gap in
+the seed script, not in the filter logic — confirmed by checking `routes/expenses.py`'s actual
+update route, which **does** set `paid_on` on a real payment and correctly triggers the auto-flip
+to `paid`. So this filter will work correctly on live/real data; it's only the mock seed data that
+never exercises the paid path. Flagging rather than silently patching `seed.py`, since changing
+seed behavior wasn't asked for.
+
+### 3. Today's To-Do List and Audit Log — real PDF downloads, not HTML
+
+Both were building an HTML blob and naming it `.html`, despite the Audit Log button explicitly
+saying "Download PDF." Neither was ever a PDF — just an HTML file that happened to look printable.
+
+**New file: `src/components/TablePDF.jsx`** — a generic, reusable tabular PDF generator built on
+`@react-pdf/renderer` (already proven in `InvoicePDF.jsx`, so no new dependency). Landscape A4,
+same brand header/footer styling as the invoice PDFs. Takes a `columns`/`rows` shape so any
+register-style page can use it without rebuilding PDF layout logic each time.
+
+Rewired `downloadTodoList()` in `Jobs.jsx` and `downloadAudit()` in `AuditLog.jsx` to call
+`downloadTablePDF(...)` instead of building a `Blob([...], {type: 'text/html'})`. Filenames now
+end in `.pdf` and the file that downloads actually is one.
+
+**Scope note:** `Archive.jsx` and `pettycash.jsx` have the exact same HTML-pretending-to-be-PDF
+pattern. Wayne only asked about the to-do list and "the log" (audit log) specifically, so those
+two are the only ones touched this session — flagging the other two as a known, easy follow-up
+rather than changing pages that weren't asked for.
+
+### 4. Reports page — rebuilt, "grayed out" filters fixed
+
+**The gray filters were a real, measurable bug, not a subjective complaint.** Computed WCAG
+contrast ratios directly: inactive `.filter-btn` text (`--text-muted`, `#8B9BB0`) against the
+toolbar's `--bg-canvas` (`#dbdee0`) background comes out to **2.1:1** — well under the 4.5:1 WCAG
+AA minimum for body text. That's why it read as disabled. Switched inactive filter-button text to
+`--text-body` (5.57:1, comfortably passes) and darkened the hover state to `--text-head`.
+
+Also added a shared `.filter-select` class (`styles.css`) for the plain `<select>` dropdowns in
+Reports (month, service type) — these were using bare inline styles with a thin border and white
+background that looked like an unstyled browser default sitting next to the styled pill filters.
+Now they match the app's rounded, bordered, custom-arrow visual language.
+
+**Rethought the page structure**, per Wayne's ask to simplify and surface only the most useful
+numbers. The previous Cashflow and Snapshot tabs repeated the same Net Cashflow figure under two
+different labels, and split 8 stat cards across two clicks for what's really one "how's the
+business doing right now" picture. Collapsed into a single **Overview** tab with 6
+non-overlapping stats (Money In, Money Out, Net Cashflow, Jobs In Progress, Unpaid Receivables,
+Unpaid Payables) in a 3-column grid, plus the existing pulse chart. **Analytics** stays as its own
+tab — genuinely a different mode (drill-down tables), not at-a-glance stats, so didn't force it
+into the same view.
+
+`StatsGrid` (`components/ModuleStandard.jsx`) now takes an optional `columns` prop (defaults to
+4, unchanged everywhere else that uses it) so Reports could use a 3-column layout for its 6 cards
+without duplicating the component.
+
+### 5. Machine Revenue — added a Machine/Service split
+
+Wayne asked for a service-revenue filter alongside the existing month and service-type dropdowns.
+Checked `services/analytics.py::build_machine_category_revenue_report()` first: the backend
+**already** returns both machine-attributed and category/service-attributed rows in one list,
+distinguished by `row.type` (`'machine'` vs `'category'`) — no backend change needed. Added a
+client-side `All / Machine / Service` pill filter in `MachineRevenueSection` (Reports.jsx) that
+filters on that existing field, plus a running total for whatever's currently shown. Section
+renamed "Machine & Service Revenue" to reflect what it now actually shows.
+
+### Build verification
+
+No JS/JSX execution environment persists between sessions the normal way, so this time an actual
+build was run rather than relying on read-through alone: installed frontend deps
+(`npm install`), ran `npx vite build` against the real repo. Hit one **pre-existing, unrelated**
+issue — `App.jsx` imports `./Sales` and `./PettyCash` but the files on disk are `sales.jsx` and
+`pettycash.jsx` (lowercase). Works fine on a case-insensitive filesystem (Mac/Windows) but breaks
+on a case-sensitive one (Linux/most CI). Not something touched this session — confirmed via `ls`
+that those filenames were already lowercase before any edits. Used temporary local symlinks
+*only* to get a clean build for verifying this session's actual changes, then removed them —
+no repo files changed by that workaround. **Flagging this for Wayne separately since it'll bite
+on any Linux deployment or CI pipeline**, even though it's not part of what was asked this session.
+
+With that worked around, `npx vite build` completed clean — all edited/new files (`Vendors.jsx`,
+`Jobs.jsx`, `AuditLog.jsx`, `Reports.jsx`, `TablePDF.jsx`, `ModuleStandard.jsx`) compile with no
+errors. Backend verified separately via a real Flask app + SQLite run: `run_full_upgrade()`,
+materials CRUD, and vendor payment-status derivation all tested against actual seeded data, not
+just read through.
+
+**Files changed:** `backend/app/__init__.py`, `backend/app/models.py`,
+`backend/app/routes/__init__.py`, `backend/app/routes/materials.py` (new),
+`backend/app/services/materials.py` (new), `src/AuditLog.jsx`, `src/Jobs.jsx`, `src/Reports.jsx`,
+`src/Vendors.jsx`, `src/api/client.js`, `src/components/ModuleStandard.jsx`,
+`src/components/TablePDF.jsx` (new), `src/styles.css`.
+
+**Still open / flagged, not fixed this session (out of the scope Wayne gave):**
+* `Archive.jsx` / `pettycash.jsx` downloads still HTML-as-PDF, same pattern as items fixed above.
+* `seed.py` never sets `Expense.paid_on`, so seeded vendors will all show as "unpaid" until real
+  payments are recorded through the actual update flow.
+* `Sales.jsx`/`PettyCash.jsx` vs `sales.jsx`/`pettycash.jsx` filename-case mismatch will break a
+  case-sensitive build/deploy.
+* Materials/inventory has no UI yet — backend and API are ready for next session.
+
+## 2026-07-26 — Reports: Monthly filter + Plain-English translation card
+**Signed:** Myth Claude
+
+### Context
+Wayne asked to work through the report suite from his Financial/Inventory Reports Summary PDF one at a time, confirming each against what's actually live in the repo (not memory/assumption). Pulled `Prince-Wayne13/T-tech2` directly via git clone to inspect ground truth — confirmed `print-dashboard/` at repo root is the live tree; `versions-dashboard/` is archived history and was ignored.
+
+### Findings (Report 1 — Income Statement / P&L)
+- Backend (`services/reports.py::build_financial_report()`) already computes a full management-accounts-style dataset: revenue, cash collected, expenses, profit, revenue-by-month, expenses-by-month, receivables aging, top clients, product mix, machine revenue.
+- Frontend (`Reports.jsx`) only ever surfaced 4-box stat summaries on two tabs (Cashflow, Snapshot) — no formatted P&L statement view exists anywhere in the UI.
+- `revenue`/`profit` top-level fields are booked-basis (invoice date), not cash-basis — a known, already-commented distinction in the code. Cashflow tab correctly uses the cash-basis `revenue_by_month`/`expenses_by_month` fields instead.
+- The `period` query param on `/reports/financials?period=...` is accepted but never used to filter anything — dead parameter.
+- Confirmed via `grep`: **zero frontend references to `/materials`** — the Material/MaterialTransaction ledger system (purchases, usage, adjustments, stock projection, revenue attribution) is fully built on the backend with a complete REST API and has no UI at all. Directly answers PDF Reports 3 & 4 (Physical Inventory Counts, Materials Used Calculation) once a frontend page is built.
+- Report 6 (Spoilage/Waste) has no dedicated endpoint, but `MaterialTransaction.transaction_type == "adjustment"` already carries the waste/damage/loss signal — a small service function comparing consumption to output would cover this without new tables.
+
+### Changes made this session
+**File:** `print-dashboard/src/Reports.jsx`
+
+1. Added `MonthSelector` component — dropdown over the 13 trailing months already present in every `financialReport()` response. No new backend call.
+2. Added `PlainEnglishCard` component — one-line verdict (made money / broke even / spent more than earned) + money-in/money-out/left-over breakdown in plain words + a simple two-segment proportional bar (spent vs. kept). Explicitly notes that Unpaid Receivables/Payables are current balances, not month-scoped, to avoid misreading.
+3. Wired `selectedMonth` state into `Reports()` — defaults to latest month on load, drives both stat grids and the new card on Cashflow and Snapshot tabs.
+4. Left Business Pulse chart (13-month trend line) and Unpaid Receivables/Payables stat boxes deliberately un-filtered by month — flagged this explicitly rather than silently changing their meaning.
+5. Renamed stat labels from "Money In This Month" → "Money In" etc. since the label was hardcoded to "this month" but the value can now be any selected month.
+
+### Verification
+- `esbuild` isolated build of `Reports.jsx` (JSX transform only, externals stubbed) — compiles clean, no syntax errors.
+- Full-repo `vite build` fails, but on a **pre-existing, unrelated issue**: `App.jsx` imports `./Sales` and `./PettyCash` (capitalized) while the actual files on disk are `sales.jsx`/`pettycash.jsx` (lowercase) — a case-sensitivity mismatch that will break on any case-sensitive filesystem (Linux). Not touched, not caused by this session's changes. Flagged for Wayne separately.
+
+### Known gaps / not yet addressed
+- No formatted, printable/exportable Income Statement document (Revenue / COGS / Opex / Net Profit line-by-line) exists yet — current UI is stat boxes + chart, not a statement layout. Not addressed this session; Wayne confirmed current state before requesting the filter/translation additions instead.
+- Materials frontend page — still not built. Confirmed as the highest-leverage next gap (backend complete, zero UI).
+- Spoilage/Waste report — still not built.
+- Report `period` param on `/reports/financials` remains dead/unused — not addressed this session, no functional impact since frontend gets full month range regardless.
+
+### Next session
+Continue report-by-report confirmation per Wayne's process — Report 2 (Cash Flow Log) next, pending his confirmation that the Reports.jsx changes render as expected.
+
+## 2026-07-26 (cont.) — Fixed dead paid-expense pipeline; Reports UI polish
+**Signed:** Myth Claude
+
+### Context
+Continuation of Report 1/2 confirmation pass. Wayne asked directly whether pressing a "Mark Paid" button would actually flow through to reports — pushed to verify rather than assume, which surfaced a real structural gap.
+
+### Investigation
+- Confirmed via `grep` on `Expenses.jsx`: no UI path anywhere ever set `status: 'paid'`, and the existing `handleStatus` helper only ever sent `{ status }` — never `paid_on` — even for the actions that did exist (Approve/Reject/Reimburse).
+- Confirmed via `seed.py`: `expense_statuses = ["approved", "approved", "approved", "reimbursed", "pending"]` — `"paid"` was never in the seed distribution, and `paid_on` was never set on any seeded expense, including reimbursed ones.
+- Net effect: Cash Flow Log's "Money Out" figure (`services/reports.py`, keyed off `Expense.paid_on`) has been structurally empty for every month, not just occasionally incomplete — nothing in the system, seed or live, ever populated `paid_on`.
+- Checked backend `update_expense` route separately — it already accepted and saved `paid_on` correctly. Only the frontend and seed data were the gap; no backend fix needed there.
+- Found a second inconsistency while checking dashboard impact: `build_dashboard_summary()` and `build_financial_report()` in `services/reports.py` checked `expense.status in {"approved", "reimbursed"}`, excluding `"paid"` — while `vendors.py` and `analytics.py` already treat `{"approved", "reimbursed", "paid"}` as the canonical "real spend" set (`vendors.py::PAID_STATUSES`). Wayne confirmed: include paid in the Dashboard total once added, don't leave two pages disagreeing.
+
+### Changes made
+1. **`src/Expenses.jsx`** — added "Mark Paid" button on expenses with status `approved` or `reimbursed`. Prompts for payment date (defaults to today), sends `status: 'paid'` and `paid_on` in a single `updateExpense` call. Extended `handleStatus(expense, status, extra = {})` to accept an optional payload for this, without touching the existing Approve/Reject/Reimburse call sites.
+2. **`backend/app/services/reports.py`** — imported `PAID_STATUSES` from `vendors.py` and replaced two hardcoded `{"approved", "reimbursed"}` checks (`build_dashboard_summary`, `build_financial_report`) with it, so all three modules (`reports.py`, `vendors.py`, `analytics.py`) now agree on what counts as real spend.
+3. **`backend/app/seed.py`** — added `"paid"` to `expense_statuses` distribution; `paid_on` now set (1–10 days after `expense_date`, capped at `today`) for both `paid` and `reimbursed` rows, matching the payment-date pattern already used for invoices elsewhere in the same file.
+4. **`src/Reports.jsx`** (carried from earlier this session) — Snapshot tab renamed to "Income Statement"; added `ReceivablesPayablesCard` giving plain-English meaning to Unpaid Receivables/Payables (separate from the cashflow verdict card, since balances and monthly flow are different questions).
+
+### Verification
+- Real Python import test (`python3 -c "from app.services import reports"`) confirmed no circular import from `reports.py` → `vendors.py`; `analytics.py` → `reports.py` chain remains one-directional.
+- `ast.parse()` syntax check on `seed.py` and `reports.py` — clean.
+- `esbuild` isolated compile on `Reports.jsx` and `Expenses.jsx` — clean, no errors.
+
+### Known follow-up (not done this session, flagged only)
+- Existing expenses already in any live/deployed database will **not** retroactively gain `paid_on` from the seed.py fix — that only affects future re-seeds. Real data needs manual "Mark Paid" clicks going forward, or a one-off backfill script if Wayne wants historical data corrected.
+
+### Delivery
+Committed locally in sandbox clone as `4fd44b0` on `main` (4 files changed, 236 insertions, 21 deletions). No push access to `Prince-Wayne13/T-tech2` from this environment — exported as `0001-Reports-monthly-filter-plain-English-cards-fix-dead-.patch` for Wayne to apply via `git am` and push himself.
+
+### Next session
+Report 5 (Sales Invoices & Job Orders / Quantity Made) confirmation pass, per Wayne's "move on" signal. Materials frontend (Reports 3/4/6) remains flagged as its own larger, dedicated build — backend complete, zero UI.
 <!-- New entries go above this line, most recent first -->

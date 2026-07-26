@@ -596,15 +596,44 @@ svg { display: block; flex-shrink: 0; }
   border-radius: 5px;
   font-size: 10px;
   font-weight: 600;
-  color: var(--text-muted);
+  /* Was var(--text-muted) (#8B9BB0) on this bar's bg-canvas background —
+     a 2.1:1 contrast ratio, well under WCAG AA's 4.5:1 minimum for text,
+     which reads as disabled rather than clickable. text-body (5.57:1)
+     keeps it visually secondary to the active pill while staying legible. */
+  color: var(--text-body);
   transition: all var(--ease);
+  cursor: pointer;
 }
 .filter-btn.active {
   background: #fff;
   color: var(--text-head);
   box-shadow: 0 1px 3px rgba(43, 58, 74, 0.06);
 }
-.filter-btn:hover:not(.active) { color: var(--text-body); }
+.filter-btn:hover:not(.active) { color: var(--text-head); }
+
+/* Shared dropdown style for report/analytics filters (month, service type,
+   etc.) — previously these used bare inline styles per-instance with a
+   1px border and white background, which reads as an unstyled/disabled
+   browser default next to the pill-style .filter-btn group beside it.
+   This brings them into the same visual language. */
+.filter-select {
+  padding: 6px 26px 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-faint);
+  background-color: #fff;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3e%3cpath d='M1 1l4 4 4-4' stroke='%234A5568' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  appearance: none;
+  -webkit-appearance: none;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-body);
+  cursor: pointer;
+  transition: all var(--ease);
+}
+.filter-select:hover { border-color: var(--border-light); color: var(--text-head); }
+.filter-select:focus { outline: none; border-color: var(--secondary); }
 
 .chart-area {
   background: var(--bg-chart);
