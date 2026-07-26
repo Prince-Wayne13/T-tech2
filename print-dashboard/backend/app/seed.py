@@ -233,6 +233,19 @@ def seed_mock_data(reset=False):
                 pages=tmpl["pages"],
                 copies=tmpl["copies"],
                 progress=progress,
+                # Fix (seed.py job-count bug, flagged 2026-07-26): total_count was
+                # never set here, so it defaulted to 0 and Jobs.jsx's ProgressCell
+                # (hasCounts = totalCount > 0) always fell back to the generic
+                # progress-percent bar instead of showing "X of Y units" for any
+                # seeded job from this block. tmpl["copies"] is already the natural
+                # per-job unit count (same figure the invoice/job templates use
+                # elsewhere), so it's reused here rather than inventing a new number.
+                # completed_count is derived from progress% against that total so
+                # the "X of Y" label and the bar fill stay visually consistent -
+                # a "finishing" job at 82% progress shows ~82% of its units done,
+                # not an arbitrary unrelated figure.
+                total_count=tmpl["copies"],
+                completed_count=round(tmpl["copies"] * progress / 100),
                 due_date=job_date + timedelta(days=random.randint(2, 10)),
                 assigned_staff_id=random.choice(staff_members).id,
                 notes="",
@@ -365,6 +378,14 @@ def seed_mock_data(reset=False):
                 status="finished",
                 priority="medium",
                 progress=100,
+                # Fix (seed.py job-count bug, flagged 2026-07-26): this job is
+                # always fully finished (status="finished", progress=100), so
+                # completed_count == total_count is the correct state, not two
+                # unset zeros. total_count is summed from the same line_items
+                # this invoice was just built from (the raw dict list, quantity
+                # key), matching the unit count actually billed.
+                total_count=sum(li["quantity"] for li in line_items),
+                completed_count=sum(li["quantity"] for li in line_items),
                 due_date=due_on,
                 assigned_staff_id=random.choice(staff_members).id,
                 notes="Synthetic job created from invoice seed data.",
@@ -674,6 +695,14 @@ def seed_mock_data(reset=False):
                     priority=proposal.priority,
                     progress=100,
                     total_count=len(proposal.line_items),
+                    # Fix (seed.py job-count bug, flagged 2026-07-26): total_count
+                    # was already set here (matching accept_proposal()'s own
+                    # line-item-count convention in routes/proposals.py - not
+                    # changed to a unit-quantity sum, to stay consistent with the
+                    # real accept flow's behavior), but completed_count was never
+                    # set, so a "completed" job was showing "0 of N" instead of
+                    # "N of N". status="completed"/progress=100 means fully done.
+                    completed_count=len(proposal.line_items),
                     due_date=proposal.valid_until,
                     assigned_staff_id=proposal.assigned_staff_id,
                     notes=proposal.notes,
@@ -774,6 +803,12 @@ def seed_mock_data(reset=False):
         status="finished",
         priority="high",
         progress=100,
+        # Fix (seed.py job-count bug, flagged 2026-07-26): same pattern as the
+        # other invoice-backed "finished" job above - fully done, so
+        # completed_count == total_count, summed from loyal_line_items'
+        # quantity key rather than left at the unset default of 0/0.
+        total_count=sum(li["quantity"] for li in loyal_line_items),
+        completed_count=sum(li["quantity"] for li in loyal_line_items),
         due_date=loyal_due_on,
         assigned_staff_id=staff_members[0].id,
         notes="Full-store rollout for a repeat client — see invoice notes for loyalty discount.",

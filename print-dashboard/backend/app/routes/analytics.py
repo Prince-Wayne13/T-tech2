@@ -9,6 +9,7 @@ from ..services.analytics import (
     build_sales_vs_expenses_report,
     build_vendor_report,
 )
+from ..services.reports import build_job_throughput, build_quantity_produced
 
 bp = Blueprint("analytics", __name__)
 
@@ -39,3 +40,13 @@ def machine_category_revenue():
         month=request.args.get("month"),
         service_type=request.args.get("service_type"),
     ))
+
+
+@bp.get("/quantity-produced")
+def quantity_produced():
+    return jsonify(build_quantity_produced())
+
+
+@bp.get("/job-throughput")
+def job_throughput():
+    return jsonify(build_job_throughput())

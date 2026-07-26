@@ -181,4 +181,6 @@ export const api = {
   analyticsProjections: () => request('/reports/analytics/projections'),
   analyticsSalesVsExpenses: () => request('/reports/analytics/sales-vs-expenses'),
   analyticsMachineRevenue: (params = '') => request(`/reports/analytics/machine-category-revenue${params}`),
+  analyticsQuantityProduced: () => request('/reports/analytics/quantity-produced'),
+  analyticsJobThroughput: () => request('/reports/analytics/job-throughput'),
 };

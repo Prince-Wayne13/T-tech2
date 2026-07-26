@@ -1521,4 +1521,372 @@ Committed locally in sandbox clone as `4fd44b0` on `main` (4 files changed, 236 
 
 ### Next session
 Report 5 (Sales Invoices & Job Orders / Quantity Made) confirmation pass, per Wayne's "move on" signal. Materials frontend (Reports 3/4/6) remains flagged as its own larger, dedicated build — backend complete, zero UI.
-<!-- New entries go above this line, most recent first -->
+## 2026-07-26 — Report 5: Quantity Made analytics section (pulled real repo files first)
+Author: Sam Claude
+Date: 2026-07-26
+Scope: Implementation session per the standing plan carried into this session — (1) build
+"Quantity Made" off `InvoiceLineItem.quantity`, real data, no dependency on the known-broken job
+counts; (2) log the `seed.py` job-count bug as a flagged, separate follow-up rather than fixing it
+now. No files were attached this session — pulled the live repo directly from
+`github.com/Prince-Wayne13/T-tech2` (via the GitHub API + `raw.githubusercontent.com`, since
+`github.com` itself blocks automated fetches) rather than guessing at unseen file contents, per
+this log's established practice.
+ 
+**Correction to this session's own starting plan, found before writing any code:** the plan
+described placing the new card "with Machine Revenue" and assumed Machine Revenue lived in
+`services/reports.py`/`routes/reports.py` (`build_machine_revenue`, `/reports/machines/revenue`).
+Pulling the real files showed this is stale — the codebase now has two parallel systems:
+* `services/reports.py`/`routes/reports.py` (`/api/reports/...`) — `build_machine_revenue` still
+  exists here and is still called by `api.machineRevenue()`, but nothing in the current
+  `Reports.jsx` calls it anymore.
+* `services/analytics.py`/`routes/analytics.py` (`/api/reports/analytics/...`) — a separate,
+  newer blueprint (registered in `routes/__init__.py` as its own prefix, not nested under
+  `reports.py`'s blueprint object). `Reports.jsx`'s actual live "Machine Revenue" section
+  (`MachineRevenueSection`) calls `api.analyticsMachineRevenue()`, which hits
+  `build_machine_category_revenue_report()` in `services/analytics.py` via
+  `/reports/analytics/machine-category-revenue` — a different, month/service-type-filterable
+  function, not `build_machine_revenue`.
+This means the dev log's own prior entries describing `MachineRevenueSection` pulling from
+`services/reports.py` (2026-07-21 14:12 UTC "Snapshot" tab entry, and the abandoned old
+report-library `RPT-MACHINE-REV` metric) describe an earlier version of this page that has since
+been superseded by the Analytics-tab rebuild — not this session's own error, but worth noting
+since it means "closest existing pattern" for a new analytics card is the Analytics tab's
+`useAnalyticsData`/`SectionShell`/section-picker pattern, not a `reports.py`-blueprint route.
+Built accordingly rather than against the stale plan.
+**Files pulled from the real repo (raw.githubusercontent.com, `main` branch,
+`print-dashboard/` root — not the archived `versions-dashboard/STAGE2/...` copies also present in
+the repo, which are old snapshots):** `backend/app/services/reports.py`,
+`backend/app/routes/reports.py`, `backend/app/routes/analytics.py`,
+`backend/app/services/analytics.py`, `backend/app/models.py`, `backend/app/routes/__init__.py`,
+`src/Reports.jsx`, `src/api/client.js`.
+ 
+**Step 1 — data shape confirmed against real `models.py`:** `InvoiceLineItem.quantity`
+(`db.Numeric(12, 2)`) and `InvoiceLineItem.product_type` (`db.String(80)`) both exist exactly as
+assumed. `Invoice.issued_on` (`db.Date`) confirmed as the only invoice-level date available for a
+month key — no separate production-date field exists anywhere on `Invoice`/`InvoiceLineItem`/
+`Job`, so `issued_on` is used as an explicit, flagged proxy (comment in code, and in the UI copy
+under the section header), same honest-proxy stance the 2026-07-20 cashflow-date-fix entry already
+established for `revenue_by_month`.
+ 
+**Step 2 — `build_quantity_produced()` added to `backend/app/services/reports.py`:**
+* Sums `InvoiceLineItem.quantity` grouped by month (via the existing `month_key()`/
+  `trailing_month_keys()` helpers already in this file) and by `product_type`, matching the
+  `"General Print"` fallback convention already used by `build_financial_report()`'s
+  `product_mix`.
+* Filtered to `active_invoice_statuses()` — same set used by `build_financial_report` and
+  `build_machine_revenue` — so cancelled/void invoices don't inflate quantity totals.
+* Returns `quantity_by_month`, `quantity_by_month_and_type`, `quantity_by_type`, and a
+  `date_basis: "issued_on"` field so any consumer (UI or otherwise) can see which date field was
+  used without needing to read the code.
+* Placed as a plain function in `reports.py`, not `analytics.py` — `analytics.py` already imports
+  shared helpers (`month_key`, `money`, `trailing_month_keys`) from `reports.py`, so this keeps
+  the aggregation logic next to those helpers and lets `analytics.py` import it the same way it
+  imports everything else from this file.
+**Step 3 — route added to `backend/app/routes/analytics.py` (not `routes/reports.py`):**
+* `GET /reports/analytics/quantity-produced` — imports `build_quantity_produced` from
+  `..services.reports` and returns it directly via `jsonify`, no wrapping, matching this file's
+  existing route bodies exactly (e.g. `vendor_report()`, `client_report()`).
+* Deliberately not added to `routes/reports.py` — confirmed via `routes/__init__.py` that
+  `reports_bp` and `analytics_bp` are registered as two separate blueprints at two separate URL
+  prefixes (`/api/reports` vs `/api/reports/analytics`), and the frontend's Analytics tab only
+  calls the `analytics` prefix. Placing it on `reports_bp` would have made it unreachable from
+  where the UI actually looks.
+**Step 4 — `src/api/client.js`:** added `analyticsQuantityProduced: () =>
+request('/reports/analytics/quantity-produced')`, appended after `analyticsMachineRevenue`,
+matching the existing `analytics*` naming and no-params call shape used by three of the other four
+sibling methods.
+ 
+**Step 5 — `src/Reports.jsx`:**
+* Added `'Quantity Made'` to `ANALYTICS_SECTIONS` (after `'Machine Revenue'`).
+* Added `QuantityMadeSection()`, following `MachineRevenueSection`'s/`SalesVsExpensesSection`'s
+  exact pattern: `useAnalyticsData(() => api.analyticsQuantityProduced())`, wrapped in the shared
+  `SectionShell` (loading/error/empty states for free), reusing `formatMonthLabel()` already
+  defined in this file for month keys.
+* UI shows: an explicit one-line note that this uses invoice-issue-date as a production-date
+  proxy (same transparency convention as the Projections section's "not a forecasting model" note
+  already in this file); a highlighted "This Month" total-units stat card (same gold-highlight
+  style already used by the Projections section's "Total Projected" card); and a Product
+  Type → Quantity table (trailing 13 months) using the same table markup/styling as
+  `VendorSpendSection`/`ClientPerformanceSection`.
+* Wired into `AnalyticsTab()`'s render switch: `{section === 'Quantity Made' && <QuantityMadeSection />}`.
+* No changes to `Income Statement`/`Cashflow` tabs, `App.jsx`, or any other file — scope held to
+  the Analytics tab only, per the plan.
+**Verification performed:**
+* `ast.parse()` on both edited Python files (`services/reports.py`, `routes/analytics.py`) —
+  both parse cleanly.
+* Real Babel AST parse (`@babel/core` + `@babel/preset-env` + `@babel/preset-react`, installed
+  fresh this session, network egress to the npm registry was available) on both edited JS/JSX
+  files (`Reports.jsx`, `client.js`) — both parse cleanly.
+* Not run against a live server/backend this session — static/code-level confirmation only, per
+  this log's established convention for sessions without an attached execution environment.
+**Files delivered to `/mnt/user-data/outputs/`:** `reports.py` (→
+`backend/app/services/reports.py`), `analytics.py` (→ `backend/app/routes/analytics.py`),
+`Reports.jsx` (→ `src/Reports.jsx`), `client.js` (→ `src/api/client.js`).
+ 
+**Flagged, not fixed this session — `seed.py` job-count bug (per this session's plan, item 2):**
+* `Job.completed_count`/`Job.total_count` (exact field names not yet re-confirmed against the
+  real current `seed.py` this session — `seed.py` was not one of the files pulled/read this pass,
+  since this session's scope was Report 5 only) are reported, per the standing plan carried into
+  this session, as essentially unset across all 4 job-creation blocks in `seed.py`. Net effect:
+  the Jobs page's "X of Y units" progress display is showing fake/zero data for most seeded jobs.
+* This needs its own pass: reading the real current `seed.py` (not assumed from a prior session,
+  since several sessions in this log have already found stale assumptions about files not
+  re-checked — this session's own Machine Revenue correction above is a fresh example of that
+  pattern), touching all 4 job-creation blocks, and deciding what realistic completed-vs-total
+  ratios should look like per job status (e.g. a `queued` job should probably show 0 completed,
+  a `finished` job should show completed == total, `printing`/`finishing` jobs need some
+  plausible partial value).
+* Not started this session — flagging only, so it's next up and doesn't get lost, per the
+  session's own stated plan.
+**Still open (unchanged from prior entries, restated for continuity):**
+* `Vendor.balance` migration decision — still undecided, comment-only status.
+* `build_financial_report()`'s mixed booked-basis (`revenue`, `profit`) vs. cash-basis
+  (`revenue_by_month`, `expenses_by_month`) fields — still unreconciled.
+* `seed.py` still does not seed any `Proposal` records (last confirmed 2026-07-21 14:12 UTC
+  entry — not re-checked this session, since `seed.py` wasn't pulled this pass).
+* Backend `Proposal.priority`/`Proposal.assigned_staff_id` + `accept_proposal()` wiring — still
+  needs a decision from the user before implementing.
+* **New this session:** `seed.py` job-count bug (see above) — flagged, not fixed, next up.
+## 2026-07-26 (follow-up) — Quantity Made: month dropdown added, closing Report 5 UI gap
+Author: Sam Claude
+Date: 2026-07-26
+Scope: Fix for a gap the user flagged right after the prior entry — `QuantityMadeSection` shipped
+without a month selector, unlike `MachineRevenueSection` right next to it in the same tab, and the
+backend's `quantity_by_month_and_type` field (already returned by `build_quantity_produced()`,
+prior session) was fetched but never rendered. File touched: `src/Reports.jsx` only — no backend
+change needed, since the data this required was already in the existing API response.
+ 
+**Why this is a frontend-only fix:** `MachineRevenueSection`'s dropdown triggers a server-side
+refetch (`month`/`service_type` become query params, `useAnalyticsData` re-runs on `[query]`
+change) because `build_machine_category_revenue_report()` is filterable server-side.
+`build_quantity_produced()` isn't built that way — it returns the full trailing-13-month,
+per-type breakdown in one response. So the correct fix here is a client-side month selector
+that switches which slice of the already-fetched `data` object is displayed, not a new query
+param or a second backend call. Confirmed this is the right shape before writing any code, rather
+than mechanically copying `MachineRevenueSection`'s server-refetch pattern where it doesn't apply.
+ 
+**Change — `QuantityMadeSection` (`src/Reports.jsx`):**
+* Added `const [month, setMonth] = useState('All')` and a `<select>` styled identically to
+  `MachineRevenueSection`'s month dropdown (same padding/border/font-size values), populated from
+  `Object.keys(quantity_by_month)` plus an `'All'` option, sorted newest-first.
+* On `'All'`: stat card shows "This Month (<latest>)" using `quantity_by_month`, and the table
+  shows the trailing-13-month lifetime sum per type from `quantity_by_type` — this is the
+  original behavior from the prior session, preserved as the default view.
+* On a specific month: stat card label switches to that month's name, its total pulled from
+  `quantity_by_month[month]`; the table switches to `quantity_by_month_and_type[month]` — the
+  per-type breakdown for that one month only, which was already being fetched but was previously
+  unused by the UI.
+* Added an explicit empty-row message ("No quantity recorded for this month.") for months with no
+  invoiced quantity, since some months in `quantity_by_month_and_type` can legitimately be `{}`
+  and an empty table with no explanation reads as broken rather than as "zero for this month."
+**Verification:** real Babel AST parse (`@babel/core` + presets, same install as prior session) on
+`Reports.jsx` — parses cleanly. Not re-run against a live server this session — static
+confirmation only, per this log's established convention.
+ 
+**Report 5 status, restated:** with this fix, all three parts of the original ask are now met —
+backend aggregation function (prior session), API endpoint (prior session), and a UI card with a
+month filter matching the Analytics tab's existing interaction pattern (this entry). Considering
+Report 5 complete as of this entry.
+ 
+**File delivered to `/mnt/user-data/outputs/`:** `Reports.jsx` (→ `src/Reports.jsx`, replaces the
+prior session's version).
+ 
+**Still open (unchanged):** `seed.py` job-count bug (flagged prior entry, not started), `Vendor.balance`
+migration decision, booked-vs-cash `build_financial_report()` fields, `seed.py` not seeding
+`Proposal` records, `Proposal.priority`/`assigned_staff_id` backend wiring.
+ 
+## 2026-07-26 (session 3) — Closed the 4 flagged items: seed.py job counts fixed, booked/cash split fixed, Vendor.balance and missing-Proposals confirmed already resolved
+Author: Sam Claude
+Date: 2026-07-26
+Scope: User asked to work through all 4 items listed as "still open" in the Report 5 entries
+above: (1) `seed.py` job-count bug, (2) `Vendor.balance` migration decision, (3)
+`build_financial_report()`'s mixed booked/cash-basis fields, (4) no seeded `Proposal` records.
+Pulled fresh copies of `seed.py`, `models.py`, `services/vendors.py`, `routes/vendors.py`,
+`Vendors.jsx`, `services/invoices.py`, `services/proposals.py`, `routes/proposals.py`, `Jobs.jsx`
+from the live repo before touching anything, per this log's established practice — and a good
+thing, since two of the four turned out to already be resolved in code that predates this log's
+awareness of it.
+ 
+**Correction up front:** items (2) and (4) were NOT still open. Re-checking the real files found
+both already fixed, just never logged:
+* **Vendor.balance (item 2):** `services/vendors.py` already derives `balance`/`amount_owed`/
+  `amount_paid`/`lifetime_spend` live from `Expense.vendor_id` rows at serialization time
+  (`serialize_vendor()`), overwriting the stored `Vendor.balance` column's value in every API
+  response. `seed.py` no longer sets `balance=` on any seeded Vendor at all (confirmed via grep —
+  zero occurrences), with an explicit comment above the vendor list: "Vendor.balance was removed
+  (see dev-log.md) — unpaid amounts are sourced entirely from Expense rows via
+  Expense.vendor_id." This is exactly the "documented read-only legacy field" resolution this
+  log's own prior entries said was still undecided — the column stays in the schema (no
+  destructive migration), is never written to, and is never trusted for reads. Nothing to do here
+  except correct the record: **resolved**, not open.
+* **Missing Proposal seed data (item 4):** `seed.py` does seed proposals — a loop generating 2–4
+  `Proposal` records per month across the full seeded date range, with a mixed status pool
+  (`draft`/`sent`/`accepted`/`declined`) and a real conversion path for `accepted` ones (creates a
+  matching `Job` + `Invoice`, same as the real `accept_proposal()` route). Confirmed via grep and a
+  direct read of the loop. **Resolved**, not open — the log's last confirmation of "no proposals
+  seeded" (2026-07-21 14:12 UTC entry) describes an earlier version of this file.
+**Item 1 — seed.py job-count bug (real, fixed this session):**
+Confirmed the bug as described: `Job.completed_count`/`Job.total_count` were unset (default 0) in
+3 of 4 job-creation blocks, and one of the 4 (the Proposal-conversion block) set `total_count` but
+not `completed_count`. Checked `Jobs.jsx`'s actual display logic first (`ProgressCell`,
+`hasCounts = job.totalCount > 0`) to confirm the real user-visible effect: with `total_count`
+unset, a job doesn't show "0 of Y" — it silently falls back to the generic percent-based progress
+bar instead, so the "X of Y units" display essentially never appeared for any seeded job outside
+the one block that already set `total_count`. That block (`Proposal` → `Job` conversion) did show
+"0 of N" on jobs marked `status="completed"`, which is a more visibly wrong state (a completed job
+showing zero units done).
+ 
+Fixed all 4 blocks in `backend/app/seed.py`:
+* **Recurring monthly jobs block** (`job = Job(...)`, the main ~10-16/month loop): added
+  `total_count=tmpl["copies"]` (reusing the template's existing `copies` field — no new number
+  invented) and `completed_count=round(tmpl["copies"] * progress / 100)`, so a "finishing" job at
+  82% progress shows ~82% of its units done rather than an unrelated figure — bar fill and "X of
+  Y" label now agree.
+* **Invoice-backed job block** (`invoice_job = Job(...)`): this job is always
+  `status="finished"`/`progress=100`, so `completed_count == total_count` is correct, not two
+  unset zeros. Both set to `sum(li["quantity"] for li in line_items)`, summed from the same raw
+  line-item dicts the invoice was just built from.
+* **Proposal-conversion job block** (`converted_job = Job(...)`): `total_count=len(proposal.line_items)`
+  was already present — left as-is, since it already matches the same convention the real
+  `accept_proposal()` route in `routes/proposals.py` uses (line-item count, not unit-quantity
+  sum). Only `completed_count` was missing; added `completed_count=len(proposal.line_items)`,
+  matching `status="completed"`/`progress=100`.
+* **Loyal-client job block** (`loyal_job = Job(...)`): same pattern as the invoice-backed block —
+  `total_count`/`completed_count` both set to `sum(li["quantity"] for li in loyal_line_items)`.
+* Each fix has an inline comment explaining the reasoning and pointing back at this bug, so a
+  future session re-reading `seed.py` doesn't have to reconstruct why these numbers are what they
+  are.
+**Item 3 — build_financial_report()'s mixed booked/cash basis (real, fixed this session):**
+Confirmed the bug is still live: top-level `revenue`/`profit` are booked-basis
+(`invoice_totals()`-driven), while `revenue_by_month`/`expenses_by_month` (added in the
+2026-07-20 cashflow-date-fix session) are cash-basis (`Payment.paid_on`/`Expense.paid_on`-driven)
+— same response object, two different accounting bases, exactly as flagged since 2026-07-20.
+ 
+**Decision made:** did not change what `revenue`/`profit` mean, since `build_report_library()`'s
+`RPT-FIN-MONTH` metric already reads them as booked-basis — silently redefining them would
+silently change that report's number too. Instead added explicit cash-basis totals alongside the
+existing fields:
+* `cash_revenue` / `cash_expenses` / `cash_profit` — summed directly from the same
+  `revenue_by_month`/`expenses_by_month` dicts already being returned, so there's no risk of the
+  new totals disagreeing with the by-month breakdown sitting right next to them in the same
+  response.
+* A `basis` dict naming which top-level field is `"booked"` vs `"cash"` for every relevant key
+  (`revenue`, `profit`, `expenses`, `cash_collected`, `revenue_by_month`, `expenses_by_month`,
+  `cash_revenue`, `cash_expenses`, `cash_profit`) — so a consumer can tell which pair to use
+  without reading this function's source.
+* Checked `Reports.jsx`'s Cashflow tab against this before touching anything: it already computes
+  its own cash-basis net-per-month directly from `revenue_by_month`/`expenses_by_month` and never
+  touches the ambiguous top-level `revenue`/`profit` fields — so this fix is purely additive on
+  the backend, no frontend change needed or made. `PulseChart`'s `netProfit` (last month's
+  revenue-by-month minus expenses-by-month) was already doing the right thing; it just didn't have
+  a backend-provided equivalent to point to for a "lifetime" or "all months summed" version, which
+  `cash_profit` now provides if a future UI wants it.
+**Verification performed:**
+* `ast.parse()` on both edited Python files (`seed.py`, `services/reports.py`) — both parse
+  cleanly.
+* Confirmed `build_report_library()`'s existing `financials["revenue"]`/`financials["profit"]`
+  reads are untouched and still valid keys in the modified return dict.
+* Re-merged this session's `services/reports.py` edit with the still-in-progress
+  `build_quantity_produced()` function from the Report 5 session earlier today (that addition
+  hadn't been pushed to the real repo yet, so the fresh pull used as this session's starting point
+  didn't have it) — confirmed both are present in the final file and it still parses cleanly as
+  one file.
+* Not run against a live server/backend this session — static/code-level confirmation only, per
+  this log's established convention.
+**Files delivered to `/mnt/user-data/outputs/`:** `seed.py` (→ `backend/app/seed.py`, all 4 job
+blocks fixed), `reports.py` (→ `backend/app/services/reports.py`, contains both this session's
+booked/cash-basis fix and the earlier Report 5 `build_quantity_produced()` addition — this
+supersedes the `reports.py` delivered in the Report 5 entries above).
+ 
+**Genuinely still open after this session:**
+* Discount fields' pre-tax-vs-post-tax mismatch in `NewInvoiceModal`'s live total vs. backend/
+  print totals — known, accepted gap per the 2026-07-22 discount-implementation entry, not
+  revisited this session (wasn't one of the 4 items asked for).
+* Everything else previously flagged and not part of this session's 4-item list is unchanged.
+**Corrected status of the original 4-item list, for anyone reading only this entry:**
+1. `seed.py` job-count bug — **fixed this session**.
+2. `Vendor.balance` migration decision — **already resolved** (found already correct, not
+   modified).
+3. `build_financial_report()` booked/cash mixing — **fixed this session**.
+4. `seed.py` missing `Proposal` records — **already resolved** (found already correct, not
+   modified).
+## 2026-07-26 (session 4) — New report: Job Throughput (production-side counterpart to Quantity Made)
+Author: Sam Claude
+Date: 2026-07-26
+Scope: User asked for a new "Job Throughput" report — explicitly not staff performance, which
+was declined as a separate item. This is the production-floor view that "Quantity Made" was
+deliberately built to route around earlier today, since `Job.completed_count`/`total_count` were
+broken at the time. That's fixed now (session 3, this same day), so this report is what actually
+uses those fields for the first time anywhere in the app.
+ 
+**Data source and honesty note:** `build_job_throughput()` sums `Job.completed_count` (not
+`total_count` — this counts units actually finished, not units ordered), grouped by month and by
+machine/service-category, excluding cancelled jobs. Same proxy-date situation as
+`build_quantity_produced()` earlier today: `Job` has no dedicated "completed on" date, so this
+groups by `Job.created_at` instead, flagged explicitly in the docstring and in the UI copy under
+the section header, same convention already established for `Invoice.issued_on` in the Quantity
+Made report. A job created in one month and finished the next will bucket under its creation
+month, not completion month — worth knowing if the numbers look off against what someone remembers
+happening on the floor in a given month.
+ 
+**Backend — `backend/app/services/reports.py`:**
+* Added `active_job_statuses()` helper (queued/printing/finishing/in_session/completed/ready/
+  finished — everything except cancelled), mirroring the existing `active_invoice_statuses()`
+  pattern in the same file.
+* Added `build_job_throughput()`, returning:
+  - `units_completed_by_month` — trailing 13 months, same `trailing_month_keys()` helper reused
+    from the rest of this file.
+  - `units_completed_by_machine` — list of `{machine, units_completed, job_count}`, sorted by
+    units completed descending. Falls back to `service_category` when a job has no
+    `machine_id` set, matching the exact fallback `build_machine_revenue()` already uses
+    elsewhere in this file, for consistency.
+  - `units_completed_by_status` — raw dict, in case a future UI wants to slice by job status
+    directly.
+  - `in_progress_summary` — job count, units completed, units total, and units remaining for
+    jobs currently `queued`/`printing`/`finishing`/`in_session` — a live "how much is left to
+    print right now" figure, which none of the existing reports expose.
+  - `finished_job_count` and `date_basis` (`"created_at"`), the latter so any consumer can see
+    which date field was used without reading the function body.
+**Backend — `backend/app/routes/analytics.py`:** added `GET /reports/analytics/job-throughput`,
+same blueprint/pattern as `quantity-produced` added earlier today — confirmed this is still the
+right blueprint (not `routes/reports.py`) per this morning's Machine Revenue investigation.
+ 
+**Frontend — `src/api/client.js`:** added `analyticsJobThroughput: () =>
+request('/reports/analytics/job-throughput')`.
+ 
+**Frontend — `src/Reports.jsx`:**
+* Added `'Job Throughput'` to `ANALYTICS_SECTIONS`, after `'Quantity Made'`.
+* Added `JobThroughputSection()`, following the same month-dropdown pattern built for
+  `QuantityMadeSection` earlier today (client-side month filtering against one fully-fetched
+  response, not a server-side refetch, since `build_job_throughput()` isn't built to be
+  filterable server-side any more than `build_quantity_produced()` was).
+* UI shows: an explanatory note (proxy-date caveat + explicit "this is the production-side
+  counterpart to Quantity Made, which counts billed units" framing, so the two reports aren't
+  mistaken for duplicates of each other); a month-filterable "units completed" stat card; a
+  second, always-visible "In Progress" card (active job count, completed/total units, units
+  remaining) that isn't affected by the month dropdown, since "what's on the floor right now" is
+  inherently a current-state figure, not a historical one; and a Machine/Category table (lifetime
+  units completed + job count per machine), same table styling as the other Analytics sections.
+* Wired into `AnalyticsTab()`'s render switch, after Quantity Made.
+**Verification performed:**
+* `ast.parse()` on both edited Python files — both parse cleanly.
+* Real Babel AST parse on both edited JS/JSX files — both parse cleanly.
+* Not run against a live server this session — static confirmation only, per this log's
+  established convention. Worth flagging in particular for this report: it's the first thing in
+  the app that actually reads the `completed_count`/`total_count` values fixed in session 3
+  earlier today, so a live run against real seeded data would be a genuinely useful check before
+  trusting the numbers it shows — the seed fix was verified by inspection/reasoning, not by
+  running it.
+**Files delivered to `/mnt/user-data/outputs/`:** `reports.py` (→
+`backend/app/services/reports.py`, now contains `build_quantity_produced`, the booked/cash-basis
+fix, and `build_job_throughput` — supersedes all earlier `reports.py` deliveries today),
+`analytics.py` (→ `backend/app/routes/analytics.py`, now has 6 routes total), `Reports.jsx` (→
+`src/Reports.jsx`, now has 7 Analytics sections), `client.js` (→ `src/api/client.js`).
+ 
+**Declined, per explicit instruction:** Staff Performance report — user named this out when asked
+"what's next," not built this session.
+ 
+**Still open (unchanged):** discount modal pre-tax/post-tax live-total mismatch (known, accepted
+gap, not revisited); a full re-audit of this log's older "still open" claims against the live repo
+was proposed but not requested/done this session.
+ 

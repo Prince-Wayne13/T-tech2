@@ -109,6 +109,26 @@ def build_financial_report(period="month"):
             expenses_by_month[month_key(expense.paid_on)] += money(expense.amount)
 
     month_keys = trailing_month_keys()
+    revenue_by_month_dict = {key: by_month.get(key, 0.0) for key in month_keys}
+    expenses_by_month_dict = {key: expenses_by_month.get(key, 0.0) for key in month_keys}
+
+    # FIX (flagged 2026-07-20, resolved this session): "revenue"/"profit" below
+    # are booked-basis (Invoice.issued_on-driven, via invoice_totals()) and are
+    # left unchanged, since build_report_library()'s RPT-FIN-MONTH metric and
+    # other existing consumers already read them that way. "revenue_by_month"/
+    # "expenses_by_month" are cash-basis (Payment.paid_on / Expense.paid_on -
+    # driven, per the 2026-07-20 fixes above) and were previously left
+    # unreconciled with the top-level fields in the same response object -
+    # a caller reading "profit" and "revenue_by_month" from one response could
+    # reasonably assume they're on the same accounting basis, and they weren't.
+    # Rather than silently changing what "revenue"/"profit" mean (which would
+    # silently change RPT-FIN-MONTH's number too), this adds explicit
+    # cash-basis totals (cash_revenue/cash_expenses/cash_profit, summed
+    # straight from the same by-month dicts already being returned) plus a
+    # "basis" block naming which fields are which - so a consumer can pick the
+    # right pair without needing to read this function's source to find out.
+    cash_revenue_total = sum(revenue_by_month_dict.values())
+    cash_expenses_total = sum(expenses_by_month_dict.values())
 
     return {
         "period": period,
@@ -116,10 +136,24 @@ def build_financial_report(period="month"):
         "cash_collected": paid,
         "expenses": expense_total,
         "profit": revenue - expense_total,
+        "cash_revenue": cash_revenue_total,
+        "cash_expenses": cash_expenses_total,
+        "cash_profit": cash_revenue_total - cash_expenses_total,
+        "basis": {
+            "revenue": "booked",
+            "profit": "booked",
+            "expenses": "booked",
+            "cash_collected": "cash",
+            "revenue_by_month": "cash",
+            "expenses_by_month": "cash",
+            "cash_revenue": "cash",
+            "cash_expenses": "cash",
+            "cash_profit": "cash",
+        },
         "invoice_totals_by_status": dict(by_status),
         "expense_totals_by_category": dict(expense_categories),
-        "revenue_by_month": {key: by_month.get(key, 0.0) for key in month_keys},
-        "expenses_by_month": {key: expenses_by_month.get(key, 0.0) for key in month_keys},
+        "revenue_by_month": revenue_by_month_dict,
+        "expenses_by_month": expenses_by_month_dict,
         "top_clients": [
             {"client_name": client, "revenue": amount}
             for client, amount in sorted(client_revenue.items(), key=lambda row: row[1], reverse=True)[:5]
@@ -203,6 +237,116 @@ def build_machine_revenue(invoices=None):
             )
 
     return sorted(rows, key=lambda row: row["revenue"], reverse=True)
+
+
+def build_quantity_produced():
+    """Sums invoiced quantity by month and by product type, from real
+    InvoiceLineItem rows (InvoiceLineItem.quantity / .product_type).
+
+    Keyed by Invoice.issued_on, since there is no separate "production date"
+    field anywhere on Invoice/InvoiceLineItem/Job today. issued_on (when the
+    work was billed out) is the closest honest proxy available - flagging
+    this explicitly rather than implying it's a true production date.
+
+    Only counts line items on invoices in an active status (same
+    active_invoice_statuses() set used by build_financial_report/
+    build_machine_revenue), so cancelled/void invoices don't inflate
+    production totals.
+    """
+    invoices = Invoice.query.all()
+
+    by_month = defaultdict(float)
+    by_month_type = defaultdict(lambda: defaultdict(float))
+    by_type = defaultdict(float)
+
+    for invoice in invoices:
+        if invoice_status_from_totals(invoice_totals(invoice)) not in active_invoice_statuses():
+            continue
+        mkey = month_key(invoice.issued_on)
+        for item in invoice.line_items:
+            qty = money(item.quantity)
+            product_type = item.product_type or "General Print"
+            by_month[mkey] += qty
+            by_month_type[mkey][product_type] += qty
+            by_type[product_type] += qty
+
+    month_keys = trailing_month_keys()
+
+    return {
+        "quantity_by_month": {key: by_month.get(key, 0.0) for key in month_keys},
+        "quantity_by_month_and_type": {
+            key: dict(by_month_type.get(key, {})) for key in month_keys
+        },
+        "quantity_by_type": dict(sorted(by_type.items(), key=lambda row: row[1], reverse=True)),
+        "date_basis": "issued_on",
+    }
+
+
+def active_job_statuses():
+    """Non-cancelled job statuses - a cancelled job's completed_count doesn't
+    represent real production, so it's excluded the same way
+    active_invoice_statuses() excludes cancelled/void invoices elsewhere in
+    this file."""
+    return {"queued", "printing", "finishing", "in_session", "completed", "ready", "finished"}
+
+
+def build_job_throughput():
+    """Units actually completed on the shop floor (Job.completed_count),
+    grouped by month, by machine, and by status - the production-side
+    counterpart to build_quantity_produced()'s billing-side view.
+
+    Keyed by Job.created_at (when the job entered the system), since there is
+    no separate "production date"/"completed on" field on Job today - same
+    honest-proxy stance already used for Invoice.issued_on in
+    build_quantity_produced(). Flagged explicitly here for the same reason:
+    a job created in one month and finished in a later one will still be
+    bucketed under its creation month, not its completion month.
+
+    Only Job.completed_count is summed (not total_count) - this counts units
+    actually finished, not units ordered/queued. Cancelled jobs are excluded
+    entirely via active_job_statuses().
+    """
+    jobs = Job.query.filter(Job.status != "cancelled").all()
+
+    by_month = defaultdict(float)
+    by_machine = defaultdict(float)
+    by_status = defaultdict(float)
+    jobs_by_machine = defaultdict(int)
+
+    for job in jobs:
+        completed = job.completed_count or 0
+        mkey = month_key(job.created_at.date() if job.created_at else None)
+        machine_name = job.machine.name if job.machine else (job.service_category or "Unassigned")
+        by_month[mkey] += completed
+        by_machine[machine_name] += completed
+        by_status[job.status or "unknown"] += completed
+        jobs_by_machine[machine_name] += 1
+
+    month_keys = trailing_month_keys()
+
+    machine_rows = [
+        {"machine": machine, "units_completed": total, "job_count": jobs_by_machine.get(machine, 0)}
+        for machine, total in sorted(by_machine.items(), key=lambda row: row[1], reverse=True)
+    ]
+
+    active_jobs = [job for job in jobs if job.status in {"queued", "printing", "finishing", "in_session"}]
+    finished_jobs = [job for job in jobs if job.status in {"completed", "ready", "finished"}]
+    total_units_active = sum(job.total_count or 0 for job in active_jobs)
+    completed_units_active = sum(job.completed_count or 0 for job in active_jobs)
+
+    return {
+        "units_completed_by_month": {key: by_month.get(key, 0.0) for key in month_keys},
+        "units_completed_by_machine": machine_rows,
+        "units_completed_by_status": dict(by_status),
+        "in_progress_summary": {
+            "job_count": len(active_jobs),
+            "units_completed": completed_units_active,
+            "units_total": total_units_active,
+            "units_remaining": max(total_units_active - completed_units_active, 0),
+        },
+        "finished_job_count": len(finished_jobs),
+        "date_basis": "created_at",
+    }
 
 
 def build_report_library():

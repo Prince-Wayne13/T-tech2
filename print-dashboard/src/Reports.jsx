@@ -18,7 +18,7 @@ import { ModuleHeader, StatsGrid } from './components/ModuleStandard';
 // confusing" — a 7-tab bar was judged more likely to overwhelm a first-time
 // user than a single tab with clear sub-section headers).
 const TABS = ['Cashflow', 'Income Statement', 'Analytics'];
-const ANALYTICS_SECTIONS = ['Vendor Spend', 'Client Performance', 'Projections', 'Sales vs Expenses', 'Machine Revenue'];
+const ANALYTICS_SECTIONS = ['Vendor Spend', 'Client Performance', 'Projections', 'Sales vs Expenses', 'Machine Revenue', 'Quantity Made', 'Job Throughput'];
 
 function formatMonthLabel(month) {
   if (!month || month === 'All') return 'All Months';
@@ -548,6 +548,146 @@ function MachineRevenueSection() {
   );
 }
 
+function QuantityMadeSection() {
+  const [month, setMonth] = useState('All');
+  const { data, loading, error } = useAnalyticsData(() => api.analyticsQuantityProduced());
+  const byMonth = data?.quantity_by_month || {};
+  const byMonthAndType = data?.quantity_by_month_and_type || {};
+  const byType = data?.quantity_by_type || {};
+  const monthKeys = Object.keys(byMonth);
+  const monthOptions = ['All', ...monthKeys].sort((a, b) => (a === 'All' ? -1 : b < a ? 1 : -1));
+  const latestMonth = monthKeys[monthKeys.length - 1];
+
+  const isAllMonths = month === 'All';
+  const activeMonth = isAllMonths ? latestMonth : month;
+  const statLabel = isAllMonths ? `This Month (${formatMonthLabel(latestMonth)})` : formatMonthLabel(month);
+  const statTotal = activeMonth ? (byMonth[activeMonth] || 0) : 0;
+
+  const typeRows = isAllMonths
+    ? Object.entries(byType).sort((a, b) => b[1] - a[1])
+    : Object.entries(byMonthAndType[month] || {}).sort((a, b) => b[1] - a[1]);
+  const tableLabel = isAllMonths ? 'Quantity (Trailing 13 Months)' : `Quantity (${formatMonthLabel(month)})`;
+
+  return (
+    <SectionShell title="Quantity Made" loading={loading} error={error} empty={monthKeys.length === 0}>
+      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '12px', lineHeight: 1.5 }}>
+        Quantity invoiced, grouped by month issued. Uses invoice issue date as a proxy for
+        production date, since no separate production date is tracked yet.
+      </div>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+        <select
+          value={month}
+          onChange={e => setMonth(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: '#fff', fontSize: '10px', color: 'var(--text-body)' }}
+        >
+          {monthOptions.map(option => <option key={option} value={option}>{option === 'All' ? 'All Months' : formatMonthLabel(option)}</option>)}
+        </select>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+        <div style={{ padding: '12px', background: 'rgba(196, 163, 90, 0.08)', borderRadius: '8px', border: '1px solid rgba(196, 163, 90, 0.2)' }}>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>{statLabel}</div>
+          <div style={{ fontSize: '16px', fontWeight: 700, color: '#C4A35A' }}>{statTotal.toLocaleString()} units</div>
+        </div>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)' }}>Product Type</th>
+              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>{tableLabel}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {typeRows.length === 0 && (
+              <tr>
+                <td colSpan={2} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)' }}>No quantity recorded for this month.</td>
+              </tr>
+            )}
+            {typeRows.map(([type, qty]) => (
+              <tr key={type} style={{ borderBottom: '1px solid var(--border-faint)' }}>
+                <td style={{ padding: '8px' }}>{type}</td>
+                <td style={{ padding: '8px', textAlign: 'right', fontWeight: 600 }}>{qty.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </SectionShell>
+  );
+}
+
+function JobThroughputSection() {
+  const [month, setMonth] = useState('All');
+  const { data, loading, error } = useAnalyticsData(() => api.analyticsJobThroughput());
+  const byMonth = data?.units_completed_by_month || {};
+  const machineRows = data?.units_completed_by_machine || [];
+  const inProgress = data?.in_progress_summary || { job_count: 0, units_completed: 0, units_total: 0, units_remaining: 0 };
+  const monthKeys = Object.keys(byMonth);
+  const monthOptions = ['All', ...monthKeys].sort((a, b) => (a === 'All' ? -1 : b < a ? 1 : -1));
+  const latestMonth = monthKeys[monthKeys.length - 1];
+
+  const isAllMonths = month === 'All';
+  const activeMonth = isAllMonths ? latestMonth : month;
+  const statLabel = isAllMonths ? `This Month (${formatMonthLabel(latestMonth)})` : formatMonthLabel(month);
+  const statTotal = activeMonth ? (byMonth[activeMonth] || 0) : 0;
+
+  return (
+    <SectionShell title="Job Throughput" loading={loading} error={error} empty={monthKeys.length === 0}>
+      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '12px', lineHeight: 1.5 }}>
+        Units actually completed on the shop floor (Job.completed_count), grouped by the date the
+        job was created — there's no separate "completed on" date tracked yet, so this is the
+        closest proxy available. Cancelled jobs are excluded. This is the production-side
+        counterpart to "Quantity Made," which counts billed units instead.
+      </div>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+        <select
+          value={month}
+          onChange={e => setMonth(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: '#fff', fontSize: '10px', color: 'var(--text-body)' }}
+        >
+          {monthOptions.map(option => <option key={option} value={option}>{option === 'All' ? 'All Months' : formatMonthLabel(option)}</option>)}
+        </select>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+        <div style={{ padding: '12px', background: 'rgba(196, 163, 90, 0.08)', borderRadius: '8px', border: '1px solid rgba(196, 163, 90, 0.2)' }}>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>{statLabel}</div>
+          <div style={{ fontSize: '16px', fontWeight: 700, color: '#C4A35A' }}>{statTotal.toLocaleString()} units completed</div>
+        </div>
+        <div style={{ padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px' }}>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>In Progress</div>
+          <div style={{ fontSize: '16px', fontWeight: 700 }}>{inProgress.units_completed.toLocaleString()} of {inProgress.units_total.toLocaleString()}</div>
+          <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{inProgress.job_count} active job{inProgress.job_count === 1 ? '' : 's'}, {inProgress.units_remaining.toLocaleString()} units remaining</div>
+        </div>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)' }}>Machine / Category</th>
+              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>Units Completed (Lifetime)</th>
+              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>Jobs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {machineRows.length === 0 && (
+              <tr>
+                <td colSpan={3} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)' }}>No completed units recorded yet.</td>
+              </tr>
+            )}
+            {machineRows.map(row => (
+              <tr key={row.machine} style={{ borderBottom: '1px solid var(--border-faint)' }}>
+                <td style={{ padding: '8px' }}>{row.machine}</td>
+                <td style={{ padding: '8px', textAlign: 'right', fontWeight: 600 }}>{row.units_completed.toLocaleString()}</td>
+                <td style={{ padding: '8px', textAlign: 'right', color: 'var(--text-muted)' }}>{row.job_count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </SectionShell>
+  );
+}
+
 function AnalyticsTab() {
   const [section, setSection] = useState(ANALYTICS_SECTIONS[0]);
   return (
@@ -562,6 +702,8 @@ function AnalyticsTab() {
       {section === 'Projections' && <ProjectionsSection />}
       {section === 'Sales vs Expenses' && <SalesVsExpensesSection />}
       {section === 'Machine Revenue' && <MachineRevenueSection />}
+      {section === 'Quantity Made' && <QuantityMadeSection />}
+      {section === 'Job Throughput' && <JobThroughputSection />}
     </>
   );
 }
