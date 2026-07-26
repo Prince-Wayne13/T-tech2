@@ -2089,3 +2089,100 @@ from `components/ModuleStandard.jsx`).
   either yet) — matches "log corrections as a new transaction" being the
   existing backend philosophy, but worth confirming that's what Wayne wants
   operationally.
+## 2026-07-26 15:41 UTC — Materials seed data + Month-End Report linked into Reports.jsx — Sam Claude
+
+**Correction to my own prior session (self-flagged):** an earlier session this same day worked
+from a stale copy of this dev log — the one attached in the Claude.ai project files, which had
+silently diverged from this repo's actual `log files/dev-log.md` after the 2026-07-23 entry (16
+entries here vs. only 9 there at the time). That session's Step 0 audit incorrectly concluded "no
+dev-log entry for this repo's materials work has ever existed" — untrue, see the 2026-07-25 20:57
+UTC and 2026-07-26 "Materials Month-End Reconciliation" entries above, which already documented
+the backend, the reconciliation report, and the `Materials.jsx` frontend build in detail. That
+session's actual code changes (seed data, Reports.jsx linkage) were still correct and are recorded
+below — only the "this was never logged" framing was wrong, and this entry is now in the right
+file so it doesn't happen again.
+
+**Scope this session:** (1) seed realistic `Material`/`MaterialTransaction` data, since `seed.py`
+never created any despite the full backend/frontend already existing (confirmed against the real
+files pulled from github.com/Prince-Wayne13/T-tech2); (2) surface the Month-End Reconciliation
+Report inside `Reports.jsx`'s Analytics tab, not just on the standalone Materials page, per user's
+request to see the bought/used/made picture without needing to already know the Materials nav item
+has its own report view buried in it.
+
+**Confirmed before writing anything (re-reading the real files, not assuming from memory):**
+* `Material`/`MaterialTransaction` models, full CRUD + summary API (`routes/materials.py`,
+  `services/materials.py`), and `build_materials_reconciliation()` (`services/reports.py`,
+  exposed at `GET /api/reports/materials?month=YYYY-MM`) all exist and are wired — matches this
+  log's own 2026-07-25 20:57 UTC and "Materials Month-End Reconciliation" entries exactly.
+* `Materials.jsx` (Directory / Detail / Month-End Report views) exists, wired into `App.jsx`'s
+  nav, every `api.*` call it makes exists in `client.js` — also matches prior entries.
+* `seed.py` had no `Material`/`MaterialTransaction` seeding anywhere — confirmed via grep, this
+  part genuinely was an open gap, not previously logged as fixed.
+* The Month-End Report was reachable only from the standalone Materials page, not from
+  `Reports.jsx` — also a genuine, previously-unaddressed gap.
+
+**Seed data added (`backend/app/seed.py`):**
+* Added `Material`, `MaterialTransaction` to model imports and to the `reset=True` delete list.
+* 6 materials, each tied to a real seeded vendor and machine: SRA3 Card Stock (Paperline Supplies
+  / Konica press), PVC Banner Vinyl + Self-Adhesive Vinyl (FlexMaster Media / Large Format), CMYK
+  Ink Set + DTF Powder (InkPro Malawi / Large Format and DTF), Sublimation Mug Blanks (Paperline
+  Supplies / Sublimation Station).
+* Per material, per month from `start_date` (2026-04-01) through the current month: one purchase
+  (restocked from the material's real vendor), up to 4 usage transactions linked to real seeded
+  `Job` rows that fall in that month and use that material's machine (so `material_revenue_summary()`
+  resolves real invoice revenue instead of zero), each usage carrying `output_quantity`/
+  `output_description` sourced from the job's own `total_count` — this is the literal "used this
+  much vinyl, made this much stickers" figure. Roughly one waste/spoilage `adjustment` every third
+  month. A month-end physical `count` transaction for every month except the current one (left
+  uncounted deliberately, so the reconciliation report's "not yet counted" flag has a real case),
+  with a small variance most months so the count-variance flag also has real, non-trivial cases.
+* Usage quantities checked against running on-hand before being added, so the ledger can't drift
+  negative — verified with a standalone arithmetic simulation before touching the real seed file;
+  on-hand stayed positive across all 4 months in the test run.
+* `output_label`-per-job's-machine lookup uses a precomputed `machine_ref_by_id` dict (same
+  pattern as the file's existing `machine_by_ref`/`vendor_by_name` lookups), not an inline reverse
+  search per job.
+* Added `materials`/`material_transactions` counts to the seed summary return dict.
+
+**Reports.jsx — Materials section added to the Analytics tab:**
+* Added `Materials` to `ANALYTICS_SECTIONS`, alongside the existing Vendor Spend / Quantity Made /
+  Job Throughput etc. sections, same segmented-control pattern.
+* New `MaterialsSection` component calls the same `api.materialsReconciliationReport(month)` the
+  standalone Materials page's Month-End Report view calls — a second, lighter-weight place to see
+  the same backend data, not a re-implementation. Renders month selector, count-variance/
+  unreconciled flags, and the Opening/Purchased/Consumed/Closing/Output Produced/Count Variance
+  table, same columns and styling as `Materials.jsx`'s own table.
+* Deliberately left out per-material transaction history, count-logging, and material CRUD from
+  this section — those stay on the Materials page only; the section's intro text says so.
+* Fixed a stale `client.js` comment ("no UI wired to it yet") that was no longer accurate.
+
+**Not done this session (flagged, not skipped silently):**
+* Dedicated spoilage/waste report (materials consumed vs. quantity produced → a waste % or cost-
+  of-waste figure) — the raw ingredients exist (`consumed` per material, `build_quantity_produced()`'s
+  per-type output) but nothing joins them yet. User's stated next step.
+
+**Verification performed:**
+* `python3 -m ast.parse` on `seed.py` — clean.
+* Standalone Python simulation of the on-hand purchase/usage/waste arithmetic (separate from the
+  real seed code, same shape) across 4 months — on-hand never went negative.
+* Real Babel AST parse (`@babel/core` + presets) against `Reports.jsx`, `Materials.jsx`,
+  `client.js` — all three parse cleanly.
+* Not run against a live server this session (no execution environment attached) — static/code-
+  level confirmation only.
+
+**Files changed:** `backend/app/seed.py`, `src/Reports.jsx`, `src/api/client.js`.
+`src/Materials.jsx`, `src/App.jsx`, `backend/app/models.py`, `backend/app/routes/materials.py`,
+`backend/app/services/materials.py`, `backend/app/services/reports.py`,
+`backend/app/routes/reports.py` were read for confirmation, not modified.
+
+**Still open:**
+* Spoilage/waste report — needs a new report builder, per above.
+* Whether the current "Income Statement" tab in `Reports.jsx` fully matches what the user's
+  uploaded report-suite PDF describes as Report 1 — not specifically checked this session.
+* Everything else previously open in this log (Vendor.balance migration decision, booked-vs-cash
+  `build_financial_report()` fields, `Proposal.priority`/`assigned_staff_id` backend wiring, the
+  materials `RecordMaterialTransactionModal` job-ID-only field, no print export for the
+  reconciliation report, no inline transaction edit) is unchanged by this session.
+* **Process note for next session:** confirm which copy of this dev log is authoritative going
+  forward — this repo's `log files/dev-log.md`, or the Claude.ai project file — and keep only one
+  updated, or the divergence that caused this session's confusion will happen again.

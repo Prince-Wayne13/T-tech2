@@ -1,6 +1,7 @@
 # path: backend/app/seed.py
 
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 import random
 
 from .extensions import db
@@ -13,6 +14,8 @@ from .models import (
     ExportJob,
     Invoice,
     Job,
+    Material,
+    MaterialTransaction,
     Payment,
     PettyCash,
     PricingItem,
@@ -48,7 +51,7 @@ def spread_days(month_start, month_end, count, force_first=False):
 def seed_mock_data(reset=False):
     random.seed(20250101)
     if reset:
-        for model in [ExportJob, AuditLog, PettyCash, Sale, Advance, Expense, ExpenseCategory, Payment, ProposalLineItem, Proposal, Invoice, Job, PricingItem, ProductionMachine, Vendor, Staff, Client]:
+        for model in [ExportJob, AuditLog, PettyCash, Sale, Advance, Expense, ExpenseCategory, Payment, ProposalLineItem, Proposal, MaterialTransaction, Material, Invoice, Job, PricingItem, ProductionMachine, Vendor, Staff, Client]:
             db.session.query(model).delete()
         db.session.commit()
 
@@ -839,6 +842,132 @@ def seed_mock_data(reset=False):
     jobs.append(loyal_job)
     sales.append(loyal_sale)
 
+    # ── MATERIALS (periodic inventory ledger) ────────────────────────────────
+    # Wayne's ask: "bought this much, used this much, made this much" per
+    # material, reconciled month-end against a physical count. Material rows
+    # are the stock items; MaterialTransaction rows are the ledger (purchase/
+    # usage/adjustment/count) that material_stock_summary() and
+    # build_materials_reconciliation() derive on_hand and consumption from -
+    # see services/materials.py and services/reports.py for the math this
+    # data is meant to exercise. Tied to the real seeded vendors/machines/jobs
+    # above rather than invented in isolation, so Revenue Generated and the
+    # per-job usage links in Materials.jsx actually resolve to something.
+    materials = [
+        Material(material_ref="MAT-0001", name="SRA3 Card Stock 300gsm", category="Paper & card stock", machine_id=machine_by_ref["MCH-KM-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="ream", unit_cost=18500, reorder_point=15, notes="250 sheets/ream, primary stock for business cards and flyers."),
+        Material(material_ref="MAT-0002", name="PVC Banner Vinyl (13oz)", category="Banner vinyl", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=4200, reorder_point=40, notes="Standard outdoor banner stock."),
+        Material(material_ref="MAT-0003", name="Self-Adhesive Vinyl - White Gloss", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=5800, reorder_point=30, notes="Stickers, contra vision backing, general cut vinyl."),
+        Material(material_ref="MAT-0004", name="CMYK Large-Format Ink Set", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=32000, reorder_point=8, notes="4-colour set, shared across banner/sticker/frosting jobs."),
+        Material(material_ref="MAT-0005", name="Sublimation Mug Blanks (11oz)", category="Paper & card stock", machine_id=machine_by_ref["MCH-SUB-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="unit", unit_cost=2600, reorder_point=50, notes="White ceramic, standard stock mug."),
+        Material(material_ref="MAT-0006", name="DTF Powder", category="Large format ink", machine_id=machine_by_ref["MCH-DTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="kg", unit_cost=15500, reorder_point=5, notes="Hot-melt adhesive powder for DTF transfers."),
+    ]
+    db.session.add_all(materials)
+    db.session.flush()
+    material_by_ref = {material.material_ref: material for material in materials}
+
+    # Jobs whose machine/category naturally consumes each material, so usage
+    # rows link to a real Job (and therefore a real Invoice) rather than
+    # floating unattributed - this is what lets "Revenue Generated" on the
+    # Materials directory card resolve to a non-zero figure.
+    jobs_by_machine_ref = {}
+    for job in jobs:
+        jobs_by_machine_ref.setdefault(job.machine_id, []).append(job)
+    machine_ref_by_id = {machine.id: ref for ref, machine in machine_by_ref.items()}
+
+    material_transactions = []
+
+    def month_starts(from_date, to_date):
+        cursor = date(from_date.year, from_date.month, 1)
+        out = []
+        while cursor <= to_date:
+            out.append(cursor)
+            nxt = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+            cursor = nxt
+        return out
+
+    all_months = month_starts(start_date, today)
+    current_month_start = date(today.year, today.month, 1)
+
+    for material in materials:
+        candidate_jobs = [job for job in jobs_by_machine_ref.get(material.machine_id, []) if job.status != "cancelled"]
+        on_hand_running = Decimal("0")
+        for i, m_start in enumerate(all_months):
+            m_end = min((m_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1), today)
+            is_current_month = m_start == current_month_start
+
+            # Purchase early in the month - restock roughly what the month is
+            # expected to consume plus a buffer, so on_hand stays positive and
+            # "days remaining" projections are meaningful rather than trivially
+            # zero.
+            purchase_qty = Decimal(str(random.randint(40, 90))) if material.unit in ("sqm", "ream") else Decimal(str(random.randint(3, 10)))
+            purchase_date = min(m_start + timedelta(days=random.randint(1, 4)), today)
+            material_transactions.append(MaterialTransaction(
+                material_id=material.id, transaction_type="purchase", quantity=purchase_qty,
+                unit_cost=material.unit_cost, transaction_date=purchase_date,
+                notes=f"Restock from {material.vendor.name}" if material.vendor else "Restock",
+            ))
+            on_hand_running += purchase_qty
+
+            # Usage rows: one per candidate job that actually falls in this
+            # month, each with an output_quantity/description - this is the
+            # literal "from this much vinyl, made this much stickers" figure.
+            month_jobs = [job for job in candidate_jobs if job.created_at and m_start <= job.created_at.date() <= m_end]
+            for job in month_jobs[:4]:  # cap per month so on_hand doesn't run negative on a busy month
+                usage_qty = Decimal(str(round(random.uniform(1.5, 6.0), 2))) if material.unit in ("sqm",) else Decimal(str(random.randint(1, 3))) if material.unit in ("ream", "kg", "L") else Decimal(str(random.randint(5, 20)))
+                if usage_qty > on_hand_running:
+                    continue
+                output_qty = job.total_count or job.copies or 0
+                job_machine_ref = machine_ref_by_id.get(job.machine_id)
+                output_label = {
+                    "MCH-LF-01": "sqm of banners produced" if material.category == "Banner vinyl" else "stickers/banners produced",
+                    "MCH-KM-01": "cards/flyers produced",
+                    "MCH-SUB-01": "mugs produced",
+                    "MCH-DTF-01": "garments produced",
+                }.get(job_machine_ref, "units produced")
+                material_transactions.append(MaterialTransaction(
+                    material_id=material.id, transaction_type="usage", quantity=usage_qty,
+                    transaction_date=min(job.created_at.date() + timedelta(days=1), today),
+                    job_id=job.id,
+                    output_quantity=output_qty if output_qty else None,
+                    output_description=output_label if output_qty else None,
+                    notes=f"Used on {job.job_ref}",
+                ))
+                on_hand_running -= usage_qty
+
+            # Occasional waste/spoilage adjustment (negative) - misprints,
+            # cutting mistakes, damaged stock - roughly one every couple of
+            # months, small relative to purchase volume so it reads as
+            # realistic spoilage rather than dominating the ledger.
+            if i % 3 == 1 and on_hand_running > 5:
+                waste_qty = Decimal(str(round(random.uniform(0.5, 2.5), 2))) if material.unit == "sqm" else Decimal("1")
+                material_transactions.append(MaterialTransaction(
+                    material_id=material.id, transaction_type="adjustment", quantity=-waste_qty,
+                    transaction_date=min(m_start + timedelta(days=random.randint(10, 20)), today),
+                    notes="Spoilage - misprint/cutting waste",
+                ))
+                on_hand_running -= waste_qty
+
+            # Month-end physical count for every month except the current one
+            # (leaves this month genuinely "not yet counted", so the
+            # Month-End Report's unreconciled-count flag has something real
+            # to show rather than being permanently empty). Small deliberate
+            # variance most months, so the reconciliation table has a
+            # non-trivial count-variance case to display too, not just
+            # perfect matches.
+            if not is_current_month:
+                variance = Decimal(str(random.choice([0, 0, 0, 1, -1, 2]))) if material.unit != "sqm" else Decimal(str(random.choice([0, 0, 0.5, -0.75, 1.2])))
+                counted_qty = max(on_hand_running + variance, Decimal("0"))
+                material_transactions.append(MaterialTransaction(
+                    material_id=material.id, transaction_type="count", quantity=counted_qty,
+                    transaction_date=m_end,
+                    notes="Month-end physical count",
+                ))
+
+    for txn in material_transactions:
+        txn.created_at = as_datetime(txn.transaction_date)
+        txn.updated_at = as_datetime(txn.transaction_date)
+    db.session.add_all(material_transactions)
+    db.session.flush()
+
     # ── AUDIT LOGS ─────────────────────────────────────────────────────────
     audit_entries = [
         AuditLog(actor="system", action="Seeded professional print dashboard mock data", entity_type="system", created_at=as_datetime(start_date)),
@@ -867,4 +996,6 @@ def seed_mock_data(reset=False):
         "sales": len(sales),
         "petty_cash_entries": len(petty_cash_entries),
         "expense_categories": len(expense_categories),
+        "materials": len(materials),
+        "material_transactions": len(material_transactions),
     }

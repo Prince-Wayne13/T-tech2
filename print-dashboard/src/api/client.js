@@ -109,7 +109,8 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(payload),
   }),
-  // Materials/inventory - backend built this session, no UI wired to it yet.
+  // Materials/inventory - full UI on the Materials page (Materials.jsx) plus
+  // a read-only month-end reconciliation view under Reports > Analytics.
   materials: (params = '') => request(`/materials${params}`),
   materialsSummary: () => request('/materials/summary'),
   getMaterial: (id) => request(`/materials/${id}`),
