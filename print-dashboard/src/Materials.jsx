@@ -55,7 +55,7 @@ function MaterialCard({ material, onOpen, onEdit }) {
   );
 }
 
-function TransactionRow({ txn }) {
+function TransactionRow({ txn, onEdit, onDelete }) {
   const typeColor = {
     purchase: 'var(--teal)',
     usage: 'var(--primary)',
@@ -72,11 +72,15 @@ function TransactionRow({ txn }) {
         {txn.notes ? `${txn.job_ref || txn.output_quantity ? ' - ' : ''}${txn.notes}` : ''}
       </span>
       <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{compactDate(txn.transaction_date)}</span>
+      <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+        <button className="filter-btn" style={{ padding: '3px 7px', fontSize: '9px' }} onClick={() => onEdit(txn)}>Edit</button>
+        <button className="filter-btn" style={{ padding: '3px 7px', fontSize: '9px', color: 'var(--red)' }} onClick={() => onDelete(txn)}>Delete</button>
+      </div>
     </div>
   );
 }
 
-function MaterialDetail({ material, onBack, onLogTransaction, notify }) {
+function MaterialDetail({ material, onBack, onLogTransaction, onEditTransaction, onDeleteTransaction, refreshKey, notify }) {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reconciliation, setReconciliation] = useState(null);
@@ -95,7 +99,7 @@ function MaterialDetail({ material, onBack, onLogTransaction, notify }) {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, [material.id]);
+  useEffect(() => { load(); }, [material.id, refreshKey]);
 
   return (
     <div>
@@ -123,7 +127,14 @@ function MaterialDetail({ material, onBack, onLogTransaction, notify }) {
         </div>
         {loading && <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px' }}>Loading...</div>}
         {!loading && transactions.length === 0 && <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px' }}>No transactions logged yet.</div>}
-        {!loading && transactions.map(txn => <TransactionRow key={txn.id} txn={txn} />)}
+        {!loading && transactions.map(txn => (
+          <TransactionRow
+            key={txn.id}
+            txn={txn}
+            onEdit={onEditTransaction}
+            onDelete={onDeleteTransaction}
+          />
+        ))}
       </div>
     </div>
   );
@@ -259,6 +270,15 @@ export default function Materials() {
   const [showEntry, setShowEntry] = useState(false);
   const [editRecord, setEditRecord] = useState(null);
   const [txnMaterial, setTxnMaterial] = useState(null);
+  // Item 4/5 (flagged gaps, fixed this pass): editTxn holds the transaction
+  // being edited (null = "Log Transaction" create flow, set = edit flow -
+  // both share the same modal). jobs is the list RecordMaterialTransactionModal
+  // searches against for the Job-link field (item 5), fetched once here
+  // rather than per-modal-open, since the job list doesn't change within a
+  // single Materials page session and jobs() can return a lot of rows.
+  const [editTxn, setEditTxn] = useState(null);
+  const [jobs, setJobs] = useState([]);
+  const [txnRefreshKey, setTxnRefreshKey] = useState(0);
   const { toast, notify } = useModuleToast();
 
   const loadMaterials = () => {
@@ -271,6 +291,9 @@ export default function Materials() {
   };
 
   useEffect(() => { loadMaterials(); }, []);
+  useEffect(() => {
+    api.jobs('?per_page=200').then(data => setJobs(data.items || [])).catch(() => {});
+  }, []);
 
   const filtered = materials.filter(m => `${m.name} ${m.category} ${m.material_ref}`.toLowerCase().includes(search.toLowerCase()));
   const lowStockCount = materials.filter(m => m.low_stock).length;
@@ -319,24 +342,46 @@ export default function Materials() {
       };
       if (form.transaction_type === 'purchase' && form.unit_cost !== '') payload.unit_cost = Number(form.unit_cost);
       if (form.transaction_type !== 'count') {
-        if (form.job_id) payload.job_id = Number(form.job_id);
+        payload.job_id = form.job_id ? Number(form.job_id) : null;
         if (form.transaction_type === 'usage' && form.output_quantity !== '') {
           payload.output_quantity = Number(form.output_quantity);
           payload.output_description = form.output_description || null;
+        } else {
+          payload.output_quantity = null;
+          payload.output_description = null;
         }
       }
-      await api.createMaterialTransaction(txnMaterial.id, payload);
-      notify('Transaction logged');
+      if (editTxn) {
+        await api.updateMaterialTransaction(editTxn.id, payload);
+        notify('Transaction updated');
+      } else {
+        await api.createMaterialTransaction(txnMaterial.id, payload);
+        notify('Transaction logged');
+      }
       setTxnMaterial(null);
+      setEditTxn(null);
       loadMaterials();
-      if (selected?.id === txnMaterial.id) {
+      setTxnRefreshKey(k => k + 1);
+      if (selected?.id === (txnMaterial?.id || editTxn?.material_id)) {
         // Refresh the open detail view's stock figures by re-fetching the summary.
         const data = await api.materialsSummary();
         const updated = (data.items || []).find(m => m.id === selected.id);
         if (updated) setSelected(updated);
       }
     } catch (saveError) {
-      notify(saveError.message || 'Could not log transaction', 'error');
+      notify(saveError.message || 'Could not save transaction', 'error');
+    }
+  };
+
+  const handleDeleteTransaction = async txn => {
+    if (!window.confirm(`Delete this ${txn.transaction_type} transaction (${txn.quantity})? This cannot be undone.`)) return;
+    try {
+      await api.deleteMaterialTransaction(txn.id);
+      notify('Transaction deleted');
+      loadMaterials();
+      setTxnRefreshKey(k => k + 1);
+    } catch (deleteError) {
+      notify(deleteError.message || 'Could not delete transaction', 'error');
     }
   };
 
@@ -399,6 +444,9 @@ export default function Materials() {
           material={selected}
           onBack={() => setSelected(null)}
           onLogTransaction={setTxnMaterial}
+          onEditTransaction={txn => setEditTxn(txn)}
+          onDeleteTransaction={handleDeleteTransaction}
+          refreshKey={txnRefreshKey}
           notify={notify}
         />
       )}
@@ -412,9 +460,11 @@ export default function Materials() {
         onSave={handleSaveMaterial}
       />
       <RecordMaterialTransactionModal
-        isOpen={Boolean(txnMaterial)}
-        material={txnMaterial}
-        onClose={() => setTxnMaterial(null)}
+        isOpen={Boolean(txnMaterial) || Boolean(editTxn)}
+        material={txnMaterial || selected}
+        editRecord={editTxn}
+        jobs={jobs}
+        onClose={() => { setTxnMaterial(null); setEditTxn(null); }}
         onSave={handleLogTransaction}
       />
       <ModuleToast toast={toast} />

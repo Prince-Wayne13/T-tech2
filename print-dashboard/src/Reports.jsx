@@ -3,6 +3,7 @@ import './styles.css';
 import { api } from './api/client';
 import { money } from './utils/format';
 import { ModuleHeader, StatsGrid } from './components/ModuleStandard';
+import { PrintPreviewModal } from './components/PrintLayouts';
 
 // ── Reports rebuild (nav/reports consolidation session) ──────────────────
 // Replaces the previous generic report-library list with two tabs:
@@ -706,6 +707,13 @@ function MaterialsSection() {
   const rows = data?.materials || [];
   const unreconciledCount = data?.flags?.unreconciled_count?.length || 0;
   const varianceCount = data?.flags?.count_variance?.length || 0;
+  // Item 3 (flagged gap, fixed this pass): print/export for this report.
+  // preview holds the same payload useAnalyticsData already fetched -
+  // PrintPreviewModal's 'materials_reconciliation' type (PrintLayouts.jsx)
+  // renders it, and the browser's native print dialog (triggered by
+  // window.print(), same mechanism every other print layout in this app
+  // uses) handles the actual PDF/paper output.
+  const [preview, setPreview] = useState(null);
 
   return (
     <SectionShell title="Materials - Month-End Reconciliation" loading={loading} error={error} empty={false}>
@@ -731,6 +739,14 @@ function MaterialsSection() {
             outline: 'none',
           }}
         />
+        <button
+          className="filter-btn"
+          disabled={loading || !data}
+          onClick={() => setPreview(data)}
+          style={{ fontSize: '11px' }}
+        >
+          Print / Export
+        </button>
         {(unreconciledCount > 0 || varianceCount > 0) && !loading && (
           <span style={{ fontSize: '10px' }}>
             {varianceCount > 0 && <span style={{ marginRight: '12px' }}><strong style={{ color: 'var(--red)' }}>{varianceCount}</strong> with a count variance</span>}
@@ -788,6 +804,15 @@ function MaterialsSection() {
           </tbody>
         </table>
       </div>
+      <PrintPreviewModal
+        type="materials_reconciliation"
+        title={`Materials Reconciliation - ${month}`}
+        data={preview}
+        onClose={() => setPreview(null)}
+        actions={
+          <button className="filter-btn active" onClick={() => window.print()}>Print</button>
+        }
+      />
     </SectionShell>
   );
 }

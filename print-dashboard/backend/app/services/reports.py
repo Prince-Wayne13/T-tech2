@@ -482,6 +482,107 @@ def build_materials_reconciliation(month=None):
     }
 
 
+def build_materials_waste_report(month=None):
+    """Item 1 (flagged gap): a spoilage/waste-% report. The data model has
+    two candidate sources for "waste": MaterialTransaction.output_quantity
+    (what a usage row was recorded as producing) and the signed "adjustment"
+    transaction_type (negative = waste/damage/loss, positive = found stock -
+    see the type comment on MaterialTransaction in models.py and the signing
+    comment in material_stock_summary() above).
+
+    Output-based yield is NOT used here as the waste measure: output_quantity
+    is in a different unit to the material consumed (e.g. sqm of vinyl in ->
+    count of stickers out), so a "waste %" from that pairing would require an
+    expected-yield-per-unit figure that doesn't exist anywhere in this model.
+    Building one would mean inventing a conversion factor with no data behind
+    it - fabricated precision, not a real number.
+
+    What the ledger DOES support honestly is: of everything that moved as
+    stock this month (purchased + found-stock adjustments), what fraction
+    was written off as waste/damage/loss (negative adjustments)? That's a
+    real, derivable percentage, so that is what this report measures.
+
+    Returns one row per material with any adjustment activity in the period,
+    plus a fleet-wide total. Materials with zero adjustment rows in the
+    period are omitted from `materials` (nothing to report) but still count
+    toward `all_materials_reviewed` for visibility that they were checked.
+    """
+    if month is None:
+        month = date.today().strftime("%Y-%m")
+    period_start, period_end = _month_bounds(month)
+
+    materials = Material.query.order_by(Material.name.asc()).all()
+    rows = []
+    total_waste_value = 0.0
+    total_stock_in_value = 0.0
+
+    for material in materials:
+        month_transactions = MaterialTransaction.query.filter(
+            MaterialTransaction.material_id == material.id,
+            MaterialTransaction.transaction_date >= period_start,
+            MaterialTransaction.transaction_date <= period_end,
+        ).all()
+
+        purchased_qty = sum(
+            (money(txn.quantity) for txn in month_transactions if txn.transaction_type == "purchase"),
+            0.0,
+        )
+        # Adjustments are signed: positive = found stock (add to "came in"),
+        # negative = waste/damage/loss (the thing this report measures).
+        found_qty = sum(
+            (money(txn.quantity) for txn in month_transactions
+             if txn.transaction_type == "adjustment" and money(txn.quantity) > 0),
+            0.0,
+        )
+        waste_qty = sum(
+            (-money(txn.quantity) for txn in month_transactions
+             if txn.transaction_type == "adjustment" and money(txn.quantity) < 0),
+            0.0,
+        )
+
+        stock_in_qty = purchased_qty + found_qty
+        waste_pct = round((waste_qty / stock_in_qty) * 100, 2) if stock_in_qty > 0 else None
+
+        unit_cost = money(material.unit_cost)
+        waste_value = round(waste_qty * unit_cost, 2)
+
+        if waste_qty > 0 or found_qty > 0:
+            rows.append({
+                "material_id": material.id,
+                "material_ref": material.material_ref,
+                "name": material.name,
+                "unit": material.unit,
+                "purchased_qty": purchased_qty,
+                "found_qty": found_qty,
+                "stock_in_qty": stock_in_qty,
+                "waste_qty": waste_qty,
+                "waste_pct": waste_pct,
+                "waste_value": waste_value,
+                "waste_transaction_count": len([
+                    txn for txn in month_transactions
+                    if txn.transaction_type == "adjustment" and money(txn.quantity) < 0
+                ]),
+            })
+            total_waste_value += waste_value
+            total_stock_in_value += round(stock_in_qty * unit_cost, 2)
+
+    rows.sort(key=lambda r: r["waste_value"], reverse=True)
+    overall_waste_pct = round((total_waste_value / total_stock_in_value) * 100, 2) if total_stock_in_value > 0 else None
+
+    return {
+        "month": month,
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
+        "method": "Waste % = negative-adjustment quantity / (purchased + found-stock adjustment quantity) this period, per material. Reflects only logged adjustment rows - not a yield/output-based estimate (see docstring).",
+        "materials": rows,
+        "all_materials_reviewed": len(materials),
+        "summary": {
+            "total_waste_value": round(total_waste_value, 2),
+            "overall_waste_pct": overall_waste_pct,
+        },
+    }
+
+
 def build_report_library():
     financials = build_financial_report()
     dashboard = build_dashboard_summary()
@@ -533,6 +634,15 @@ def build_report_library():
             "status": "ready",
             "generated_by": "System",
             "notes": "Periodic inventory method: opening stock, purchases, and closing stock reconcile to consumption per material, cross-checked against physical counts and against units produced. Call GET /api/reports/materials?month=YYYY-MM for the full table.",
+            "metrics": {},
+        },
+        {
+            "id": "RPT-MATERIALS-WASTE",
+            "name": "Materials Spoilage / Waste Report",
+            "type": "Monthly",
+            "status": "ready",
+            "generated_by": "System",
+            "notes": "Waste % per material, from logged waste/damage/loss adjustment rows against stock that moved in this period. Call GET /api/reports/materials/waste?month=YYYY-MM for the full table.",
             "metrics": {},
         },
     ]

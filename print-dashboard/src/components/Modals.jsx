@@ -437,7 +437,7 @@ function SimpleRecordPreview({ type, data }) {
 
 /* ═══════════════════════════════════════ MODAL: New Invoice ═══════════════════════════════════════ */
 export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ client: '', items: [], due: '', notes: '', discount: 0 });
+  const [form, setForm] = useState({ client: '', items: [], due: '', notes: '', discount: 0, taxRate: 0 });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
   const [showPreview, setShowPreview] = useState(false);
@@ -450,6 +450,16 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
       due: initialData?.due_on || initialData?.due || '',
       notes: initialData?.notes || '',
       discount: Number(initialData?.discount_amount || 0),
+      // Item 8 (flagged gap, fixed this pass): tax_rate is a real column on
+      // Invoice (models.py) and services/invoices.py's invoice_totals()
+      // already computes tax = (subtotal - discount) * tax_rate, total =
+      // taxable + tax - but this form never captured or displayed that
+      // rate, so it always saved as 0 and the live preview below never
+      // matched what a non-zero rate would actually produce once saved.
+      // Stored here as a fraction (0.165 = 16.5%), matching the backend
+      // column's own units (Numeric(6,4), same fraction convention as the
+      // backend applies it in - not a percentage int needing /100 either side).
+      taxRate: Number(initialData?.tax_rate || 0),
     });
     setSelectedService(null); setQty('1'); setShowPreview(false);
   }, [isOpen, initialData]);
@@ -461,7 +471,10 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
     }
   };
   const removeItem = i => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }));
-  const total = calculateDiscountedTotal(form.items, form.discount);
+  const subtotal = calculateTotal(form.items);
+  const taxable = Math.max(subtotal - Number(form.discount || 0), 0);
+  const taxAmount = taxable * Number(form.taxRate || 0);
+  const total = taxable + taxAmount;
 
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title={initialData ? 'Edit Invoice' : 'New Invoice'} wide footer={<>
@@ -496,16 +509,23 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
           <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-faint)', flexShrink: 0 }}>
             <label style={labelStyle}>Discount (flat amount, MK)</label>
             <input type="number" min="0" style={inputStyle} placeholder="0" value={form.discount || ''} onChange={e => setForm({ ...form, discount: Number(e.target.value) || 0 })} />
+            <label style={{ ...labelStyle, marginTop: '10px' }}>Tax Rate (%, optional)</label>
+            <input type="number" min="0" step="0.01" style={inputStyle} placeholder="0" value={form.taxRate ? form.taxRate * 100 : ''} onChange={e => setForm({ ...form, taxRate: (Number(e.target.value) || 0) / 100 })} />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '10px', color: 'var(--text-muted)' }}>
-              <span>Subtotal</span><span>MK {calculateTotal(form.items).toLocaleString()}</span>
+              <span>Subtotal</span><span>MK {subtotal.toLocaleString()}</span>
             </div>
             {form.discount > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
                 <span>Discount</span><span>-MK {Number(form.discount).toLocaleString()}</span>
               </div>
             )}
+            {form.taxRate > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
+                <span>Tax ({(form.taxRate * 100).toFixed(2)}%)</span><span>+MK {taxAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '11px', fontWeight: 700, color: 'var(--text-head)' }}>
-              <span>Total</span><span>MK {total.toLocaleString()}</span>
+              <span>Total</span><span>MK {total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
             </div>
           </div>
           <AddItemBar selectedService={selectedService} form={{ qty }} setForm={f => setQty(f.qty)} onAdd={addItem} />
@@ -1122,13 +1142,14 @@ const TRANSACTION_TYPES = [
   { value: 'count', label: 'Physical Count' },
 ];
 
-export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, material }) {
+export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, material, editRecord = null, jobs = [] }) {
   const [form, setForm] = useState({
     transaction_type: 'usage',
     quantity: '',
     unit_cost: '',
     transaction_date: new Date().toISOString().split('T')[0],
     job_id: '',
+    job_label: '',
     output_quantity: '',
     output_description: '',
     notes: '',
@@ -1136,27 +1157,58 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
   const [showPreview, setShowPreview] = useState(false);
   useEffect(() => {
     if (!isOpen) return;
-    setForm({
-      transaction_type: 'usage',
-      quantity: '',
-      unit_cost: '',
-      transaction_date: new Date().toISOString().split('T')[0],
-      job_id: '',
-      output_quantity: '',
-      output_description: '',
-      notes: '',
-    });
+    if (editRecord) {
+      // Item 4 (flagged gap, fixed this pass): pre-fill from the existing
+      // row when editing, instead of only ever offering a blank form
+      // (which previously meant "fix a mistake" only worked as
+      // delete-and-recreate, losing the original created_at/audit order).
+      const linkedJob = jobs.find(j => j.id === editRecord.job_id);
+      setForm({
+        transaction_type: editRecord.transaction_type || 'usage',
+        quantity: editRecord.quantity != null ? String(editRecord.quantity) : '',
+        unit_cost: editRecord.unit_cost != null ? String(editRecord.unit_cost) : '',
+        transaction_date: editRecord.transaction_date || new Date().toISOString().split('T')[0],
+        job_id: editRecord.job_id != null ? String(editRecord.job_id) : '',
+        job_label: linkedJob ? `${linkedJob.job_ref} - ${linkedJob.client_name || linkedJob.title || ''}`.trim() : (editRecord.job_ref || ''),
+        output_quantity: editRecord.output_quantity != null ? String(editRecord.output_quantity) : '',
+        output_description: editRecord.output_description || '',
+        notes: editRecord.notes || '',
+      });
+    } else {
+      setForm({
+        transaction_type: 'usage',
+        quantity: '',
+        unit_cost: '',
+        transaction_date: new Date().toISOString().split('T')[0],
+        job_id: '',
+        job_label: '',
+        output_quantity: '',
+        output_description: '',
+        notes: '',
+      });
+    }
     setShowPreview(false);
-  }, [isOpen, material]);
+  }, [isOpen, material, editRecord]);
 
   const isCount = form.transaction_type === 'count';
   const isUsage = form.transaction_type === 'usage';
   const isPurchase = form.transaction_type === 'purchase';
 
+  // Item 5 (flagged gap, fixed this pass): searchable Job link instead of a
+  // raw numeric ID field. Follows the same <input list> + <datalist>
+  // pattern already used for Client search elsewhere in this file (see
+  // "job-client-list" in the Job modal below) rather than introducing a
+  // new autocomplete mechanism. Typing/selecting a "JOB-0102 - Client Name"
+  // label resolves back to the numeric job_id the backend actually wants.
+  const handleJobLabelChange = value => {
+    const match = jobs.find(j => `${j.job_ref} - ${j.client_name || j.title || ''}`.trim() === value);
+    setForm(prev => ({ ...prev, job_label: value, job_id: match ? String(match.id) : '' }));
+  };
+
   return (
-    <ModalWrapper isOpen={isOpen} onClose={onClose} title={material ? `Log Transaction: ${material.name}` : 'Log Transaction'} wide footer={<>
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title={material ? `${editRecord ? 'Edit' : 'Log'} Transaction: ${material.name}` : `${editRecord ? 'Edit' : 'Log'} Transaction`} wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>Save</button>
+      <button onClick={() => onSave(form)} style={createButton}>{editRecord ? 'Save Changes' : 'Save'}</button>
     </>}>
       <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={
@@ -1178,7 +1230,13 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
             )}
             <div><label style={labelStyle}>Date</label><input type="date" style={inputStyle} value={form.transaction_date} onChange={e => setForm({ ...form, transaction_date: e.target.value })} /></div>
             {!isCount && (
-              <div><label style={labelStyle}>Job # (optional)</label><input style={inputStyle} placeholder="e.g. 12 (Job ID)" value={form.job_id} onChange={e => setForm({ ...form, job_id: e.target.value })} /></div>
+              <div>
+                <label style={labelStyle}>Job (optional)</label>
+                <input style={inputStyle} list="material-txn-job-list" placeholder="Search job # or client..." value={form.job_label} onChange={e => handleJobLabelChange(e.target.value)} />
+                <datalist id="material-txn-job-list">
+                  {jobs.map(j => <option key={j.id} value={`${j.job_ref} - ${j.client_name || j.title || ''}`.trim()} />)}
+                </datalist>
+              </div>
             )}
             {isUsage && (
               <>

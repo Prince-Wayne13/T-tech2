@@ -7,6 +7,7 @@ from ..services.reports import (
     build_financial_report,
     build_machine_revenue,
     build_materials_reconciliation,
+    build_materials_waste_report,
     build_report_library,
 )
 
@@ -44,3 +45,15 @@ def materials_reconciliation():
     """
     month = request.args.get("month")
     return jsonify(build_materials_reconciliation(month=month))
+
+
+@bp.get("/materials/waste")
+def materials_waste():
+    """Item 1 (flagged gap, fixed this pass): spoilage/waste % per material.
+    Derived from logged negative "adjustment" transaction rows (waste/damage/
+    loss) against stock that moved in the period (purchased + found-stock
+    adjustments). ?month=YYYY-MM, defaults to the current calendar month.
+    See build_materials_waste_report() for why this isn't output/yield-based.
+    """
+    month = request.args.get("month")
+    return jsonify(build_materials_waste_report(month=month))

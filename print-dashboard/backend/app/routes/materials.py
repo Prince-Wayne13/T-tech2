@@ -180,6 +180,54 @@ def create_material_transaction(material_id):
     return jsonify(serialize_transaction(txn)), 201
 
 
+@bp.put("/transactions/<int:transaction_id>")
+def update_material_transaction(transaction_id):
+    # Item 4 (flagged gap, fixed this pass): inline edit for a logged
+    # material transaction. Previously only create/delete existed - any
+    # correction (wrong quantity, wrong job link, wrong date) meant delete
+    # and re-create, which loses the original created_at and silently
+    # re-orders audit history. This edits the row in place instead, with
+    # the same validation create_material_transaction() applies, and logs
+    # the change to AuditLog the same way every other mutating route here does.
+    txn = MaterialTransaction.query.get_or_404(transaction_id)
+    data = request.get_json() or {}
+
+    transaction_type = data.get("transaction_type", txn.transaction_type)
+    if transaction_type not in {"purchase", "usage", "adjustment", "count"}:
+        return jsonify({"error": "transaction_type must be 'purchase', 'usage', 'adjustment', or 'count'"}), 400
+    if transaction_type == "count" and (
+        data.get("job_id", txn.job_id) or data.get("output_quantity", txn.output_quantity)
+    ):
+        return jsonify({"error": "'count' transactions cannot have a job_id or output_quantity"}), 400
+
+    if "transaction_type" in data:
+        txn.transaction_type = transaction_type
+    if "quantity" in data:
+        if data["quantity"] is None:
+            return jsonify({"error": "quantity is required"}), 400
+        txn.quantity = data["quantity"]
+    if "unit_cost" in data:
+        txn.unit_cost = data["unit_cost"]
+    if "transaction_date" in data:
+        txn.transaction_date = parse_date(data.get("transaction_date")) or txn.transaction_date
+    if "job_id" in data:
+        txn.job_id = data["job_id"]
+    if "output_quantity" in data:
+        txn.output_quantity = data["output_quantity"]
+    if "output_description" in data:
+        txn.output_description = data["output_description"]
+    if "notes" in data:
+        txn.notes = data["notes"]
+
+    db.session.add(AuditLog(
+        action=f"Edited {txn.transaction_type} transaction for material #{txn.material_id}",
+        entity_type="material_transaction",
+        entity_id=txn.id,
+    ))
+    db.session.commit()
+    return jsonify(serialize_transaction(txn))
+
+
 @bp.delete("/transactions/<int:transaction_id>")
 def delete_material_transaction(transaction_id):
     # Corrections happen (wrong quantity entered, wrong job linked) - a hard

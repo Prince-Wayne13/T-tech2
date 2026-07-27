@@ -178,9 +178,20 @@ function ItemsTable({ items, unitColumn = true }) {
 function InvoiceDocument({ invoice }) {
   const lineItems = normaliseItems(invoice);
   const subtotal = calculateTotal(lineItems);
+  // Item 8 (flagged gap, fixed this pass): this function previously went
+  // straight from subtotal to VAT to total, never subtracting
+  // invoice.discount_amount at all - the only one of the two PDF paths
+  // (this one vs. PrintLayouts.jsx's InvoicePrintLayout) that dropped it.
+  // ProposalDocument just below in this same file already does this
+  // correctly (taxable = subtotal - discount, then VAT on the taxable
+  // amount) - this now matches that pattern instead of diverging from it,
+  // and also matches services/invoices.py's invoice_totals() on the backend
+  // (taxable = subtotal - discount; tax = taxable * tax_rate).
+  const discount = Number(invoice?.discount_amount ?? invoice?.discount ?? 0);
+  const taxable = Math.max(subtotal - discount, 0);
   const vatEnabled = invoice?.vat_enabled !== false;
-  const vat = Number(invoice?.vat ?? invoice?.tax ?? (vatEnabled ? subtotal * VAT_RATE : 0));
-  const total = subtotal + vat;
+  const vat = Number(invoice?.vat ?? invoice?.tax ?? (vatEnabled ? taxable * VAT_RATE : 0));
+  const total = taxable + vat;
   const paid = Number(invoice?.totals?.paid ?? invoice?.amount_paid ?? 0);
   const balance = Number(invoice?.totals?.balance ?? invoice?.balance_due ?? Math.max(total - paid, 0));
 
@@ -235,6 +246,9 @@ function InvoiceDocument({ invoice }) {
           <View style={styles.totalsSection}>
             <View style={styles.totalsBox}>
               <View style={styles.totalsRow}><Text style={styles.totalsLabel}>Subtotal</Text><Text style={styles.totalsValue}>{fmt(subtotal)}</Text></View>
+              {discount > 0 && (
+                <View style={styles.totalsMutedRow}><Text style={styles.totalsMutedLabel}>Discount</Text><Text style={styles.totalsMutedValue}>-{fmt(discount)}</Text></View>
+              )}
               {vatEnabled && (
                 <View style={styles.totalsMutedRow}><Text style={styles.totalsMutedLabel}>VAT (16.5%)</Text><Text style={styles.totalsMutedValue}>{fmt(vat)}</Text></View>
               )}
