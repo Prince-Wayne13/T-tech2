@@ -275,29 +275,6 @@ def ensure_machine_capability_schema():
     return changed
 
 
-def ensure_material_yield_schema():
-    """This session's addition: MaterialTransaction.output_quantity and
-    .output_description (yield tracking - "this much material produced this
-    much output"), needed for the month-end materials reconciliation report.
-    No new transaction_type value needs a schema change ("count" is just a
-    new allowed string in an existing VARCHAR column, not a new column), so
-    this migration only needs to add the two output_* columns.
-    """
-    changed = []
-    material_transaction_columns = _columns("material_transactions")
-
-    if "output_quantity" not in material_transaction_columns:
-        _add_column("material_transactions", "output_quantity NUMERIC(14, 2)")
-        changed.append("material_transactions.output_quantity")
-
-    if "output_description" not in material_transaction_columns:
-        _add_column("material_transactions", "output_description VARCHAR(120)")
-        changed.append("material_transactions.output_description")
-
-    db.session.commit()
-    return changed
-
-
 def ensure_default_capabilities_seed():
     """Seed the capability set from the workshop's actual machine lineup
     (Large Format = vinyl stickers/banners, DTF = apparel transfers, etc.),
@@ -313,22 +290,20 @@ def ensure_default_capabilities_seed():
         ("Duplex Printing", "Digital Print"),
         ("A3 Printing", "Digital Print"),
         ("Document Printing", "Digital Print"),
-        ("Book Printing", "Digital Print"),
-        ("Magazine Printing", "Digital Print"),
-        ("Calendar Printing", "Digital Print"),
         ("Stapling", "Finishing"),
         ("Book Binding", "Finishing"),
         ("Cutting & Trimming", "Finishing"),
         ("Vinyl Stickers", "Large Format"),
         ("Banner Printing", "Large Format"),
+        ("Contra Vision", "Large Format"),
+        ("Window Frosting", "Large Format"),
         ("Photo Printing", "Sublimation"),
         ("Glossy Printing", "Sublimation"),
-        ("Mug Cup Sublimation", "Sublimation"),
+        ("Mug & Plate Sublimation", "Sublimation"),
         ("DTF Apparel Transfer", "DTF Apparel"),
-        ("DTF Diary Branding", "DTF Apparel"),
-        ("UV DTF Assorted Items", "UV DTF"),
-        ("PVC Card Printing", "PVC Cards"),
-        ("Cutting Stencils", "Cutting"),
+        ("Cap Branding", "DTF Apparel"),
+        ("UV DTF Hard Surface", "UV DTF"),
+        ("Fabric Embroidery", "Embroidery"),
     ]
     existing = {cap.name.lower(): cap for cap in Capability.query.all()}
     created = []
@@ -462,11 +437,6 @@ def run_full_upgrade():
     # same ordering requirement documented above for prompt4/staff_assignment.
     machine_capability_schema = ensure_machine_capability_schema()
     default_capabilities = ensure_default_capabilities_seed()
-    # Must run before anything does an ORM query against MaterialTransaction
-    # (e.g. services/materials.py's stock/summary functions, or the new
-    # build_materials_reconciliation() report), same ordering reason as
-    # every other ALTER TABLE migration in this function.
-    material_yield_schema = ensure_material_yield_schema()
     normalized = normalize_legacy_job_statuses()
     backfilled = backfill_invoice_jobs()
     return {
@@ -478,7 +448,6 @@ def run_full_upgrade():
         "payment_invoice_nullable_schema_changes": payment_invoice_nullable,
         "machine_capability_schema_changes": machine_capability_schema,
         "default_capabilities_seed": default_capabilities,
-        "material_yield_schema_changes": material_yield_schema,
         "job_invoice_flow": {
             "schema_changes": job_invoice_schema,
             "statuses_normalized": normalized,

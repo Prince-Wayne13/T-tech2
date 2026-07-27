@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request
 
 from ..extensions import db
 from ..models import AuditLog, Material, MaterialTransaction
-from ..services.materials import next_material_ref, reconcile_material_count, serialize_material, serialize_transaction
+from ..services.materials import next_material_ref, serialize_material, serialize_transaction
 from ..utils import parse_date
 from .common import apply_search, list_response
 
@@ -61,25 +61,6 @@ def materials_summary():
 def get_material(material_id):
     material = Material.query.get_or_404(material_id)
     return jsonify(serialize_material(material))
-
-
-@bp.get("/<int:material_id>/reconciliation")
-def get_material_reconciliation(material_id):
-    """Compares the ledger-derived on_hand against the most recent physical
-    'count' transaction for this material. Optional ?as_of=YYYY-MM-DD to
-    reconcile against a specific month's count rather than the latest one
-    (used by the /api/reports/materials month-end report).
-    Returns {'reconciled': False} rather than a 404 when no count has ever
-    been logged - not having taken a count yet is a normal, expected state,
-    not an error.
-    """
-    Material.query.get_or_404(material_id)
-    as_of = parse_date(request.args.get("as_of")) if request.args.get("as_of") else None
-    result = reconcile_material_count(material_id, as_of=as_of)
-    if result is None:
-        return jsonify({"reconciled": False, "message": "No physical count has been recorded for this material yet."})
-    result["reconciled"] = True
-    return jsonify(result)
 
 
 @bp.post("")
@@ -146,17 +127,11 @@ def create_material_transaction(material_id):
     material = Material.query.get_or_404(material_id)
     data = request.get_json() or {}
     transaction_type = data.get("transaction_type")
-    if transaction_type not in {"purchase", "usage", "adjustment", "count"}:
-        return jsonify({"error": "transaction_type must be 'purchase', 'usage', 'adjustment', or 'count'"}), 400
+    if transaction_type not in {"purchase", "usage", "adjustment"}:
+        return jsonify({"error": "transaction_type must be 'purchase', 'usage', or 'adjustment'"}), 400
     quantity = data.get("quantity")
     if quantity is None:
         return jsonify({"error": "quantity is required"}), 400
-    # "count" rows represent an absolute physical count, not a movement -
-    # a job_id or output on a count row wouldn't mean anything (nothing was
-    # produced or consumed by taking a count), so both are rejected outright
-    # rather than silently accepted and ignored.
-    if transaction_type == "count" and (data.get("job_id") or data.get("output_quantity")):
-        return jsonify({"error": "'count' transactions cannot have a job_id or output_quantity"}), 400
 
     txn = MaterialTransaction(
         material_id=material.id,
@@ -165,8 +140,6 @@ def create_material_transaction(material_id):
         unit_cost=data.get("unit_cost"),
         transaction_date=parse_date(data.get("transaction_date")) or None,
         job_id=data.get("job_id"),
-        output_quantity=data.get("output_quantity"),
-        output_description=data.get("output_description"),
         notes=data.get("notes"),
     )
     db.session.add(txn)
@@ -178,54 +151,6 @@ def create_material_transaction(material_id):
     ))
     db.session.commit()
     return jsonify(serialize_transaction(txn)), 201
-
-
-@bp.put("/transactions/<int:transaction_id>")
-def update_material_transaction(transaction_id):
-    # Item 4 (flagged gap, fixed this pass): inline edit for a logged
-    # material transaction. Previously only create/delete existed - any
-    # correction (wrong quantity, wrong job link, wrong date) meant delete
-    # and re-create, which loses the original created_at and silently
-    # re-orders audit history. This edits the row in place instead, with
-    # the same validation create_material_transaction() applies, and logs
-    # the change to AuditLog the same way every other mutating route here does.
-    txn = MaterialTransaction.query.get_or_404(transaction_id)
-    data = request.get_json() or {}
-
-    transaction_type = data.get("transaction_type", txn.transaction_type)
-    if transaction_type not in {"purchase", "usage", "adjustment", "count"}:
-        return jsonify({"error": "transaction_type must be 'purchase', 'usage', 'adjustment', or 'count'"}), 400
-    if transaction_type == "count" and (
-        data.get("job_id", txn.job_id) or data.get("output_quantity", txn.output_quantity)
-    ):
-        return jsonify({"error": "'count' transactions cannot have a job_id or output_quantity"}), 400
-
-    if "transaction_type" in data:
-        txn.transaction_type = transaction_type
-    if "quantity" in data:
-        if data["quantity"] is None:
-            return jsonify({"error": "quantity is required"}), 400
-        txn.quantity = data["quantity"]
-    if "unit_cost" in data:
-        txn.unit_cost = data["unit_cost"]
-    if "transaction_date" in data:
-        txn.transaction_date = parse_date(data.get("transaction_date")) or txn.transaction_date
-    if "job_id" in data:
-        txn.job_id = data["job_id"]
-    if "output_quantity" in data:
-        txn.output_quantity = data["output_quantity"]
-    if "output_description" in data:
-        txn.output_description = data["output_description"]
-    if "notes" in data:
-        txn.notes = data["notes"]
-
-    db.session.add(AuditLog(
-        action=f"Edited {txn.transaction_type} transaction for material #{txn.material_id}",
-        entity_type="material_transaction",
-        entity_id=txn.id,
-    ))
-    db.session.commit()
-    return jsonify(serialize_transaction(txn))
 
 
 @bp.delete("/transactions/<int:transaction_id>")

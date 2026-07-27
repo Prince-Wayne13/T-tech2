@@ -290,7 +290,7 @@ export default function UnifiedPreviewModal({ isOpen, onClose, title, data, onDo
   }[layout];
 
   return (
-    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(6px)', animation: isOpen ? 'fadeIn 0.15s ease' : 'fadeOut 0.15s ease' }} onClick={onClose}>
+    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(6px)', animation: isOpen ? 'fadeIn 0.15s ease' : 'fadeOut 0.15s ease' }} onClick={onClose}>
       {/* Premium Gold-Edged Modal Container */}
       <div style={{ background: 'var(--bg-canvas)', borderRadius: 'var(--r-card)', width: 'min(680px, 96vw)', maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 60px rgba(0,0,0,0.22), inset 0 0 0 1px rgba(196, 163, 90, 0.15)', border: '1px solid var(--border-light)', overflow: 'hidden', animation: isOpen ? 'slideUp 0.2s ease' : 'slideDown 0.15s ease' }} onClick={e => e.stopPropagation()}>
         

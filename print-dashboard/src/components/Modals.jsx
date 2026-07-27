@@ -25,42 +25,39 @@ const D = {
    SERVICE DATA
 ═══════════════════════════════════════ */
 const SERVICES = [
-  { category: 'PVC Cards', items: [
-    { name: 'PVC Card Printing', unit: 'card' },
-  ]},
-  { category: 'Sublimation', items: [
-    { name: 'Mug Cup Print', unit: 'mug' },
-  ]},
-  { category: 'UV DTF', items: [
-    { name: 'UV DTF (Other/Assorted)', unit: 'unit' },
-  ]},
-  { category: 'Large Format', items: [
-    { name: 'Banner Printing', unit: 'sqm' },
-    { name: 'Sticker Printing', unit: 'sqm' },
+  { category: 'Digital Print', items: [
+    { name: 'A4 B&W Document', rate: 150, unit: 'page' },
+    { name: 'A4 Color Document', rate: 650, unit: 'page' },
+    { name: 'A5 Flyer Full Color', rate: 210, unit: 'flyer' },
   ]},
   { category: 'DTF Apparel', items: [
-    { name: 'DTF T-Shirt', unit: 'print' },
-    { name: 'DTF Diary', unit: 'diary' },
-    { name: 'DTF Other', unit: 'unit' },
+    { name: 'DTF T-Shirt (A4)', rate: 8500, unit: 'print' },
+    { name: 'DTF Cap Branding', rate: 6500, unit: 'cap' },
+    { name: 'DTF Diary Branding', rate: 7500, unit: 'diary' },
   ]},
-  { category: 'Cutting', items: [
-    { name: 'Cutting Stencil', unit: 'unit' },
-  ]},
-  { category: 'Digital Print', items: [
-    { name: 'Book Printing', unit: 'book' },
-    { name: 'Magazine Printing', unit: 'magazine' },
-    { name: 'Calendar Printing', unit: 'calendar' },
-    { name: 'Normal Printing', unit: 'page' },
+  { category: 'Large Format', items: [
+    { name: 'PVC Banner', rate: 18000, unit: 'sqm' },
+    { name: 'Vinyl Sticker', rate: 22000, unit: 'sqm' },
+    { name: 'Window Frosting', rate: 28000, unit: 'sqm' },
+    { name: 'Contra Vision', rate: 30000, unit: 'sqm' },
   ]},
   { category: 'Finishing', items: [
-    { name: 'Book Binding', unit: 'book' },
+    { name: 'Book Binding', rate: 3500, unit: 'book' },
+  ]},
+  { category: 'Sublimation', items: [
+    { name: 'Mug Print', rate: 7500, unit: 'mug' },
+    { name: 'Plate Print', rate: 9500, unit: 'plate' },
+  ]},
+  { category: 'UV DTF', items: [
+    { name: 'Pen Branding', rate: 1800, unit: 'pen' },
+    { name: 'Key Holder', rate: 2500, unit: 'key holder' },
   ]},
 ];
 
 /* ═══════════════════════════════════════
    SHARED STYLES
 ═══════════════════════════════════════ */
-const inputStyle = { width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: '#fff', color: 'var(--text-body)', colorScheme: 'light', fontSize: '11px', outline: 'none', transition: 'border-color var(--ease)', fontFamily: 'var(--font)', boxSizing: 'border-box' };
+const inputStyle = { width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: '#fff', color: 'var(--text-body)', fontSize: '11px', outline: 'none', transition: 'border-color var(--ease)', fontFamily: 'var(--font)', boxSizing: 'border-box' };
 const labelStyle = { display: 'block', fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' };
 const pillBtnStyle = active => ({ padding: '5px 10px', borderRadius: '50px', border: 'none', fontSize: '10px', fontWeight: active ? 600 : 500, background: active ? 'var(--primary)' : 'var(--bg-canvas)', color: active ? '#fff' : 'var(--text-body)', cursor: 'pointer', transition: 'all var(--ease)' });
 const cancelButton = { padding: '6px 14px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--text-muted)', fontSize: '10px', fontWeight: 600, cursor: 'pointer' };
@@ -95,7 +92,7 @@ function ModalWrapper({ isOpen, onClose, title, children, footer, wide = false }
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', animation: 'fadeIn 0.15s ease' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', animation: 'fadeIn 0.15s ease' }}
       onClick={event => event.target === event.currentTarget && onClose()}
     >
       <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--r-card)', padding: 0, width: '95%', maxWidth: wide ? '950px' : '500px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 50px rgba(0,0,0,0.2)', border: '1px solid var(--border-light)', position: 'relative', animation: 'fadeIn 0.2s ease', overflow: 'hidden' }}>
@@ -219,7 +216,7 @@ function ServiceDropdown({ selectedService, onSelect }) {
           <optgroup key={cat.category} label={cat.category}>
             {cat.items.map(item => (
               <option key={item.name} value={item.name}>
-                {item.name} (per {item.unit})
+                {item.name} (MK {item.rate.toLocaleString()}/{item.unit})
               </option>
             ))}
           </optgroup>
@@ -231,22 +228,17 @@ function ServiceDropdown({ selectedService, onSelect }) {
 
 function AddItemBar({ selectedService, form, setForm, onAdd }) {
   if (!selectedService) return null;
-  const canAdd = Number(form.qty) > 0 && Number(form.rate) > 0;
   return (
-    <div style={{ padding: '12px 20px', background: 'var(--bg-canvas)', borderTop: '1px solid var(--border-faint)', display: 'flex', alignItems: 'flex-end', gap: '10px', flexShrink: 0, flexWrap: 'wrap' }}>
-      <div style={{ flex: 1, minWidth: '120px' }}>
+    <div style={{ padding: '12px 20px', background: 'var(--bg-canvas)', borderTop: '1px solid var(--border-faint)', display: 'flex', alignItems: 'flex-end', gap: '10px', flexShrink: 0 }}>
+      <div style={{ flex: 1 }}>
         <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-head)', marginBottom: '2px' }}>{selectedService.name}</div>
-        <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>Priced per {selectedService.unit}</div>
+        <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>MK {Number(selectedService.rate).toLocaleString()} per {selectedService.unit}</div>
       </div>
       <div style={{ width: '70px' }}>
         <label style={{ ...labelStyle, marginBottom: '2px' }}>Qty</label>
         <input type="number" min="1" style={{ ...inputStyle, padding: '6px', textAlign: 'center' }} value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })} />
       </div>
-      <div style={{ width: '100px' }}>
-        <label style={{ ...labelStyle, marginBottom: '2px' }}>Price (MK)</label>
-        <input type="number" min="0" placeholder="0" style={{ ...inputStyle, padding: '6px', textAlign: 'center' }} value={form.rate} onChange={e => setForm({ ...form, rate: e.target.value })} />
-      </div>
-      <button onClick={onAdd} disabled={!canAdd} style={{ ...createButton, padding: '6px 12px', opacity: canAdd ? 1 : 0.5, cursor: canAdd ? 'pointer' : 'not-allowed' }}>
+      <button onClick={onAdd} style={{ ...createButton, padding: '6px 12px' }}>
         <Icon d={D.plus} size={14} />
       </button>
     </div>
@@ -445,10 +437,9 @@ function SimpleRecordPreview({ type, data }) {
 
 /* ═══════════════════════════════════════ MODAL: New Invoice ═══════════════════════════════════════ */
 export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ client: '', items: [], due: '', notes: '', discount: 0, taxRate: 0 });
+  const [form, setForm] = useState({ client: '', items: [], due: '', notes: '', discount: 0 });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
-  const [rate, setRate] = useState('');
   const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
@@ -459,31 +450,18 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
       due: initialData?.due_on || initialData?.due || '',
       notes: initialData?.notes || '',
       discount: Number(initialData?.discount_amount || 0),
-      // Item 8 (flagged gap, fixed this pass): tax_rate is a real column on
-      // Invoice (models.py) and services/invoices.py's invoice_totals()
-      // already computes tax = (subtotal - discount) * tax_rate, total =
-      // taxable + tax - but this form never captured or displayed that
-      // rate, so it always saved as 0 and the live preview below never
-      // matched what a non-zero rate would actually produce once saved.
-      // Stored here as a fraction (0.165 = 16.5%), matching the backend
-      // column's own units (Numeric(6,4), same fraction convention as the
-      // backend applies it in - not a percentage int needing /100 either side).
-      taxRate: Number(initialData?.tax_rate || 0),
     });
-    setSelectedService(null); setQty('1'); setRate(''); setShowPreview(false);
+    setSelectedService(null); setQty('1'); setShowPreview(false);
   }, [isOpen, initialData]);
 
   const addItem = () => {
-    if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate) }] }));
-      setQty('1'); setRate(''); setSelectedService(null);
+    if (selectedService && qty > 0) {
+      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: selectedService.rate }] }));
+      setQty('1'); setSelectedService(null);
     }
   };
   const removeItem = i => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }));
-  const subtotal = calculateTotal(form.items);
-  const taxable = Math.max(subtotal - Number(form.discount || 0), 0);
-  const taxAmount = taxable * Number(form.taxRate || 0);
-  const total = taxable + taxAmount;
+  const total = calculateDiscountedTotal(form.items, form.discount);
 
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title={initialData ? 'Edit Invoice' : 'New Invoice'} wide footer={<>
@@ -518,26 +496,19 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
           <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-faint)', flexShrink: 0 }}>
             <label style={labelStyle}>Discount (flat amount, MK)</label>
             <input type="number" min="0" style={inputStyle} placeholder="0" value={form.discount || ''} onChange={e => setForm({ ...form, discount: Number(e.target.value) || 0 })} />
-            <label style={{ ...labelStyle, marginTop: '10px' }}>Tax Rate (%, optional)</label>
-            <input type="number" min="0" step="0.01" style={inputStyle} placeholder="0" value={form.taxRate ? form.taxRate * 100 : ''} onChange={e => setForm({ ...form, taxRate: (Number(e.target.value) || 0) / 100 })} />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '10px', color: 'var(--text-muted)' }}>
-              <span>Subtotal</span><span>MK {subtotal.toLocaleString()}</span>
+              <span>Subtotal</span><span>MK {calculateTotal(form.items).toLocaleString()}</span>
             </div>
             {form.discount > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
                 <span>Discount</span><span>-MK {Number(form.discount).toLocaleString()}</span>
               </div>
             )}
-            {form.taxRate > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
-                <span>Tax ({(form.taxRate * 100).toFixed(2)}%)</span><span>+MK {taxAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-              </div>
-            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '11px', fontWeight: 700, color: 'var(--text-head)' }}>
-              <span>Total</span><span>MK {total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+              <span>Total</span><span>MK {total.toLocaleString()}</span>
             </div>
           </div>
-          <AddItemBar selectedService={selectedService} form={{ qty, rate }} setForm={f => { setQty(f.qty); setRate(f.rate); }} onAdd={addItem} />
+          <AddItemBar selectedService={selectedService} form={{ qty }} setForm={f => setQty(f.qty)} onAdd={addItem} />
         </>}
         previewContent={<InvoicePreviewFrame data={form} total={total} />}
       />
@@ -550,7 +521,6 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
   const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', validDays: '', contact: '', notes: '', discount: 0, priority: 'medium', assignedStaffId: '' });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
-  const [rate, setRate] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const [clients, setClients] = useState([]);
   const [staffList, setStaffList] = useState([]);
@@ -596,7 +566,7 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
       priority: initialData?.priority || 'medium',
       assignedStaffId: initialData?.assignedStaffId || initialData?.assigned_staff_id || '',
     });
-    setSelectedService(null); setQty('1'); setRate(''); setShowPreview(false);
+    setSelectedService(null); setQty('1'); setShowPreview(false);
     api.clients('?per_page=500').then(data => setClients(data.items || [])).catch(() => setClients([]));
     api.staff('?active=true').then(data => setStaffList(data.items || [])).catch(() => setStaffList([]));
   }, [isOpen, initialData]);
@@ -641,9 +611,9 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
   };
 
   const addItem = () => {
-    if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate), unit: selectedService.unit }] }));
-      setQty('1'); setRate(''); setSelectedService(null);
+    if (selectedService) {
+      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: selectedService.rate, unit: selectedService.unit }] }));
+      setQty('1'); setSelectedService(null);
     }
   };
   const subtotal = calculateTotal(form.items);
@@ -740,7 +710,7 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
               <span>Total</span><span>MK {total.toLocaleString()}</span>
             </div>
           </div>
-          <AddItemBar selectedService={selectedService} form={{ qty, rate }} setForm={f => { setQty(f.qty); setRate(f.rate); }} onAdd={addItem} />
+          <AddItemBar selectedService={selectedService} form={{ qty }} setForm={f => setQty(f.qty)} onAdd={addItem} />
         </>}
         previewContent={<ProposalPreviewFrame data={form} total={total} />}
       />
@@ -763,7 +733,6 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
   const [form, setForm] = useState({ client: '', title: '', items: [], specs: [], priority: 'medium', due: '', dueDays: '', machineId: '', assignedStaffId: '', notes: '', discount: 0 });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
-  const [rate, setRate] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const [clients, setClients] = useState([]);
   const [staffList, setStaffList] = useState([]);
@@ -797,7 +766,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
       notes: initialData?.notes || '',
       discount: Number(initialData?.discount_amount || initialData?.discount || 0),
     });
-    setSelectedService(null); setQty('1'); setRate(''); setShowPreview(false);
+    setSelectedService(null); setQty('1'); setShowPreview(false);
     // Non-fatal fetches, same pattern as AddExpenseModal's categories/vendors
     // load — this modal must still open and work even if either call fails.
     api.clients('?per_page=500').then(data => setClients(data.items || [])).catch(() => setClients([]));
@@ -826,9 +795,9 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
   };
 
   const addItem = () => {
-    if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate) }] }));
-      setQty('1'); setRate(''); setSelectedService(null);
+    if (selectedService && qty > 0) {
+      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: selectedService.rate }] }));
+      setQty('1'); setSelectedService(null);
     }
   };
   const removeItem = i => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }));
@@ -910,7 +879,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
               <span>Total</span><span>MK {total.toLocaleString()}</span>
             </div>
           </div>
-          <AddItemBar selectedService={selectedService} form={{ qty, rate }} setForm={f => { setQty(f.qty); setRate(f.rate); }} onAdd={addItem} />
+          <AddItemBar selectedService={selectedService} form={{ qty }} setForm={f => setQty(f.qty)} onAdd={addItem} />
           <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-faint)', flexShrink: 0 }}>
             <label style={labelStyle}>Notes</label>
             <textarea style={{ ...inputStyle, minHeight: '60px', resize: 'vertical' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
@@ -1097,176 +1066,6 @@ export function NewVendorModal({ isOpen, onClose, onSave, initialData = null }) 
   );
 }
 
-/* ═══════════════════════════════════════ MODAL: New Material ═══════════════════════════════════════ */
-export function NewMaterialModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ name: '', category: '', unit: 'unit', unit_cost: '', reorder_point: '', notes: '' });
-  const [showPreview, setShowPreview] = useState(false);
-  useEffect(() => {
-    if (!isOpen) return;
-    setForm({
-      name: initialData?.name || '',
-      category: initialData?.category || '',
-      unit: initialData?.unit || 'unit',
-      unit_cost: initialData?.unit_cost ?? '',
-      reorder_point: initialData?.reorder_point ?? '',
-      notes: initialData?.notes || '',
-    });
-    setShowPreview(false);
-  }, [isOpen, initialData]);
-  return (
-    <ModalWrapper isOpen={isOpen} onClose={onClose} title={initialData ? 'Edit Material' : 'New Material'} wide footer={<>
-      <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>{initialData ? 'Update' : 'Create'}</button>
-    </>}>
-      <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
-        formChildren={
-          <div style={{ padding: '20px', display: 'grid', gap: '12px', alignContent: 'start', overflowY: 'auto', flex: 1 }}>
-            <div><label style={labelStyle}>Name</label><input style={inputStyle} placeholder="e.g. Vinyl - White Gloss" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
-            <div><label style={labelStyle}>Category</label><input style={inputStyle} placeholder="e.g. Large Format" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} /></div>
-            <div><label style={labelStyle}>Unit</label><input style={inputStyle} placeholder="e.g. sq.m, L, roll" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} /></div>
-            <div><label style={labelStyle}>Unit Cost (MK)</label><input type="number" style={inputStyle} value={form.unit_cost} onChange={e => setForm({ ...form, unit_cost: e.target.value })} /></div>
-            <div><label style={labelStyle}>Reorder Point (optional)</label><input type="number" style={inputStyle} placeholder="Flag as low stock below this" value={form.reorder_point} onChange={e => setForm({ ...form, reorder_point: e.target.value })} /></div>
-            <div><label style={labelStyle}>Notes</label><textarea style={{ ...inputStyle, minHeight: '50px', resize: 'vertical' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
-          </div>
-        }
-        previewContent={<SimpleRecordPreview type="material" data={form} />}
-      />
-    </ModalWrapper>
-  );
-}
-
-/* ═══════════════════════════════════════ MODAL: Record Material Transaction ═══════════════════════════════════════
-   Covers all four MaterialTransaction types (purchase / usage / adjustment /
-   count) in one modal, matching the backend's single-endpoint design
-   (POST /materials/:id/transactions with a transaction_type field) rather
-   than four separate forms. output_quantity/output_description only show
-   for "usage" — this is what answers "for this much material, we made this
-   much X", so it's surfaced right where the usage itself is logged, not as
-   a separate step. "count" hides quantity's purchase/usage framing (it's an
-   absolute shelf count, not a movement) and hides job/output entirely,
-   matching the backend's 400 rejection of job_id/output_quantity on count rows.
-═══════════════════════════════════════ */
-const TRANSACTION_TYPES = [
-  { value: 'purchase', label: 'Purchase' },
-  { value: 'usage', label: 'Usage' },
-  { value: 'adjustment', label: 'Adjustment' },
-  { value: 'count', label: 'Physical Count' },
-];
-
-export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, material, editRecord = null, jobs = [] }) {
-  const [form, setForm] = useState({
-    transaction_type: 'usage',
-    quantity: '',
-    unit_cost: '',
-    transaction_date: new Date().toISOString().split('T')[0],
-    job_id: '',
-    job_label: '',
-    output_quantity: '',
-    output_description: '',
-    notes: '',
-  });
-  const [showPreview, setShowPreview] = useState(false);
-  useEffect(() => {
-    if (!isOpen) return;
-    if (editRecord) {
-      // Item 4 (flagged gap, fixed this pass): pre-fill from the existing
-      // row when editing, instead of only ever offering a blank form
-      // (which previously meant "fix a mistake" only worked as
-      // delete-and-recreate, losing the original created_at/audit order).
-      const linkedJob = jobs.find(j => j.id === editRecord.job_id);
-      setForm({
-        transaction_type: editRecord.transaction_type || 'usage',
-        quantity: editRecord.quantity != null ? String(editRecord.quantity) : '',
-        unit_cost: editRecord.unit_cost != null ? String(editRecord.unit_cost) : '',
-        transaction_date: editRecord.transaction_date || new Date().toISOString().split('T')[0],
-        job_id: editRecord.job_id != null ? String(editRecord.job_id) : '',
-        job_label: linkedJob ? `${linkedJob.job_ref} - ${linkedJob.client_name || linkedJob.title || ''}`.trim() : (editRecord.job_ref || ''),
-        output_quantity: editRecord.output_quantity != null ? String(editRecord.output_quantity) : '',
-        output_description: editRecord.output_description || '',
-        notes: editRecord.notes || '',
-      });
-    } else {
-      setForm({
-        transaction_type: 'usage',
-        quantity: '',
-        unit_cost: '',
-        transaction_date: new Date().toISOString().split('T')[0],
-        job_id: '',
-        job_label: '',
-        output_quantity: '',
-        output_description: '',
-        notes: '',
-      });
-    }
-    setShowPreview(false);
-  }, [isOpen, material, editRecord]);
-
-  const isCount = form.transaction_type === 'count';
-  const isUsage = form.transaction_type === 'usage';
-  const isPurchase = form.transaction_type === 'purchase';
-
-  // Item 5 (flagged gap, fixed this pass): searchable Job link instead of a
-  // raw numeric ID field. Follows the same <input list> + <datalist>
-  // pattern already used for Client search elsewhere in this file (see
-  // "job-client-list" in the Job modal below) rather than introducing a
-  // new autocomplete mechanism. Typing/selecting a "JOB-0102 - Client Name"
-  // label resolves back to the numeric job_id the backend actually wants.
-  const handleJobLabelChange = value => {
-    const match = jobs.find(j => `${j.job_ref} - ${j.client_name || j.title || ''}`.trim() === value);
-    setForm(prev => ({ ...prev, job_label: value, job_id: match ? String(match.id) : '' }));
-  };
-
-  return (
-    <ModalWrapper isOpen={isOpen} onClose={onClose} title={material ? `${editRecord ? 'Edit' : 'Log'} Transaction: ${material.name}` : `${editRecord ? 'Edit' : 'Log'} Transaction`} wide footer={<>
-      <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>{editRecord ? 'Save Changes' : 'Save'}</button>
-    </>}>
-      <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
-        formChildren={
-          <div style={{ padding: '20px', display: 'grid', gap: '12px', alignContent: 'start', overflowY: 'auto', flex: 1 }}>
-            <div>
-              <label style={labelStyle}>Transaction Type</label>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {TRANSACTION_TYPES.map(t => (
-                  <button key={t.value} onClick={() => setForm({ ...form, transaction_type: t.value })} style={pillBtnStyle(form.transaction_type === t.value)}>{t.label}</button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label style={labelStyle}>{isCount ? `Counted Quantity (${material?.unit || 'unit'})` : `Quantity (${material?.unit || 'unit'})`}</label>
-              <input type="number" style={inputStyle} value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} />
-            </div>
-            {isPurchase && (
-              <div><label style={labelStyle}>Unit Cost (MK, optional)</label><input type="number" style={inputStyle} placeholder="Defaults to material's current unit cost" value={form.unit_cost} onChange={e => setForm({ ...form, unit_cost: e.target.value })} /></div>
-            )}
-            <div><label style={labelStyle}>Date</label><input type="date" style={inputStyle} value={form.transaction_date} onChange={e => setForm({ ...form, transaction_date: e.target.value })} /></div>
-            {!isCount && (
-              <div>
-                <label style={labelStyle}>Job (optional)</label>
-                <input style={inputStyle} list="material-txn-job-list" placeholder="Search job # or client..." value={form.job_label} onChange={e => handleJobLabelChange(e.target.value)} />
-                <datalist id="material-txn-job-list">
-                  {jobs.map(j => <option key={j.id} value={`${j.job_ref} - ${j.client_name || j.title || ''}`.trim()} />)}
-                </datalist>
-              </div>
-            )}
-            {isUsage && (
-              <>
-                <div style={{ borderTop: '1px dashed var(--border-faint)', paddingTop: '10px', fontSize: '9px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                  Output produced (optional) — "from this much material, we made this much..."
-                </div>
-                <div><label style={labelStyle}>Output Quantity</label><input type="number" style={inputStyle} placeholder="e.g. 300" value={form.output_quantity} onChange={e => setForm({ ...form, output_quantity: e.target.value })} /></div>
-                <div><label style={labelStyle}>Output Description</label><input style={inputStyle} placeholder="e.g. Stickers (A6)" value={form.output_description} onChange={e => setForm({ ...form, output_description: e.target.value })} /></div>
-              </>
-            )}
-            <div><label style={labelStyle}>Notes</label><textarea style={{ ...inputStyle, minHeight: '50px', resize: 'vertical' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
-          </div>
-        }
-        previewContent={<SimpleRecordPreview type="material transaction" data={form} />}
-      />
-    </ModalWrapper>
-  );
-}
-
 /* ═══════════════════════════════════════ MODAL: Record Payment ═══════════════════════════════════════ */
 export function RecordPaymentModal({ isOpen, onClose, onSave, initialData = null }) {
   const [form, setForm] = useState({ job: '', amount: '', date: new Date().toISOString().split('T')[0], method: 'bank', ref: '', notes: '' });
@@ -1419,7 +1218,7 @@ export function SearchResultsModal({ isOpen, onClose, results, onSelect }) {
     ...(results?.pricing || []).map(i => ({ title: i.name, type: 'Pricing', sub: `${i.category || ''} ${i.price ? `- MK ${Number(i.price).toLocaleString()}` : ''}`, raw: i })),
   ];
   return (
-    <div style={{ position: 'fixed', top: '60px', left: '50%', transform: 'translateX(-50%)', zIndex: 'var(--z-toast)', width: '90%', maxWidth: '420px', background: 'var(--bg-card)', borderRadius: 'var(--r-card)', border: '1px solid var(--border-faint)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)', animation: 'fadeIn 0.15s ease' }}>
+    <div style={{ position: 'fixed', top: '60px', left: '50%', transform: 'translateX(-50%)', zIndex: 950, width: '90%', maxWidth: '420px', background: 'var(--bg-card)', borderRadius: 'var(--r-card)', border: '1px solid var(--border-faint)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)', animation: 'fadeIn 0.15s ease' }}>
       <div style={{ padding: '12px', borderBottom: '1px solid var(--border-faint)', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>Search Results</div>
       <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
         {rows.length === 0

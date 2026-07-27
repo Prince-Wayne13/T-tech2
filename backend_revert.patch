@@ -1,0 +1,1128 @@
+diff --git a/print-dashboard/backend/app/config.py b/print-dashboard/backend/app/config.py
+index be0fba7..a8d235c 100644
+--- a/print-dashboard/backend/app/config.py
++++ b/print-dashboard/backend/app/config.py
+@@ -21,24 +21,16 @@ class BaseConfig:
+     REPORT_EXPORT_DIR = os.getenv("REPORT_EXPORT_DIR", str(BASE_DIR / "exports"))
+     COMPANY_PROFILE = {
+         "name": os.getenv("COMPANY_NAME", "T-Tech Suppliers & General Dealers Ltd"),
+-        "tagline": os.getenv(
+-            "COMPANY_TAGLINE",
+-            "Screen printing, large format printing, offset printing, sublimation printing, "
+-            "DTF and UV, wallpapers, Portraits, cashsale books, Digital printing, lamination, "
+-            "Photocopying, Scanning and many more.",
+-        ),
+         "contact": {
+-            "phone": os.getenv("COMPANY_PHONE", "0988 231 291"),
++            "phone": os.getenv("COMPANY_PHONE", "+265 988 231 291"),
+             "email": os.getenv("COMPANY_EMAIL", "ttechsuppliers@gmail.com"),
+-            "address": os.getenv("COMPANY_ADDRESS", "Lilongwe, City Mall"),
++            "address": os.getenv("COMPANY_ADDRESS", "Lilongwe, City Mall, Standard Bank Corridor"),
+         },
+         "banking": {
+-            "standard_bank": os.getenv("COMPANY_STANDARD_BANK", "9100008349182"),
+-            "nbs": os.getenv("COMPANY_NBS", "25058402"),
+-            "airtel_money": os.getenv("COMPANY_AIRTEL_MONEY", "0988 231 291"),
+-            "code": os.getenv("COMPANY_CODE", "10156932"),
++            "bank": os.getenv("COMPANY_BANK", "National Bank of Malawi"),
++            "account_name": os.getenv("COMPANY_ACCOUNT_NAME", "T-Tech Suppliers & General Dealers Ltd"),
++            "account_number": os.getenv("COMPANY_ACCOUNT_NUMBER", "1234567890"),
+         },
+-        "vat_rate": float(os.getenv("COMPANY_VAT_RATE", "0.175")),
+     }
+ 
+ 
+diff --git a/print-dashboard/backend/app/models.py b/print-dashboard/backend/app/models.py
+index e0098c4..7573d57 100644
+--- a/print-dashboard/backend/app/models.py
++++ b/print-dashboard/backend/app/models.py
+@@ -163,28 +163,10 @@ class MaterialTransaction(TimestampMixin, SerializableMixin, db.Model):
+     id = db.Column(db.Integer, primary_key=True)
+     material_id = db.Column(db.Integer, db.ForeignKey("materials.id"), nullable=False, index=True)
+     # "purchase" adds to stock (new delivery); "usage" subtracts from stock
+-    # (consumed on a job). "adjustment" covers manual corrections (waste,
+-    # damage, found stock) where no physical count was taken. "count" is a
+-    # month-end physical stock count: it does NOT add to or subtract from
+-    # on_hand like the other three types (material_stock_summary() in
+-    # services/materials.py deliberately does not bucket "count" rows into
+-    # purchased/used/adjusted) - it exists purely as a labelled snapshot for
+-    # reconciliation reporting (services/reports.py's
+-    # build_materials_reconciliation()), which compares the ledger-derived
+-    # on_hand figure against the most recent "count" row's quantity and
+-    # surfaces the gap as a variance instead of silently overwriting it.
++    # (consumed on a job). "adjustment" covers manual corrections (stock
++    # count, waste, damage) without pretending it was a purchase or a job.
+     transaction_type = db.Column(db.String(20), nullable=False, index=True)
+     quantity = db.Column(db.Numeric(14, 3), nullable=False)
+-    # Set only on "usage" rows where the material was consumed to produce a
+-    # countable output (e.g. "used 5 sq.m of vinyl" -> output_quantity=300,
+-    # output_description="stickers"). This is what answers Wayne's boss's
+-    # actual question - "from this much vinyl, we made this much stickers" -
+-    # without needing a separate table: the yield is recorded at the same
+-    # point the usage itself is logged. Left null for purchase/adjustment/
+-    # count rows, and for usage rows where no countable output applies
+-    # (e.g. ink used across many jobs with no single output to attribute it to).
+-    output_quantity = db.Column(db.Numeric(14, 2), nullable=True)
+-    output_description = db.Column(db.String(120), nullable=True)
+     # Purchases: what was actually paid, if known - lets Material.unit_cost
+     # stay a simple "current price" while individual purchases can vary.
+     # Usages: left null; revenue for a usage row comes from the linked job's
+@@ -564,4 +546,4 @@ class PettyCash(TimestampMixin, SerializableMixin, db.Model):
+     notes = db.Column(db.Text)
+ 
+     staff = db.relationship("Staff", backref="petty_cash_entries")
+-    linked_expense = db.relationship("Expense", backref="petty_cash_source")
+\ No newline at end of file
++    linked_expense = db.relationship("Expense", backref="petty_cash_source")
+diff --git a/print-dashboard/backend/app/routes/machines.py b/print-dashboard/backend/app/routes/machines.py
+index eece9d0..6a076de 100644
+--- a/print-dashboard/backend/app/routes/machines.py
++++ b/print-dashboard/backend/app/routes/machines.py
+@@ -223,35 +223,3 @@ def create_pricing_item():
+     db.session.add(AuditLog(action=f"Created pricing item {item.code}", entity_type="pricing_item", entity_id=item.id))
+     db.session.commit()
+     return jsonify(item.to_dict() | {"machine_name": item.machine.name if item.machine else None}), 201
+-
+-
+-@bp.get("/pricing/<int:item_id>")
+-def get_pricing_item(item_id):
+-    item = PricingItem.query.get_or_404(item_id)
+-    return jsonify(item.to_dict() | {"machine_name": item.machine.name if item.machine else None})
+-
+-
+-@bp.put("/pricing/<int:item_id>")
+-def update_pricing_item(item_id):
+-    item = PricingItem.query.get_or_404(item_id)
+-    data = request.get_json() or {}
+-    for field in ["code", "name", "category", "unit", "price", "cost_estimate", "currency", "notes"]:
+-        if field in data:
+-            setattr(item, field, data[field])
+-    if "machine_id" in data:
+-        item.machine_id = data["machine_id"]
+-    if "active" in data:
+-        item.active = bool(data["active"])
+-    db.session.add(AuditLog(action=f"Updated pricing item {item.code}", entity_type="pricing_item", entity_id=item.id))
+-    db.session.commit()
+-    return jsonify(item.to_dict() | {"machine_name": item.machine.name if item.machine else None})
+-
+-
+-@bp.delete("/pricing/<int:item_id>")
+-def delete_pricing_item(item_id):
+-    item = PricingItem.query.get_or_404(item_id)
+-    code = item.code
+-    db.session.delete(item)
+-    db.session.add(AuditLog(action=f"Deleted pricing item {code}", entity_type="pricing_item", entity_id=item_id))
+-    db.session.commit()
+-    return "", 204
+diff --git a/print-dashboard/backend/app/routes/materials.py b/print-dashboard/backend/app/routes/materials.py
+index 7f39926..2221008 100644
+--- a/print-dashboard/backend/app/routes/materials.py
++++ b/print-dashboard/backend/app/routes/materials.py
+@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request
+ 
+ from ..extensions import db
+ from ..models import AuditLog, Material, MaterialTransaction
+-from ..services.materials import next_material_ref, reconcile_material_count, serialize_material, serialize_transaction
++from ..services.materials import next_material_ref, serialize_material, serialize_transaction
+ from ..utils import parse_date
+ from .common import apply_search, list_response
+ 
+@@ -63,25 +63,6 @@ def get_material(material_id):
+     return jsonify(serialize_material(material))
+ 
+ 
+-@bp.get("/<int:material_id>/reconciliation")
+-def get_material_reconciliation(material_id):
+-    """Compares the ledger-derived on_hand against the most recent physical
+-    'count' transaction for this material. Optional ?as_of=YYYY-MM-DD to
+-    reconcile against a specific month's count rather than the latest one
+-    (used by the /api/reports/materials month-end report).
+-    Returns {'reconciled': False} rather than a 404 when no count has ever
+-    been logged - not having taken a count yet is a normal, expected state,
+-    not an error.
+-    """
+-    Material.query.get_or_404(material_id)
+-    as_of = parse_date(request.args.get("as_of")) if request.args.get("as_of") else None
+-    result = reconcile_material_count(material_id, as_of=as_of)
+-    if result is None:
+-        return jsonify({"reconciled": False, "message": "No physical count has been recorded for this material yet."})
+-    result["reconciled"] = True
+-    return jsonify(result)
+-
+-
+ @bp.post("")
+ def create_material():
+     data = request.get_json() or {}
+@@ -146,17 +127,11 @@ def create_material_transaction(material_id):
+     material = Material.query.get_or_404(material_id)
+     data = request.get_json() or {}
+     transaction_type = data.get("transaction_type")
+-    if transaction_type not in {"purchase", "usage", "adjustment", "count"}:
+-        return jsonify({"error": "transaction_type must be 'purchase', 'usage', 'adjustment', or 'count'"}), 400
++    if transaction_type not in {"purchase", "usage", "adjustment"}:
++        return jsonify({"error": "transaction_type must be 'purchase', 'usage', or 'adjustment'"}), 400
+     quantity = data.get("quantity")
+     if quantity is None:
+         return jsonify({"error": "quantity is required"}), 400
+-    # "count" rows represent an absolute physical count, not a movement -
+-    # a job_id or output on a count row wouldn't mean anything (nothing was
+-    # produced or consumed by taking a count), so both are rejected outright
+-    # rather than silently accepted and ignored.
+-    if transaction_type == "count" and (data.get("job_id") or data.get("output_quantity")):
+-        return jsonify({"error": "'count' transactions cannot have a job_id or output_quantity"}), 400
+ 
+     txn = MaterialTransaction(
+         material_id=material.id,
+@@ -165,8 +140,6 @@ def create_material_transaction(material_id):
+         unit_cost=data.get("unit_cost"),
+         transaction_date=parse_date(data.get("transaction_date")) or None,
+         job_id=data.get("job_id"),
+-        output_quantity=data.get("output_quantity"),
+-        output_description=data.get("output_description"),
+         notes=data.get("notes"),
+     )
+     db.session.add(txn)
+@@ -180,54 +153,6 @@ def create_material_transaction(material_id):
+     return jsonify(serialize_transaction(txn)), 201
+ 
+ 
+-@bp.put("/transactions/<int:transaction_id>")
+-def update_material_transaction(transaction_id):
+-    # Item 4 (flagged gap, fixed this pass): inline edit for a logged
+-    # material transaction. Previously only create/delete existed - any
+-    # correction (wrong quantity, wrong job link, wrong date) meant delete
+-    # and re-create, which loses the original created_at and silently
+-    # re-orders audit history. This edits the row in place instead, with
+-    # the same validation create_material_transaction() applies, and logs
+-    # the change to AuditLog the same way every other mutating route here does.
+-    txn = MaterialTransaction.query.get_or_404(transaction_id)
+-    data = request.get_json() or {}
+-
+-    transaction_type = data.get("transaction_type", txn.transaction_type)
+-    if transaction_type not in {"purchase", "usage", "adjustment", "count"}:
+-        return jsonify({"error": "transaction_type must be 'purchase', 'usage', 'adjustment', or 'count'"}), 400
+-    if transaction_type == "count" and (
+-        data.get("job_id", txn.job_id) or data.get("output_quantity", txn.output_quantity)
+-    ):
+-        return jsonify({"error": "'count' transactions cannot have a job_id or output_quantity"}), 400
+-
+-    if "transaction_type" in data:
+-        txn.transaction_type = transaction_type
+-    if "quantity" in data:
+-        if data["quantity"] is None:
+-            return jsonify({"error": "quantity is required"}), 400
+-        txn.quantity = data["quantity"]
+-    if "unit_cost" in data:
+-        txn.unit_cost = data["unit_cost"]
+-    if "transaction_date" in data:
+-        txn.transaction_date = parse_date(data.get("transaction_date")) or txn.transaction_date
+-    if "job_id" in data:
+-        txn.job_id = data["job_id"]
+-    if "output_quantity" in data:
+-        txn.output_quantity = data["output_quantity"]
+-    if "output_description" in data:
+-        txn.output_description = data["output_description"]
+-    if "notes" in data:
+-        txn.notes = data["notes"]
+-
+-    db.session.add(AuditLog(
+-        action=f"Edited {txn.transaction_type} transaction for material #{txn.material_id}",
+-        entity_type="material_transaction",
+-        entity_id=txn.id,
+-    ))
+-    db.session.commit()
+-    return jsonify(serialize_transaction(txn))
+-
+-
+ @bp.delete("/transactions/<int:transaction_id>")
+ def delete_material_transaction(transaction_id):
+     # Corrections happen (wrong quantity entered, wrong job linked) - a hard
+@@ -241,4 +166,4 @@ def delete_material_transaction(transaction_id):
+     ))
+     db.session.delete(txn)
+     db.session.commit()
+-    return jsonify({"deleted": True})
+\ No newline at end of file
++    return jsonify({"deleted": True})
+diff --git a/print-dashboard/backend/app/routes/reports.py b/print-dashboard/backend/app/routes/reports.py
+index e984438..951f86c 100644
+--- a/print-dashboard/backend/app/routes/reports.py
++++ b/print-dashboard/backend/app/routes/reports.py
+@@ -2,14 +2,7 @@
+ 
+ from flask import Blueprint, jsonify, request
+ 
+-from ..services.reports import (
+-    build_dashboard_summary,
+-    build_financial_report,
+-    build_machine_revenue,
+-    build_materials_reconciliation,
+-    build_materials_waste_report,
+-    build_report_library,
+-)
++from ..services.reports import build_dashboard_summary, build_financial_report, build_machine_revenue, build_report_library
+ 
+ bp = Blueprint("reports", __name__)
+ 
+@@ -33,27 +26,4 @@ def reports_library():
+ @bp.get("/machines/revenue")
+ def machine_revenue():
+     rows = build_machine_revenue()
+-    return jsonify({"items": rows, "total": len(rows)})
+-
+-
+-@bp.get("/materials")
+-def materials_reconciliation():
+-    """Month-end periodic inventory report: Opening + Purchased - Consumed
+-    = Closing per material, cross-checked against physical counts and
+-    against recorded output (material consumed -> units produced).
+-    ?month=YYYY-MM, defaults to the current calendar month.
+-    """
+-    month = request.args.get("month")
+-    return jsonify(build_materials_reconciliation(month=month))
+-
+-
+-@bp.get("/materials/waste")
+-def materials_waste():
+-    """Item 1 (flagged gap, fixed this pass): spoilage/waste % per material.
+-    Derived from logged negative "adjustment" transaction rows (waste/damage/
+-    loss) against stock that moved in the period (purchased + found-stock
+-    adjustments). ?month=YYYY-MM, defaults to the current calendar month.
+-    See build_materials_waste_report() for why this isn't output/yield-based.
+-    """
+-    month = request.args.get("month")
+-    return jsonify(build_materials_waste_report(month=month))
+\ No newline at end of file
++    return jsonify({"items": rows, "total": len(rows)})
+\ No newline at end of file
+diff --git a/print-dashboard/backend/app/schema_migrations.py b/print-dashboard/backend/app/schema_migrations.py
+index c1bbfe3..9d656dd 100644
+--- a/print-dashboard/backend/app/schema_migrations.py
++++ b/print-dashboard/backend/app/schema_migrations.py
+@@ -275,29 +275,6 @@ def ensure_machine_capability_schema():
+     return changed
+ 
+ 
+-def ensure_material_yield_schema():
+-    """This session's addition: MaterialTransaction.output_quantity and
+-    .output_description (yield tracking - "this much material produced this
+-    much output"), needed for the month-end materials reconciliation report.
+-    No new transaction_type value needs a schema change ("count" is just a
+-    new allowed string in an existing VARCHAR column, not a new column), so
+-    this migration only needs to add the two output_* columns.
+-    """
+-    changed = []
+-    material_transaction_columns = _columns("material_transactions")
+-
+-    if "output_quantity" not in material_transaction_columns:
+-        _add_column("material_transactions", "output_quantity NUMERIC(14, 2)")
+-        changed.append("material_transactions.output_quantity")
+-
+-    if "output_description" not in material_transaction_columns:
+-        _add_column("material_transactions", "output_description VARCHAR(120)")
+-        changed.append("material_transactions.output_description")
+-
+-    db.session.commit()
+-    return changed
+-
+-
+ def ensure_default_capabilities_seed():
+     """Seed the capability set from the workshop's actual machine lineup
+     (Large Format = vinyl stickers/banners, DTF = apparel transfers, etc.),
+@@ -313,22 +290,20 @@ def ensure_default_capabilities_seed():
+         ("Duplex Printing", "Digital Print"),
+         ("A3 Printing", "Digital Print"),
+         ("Document Printing", "Digital Print"),
+-        ("Book Printing", "Digital Print"),
+-        ("Magazine Printing", "Digital Print"),
+-        ("Calendar Printing", "Digital Print"),
+         ("Stapling", "Finishing"),
+         ("Book Binding", "Finishing"),
+         ("Cutting & Trimming", "Finishing"),
+         ("Vinyl Stickers", "Large Format"),
+         ("Banner Printing", "Large Format"),
++        ("Contra Vision", "Large Format"),
++        ("Window Frosting", "Large Format"),
+         ("Photo Printing", "Sublimation"),
+         ("Glossy Printing", "Sublimation"),
+-        ("Mug Cup Sublimation", "Sublimation"),
++        ("Mug & Plate Sublimation", "Sublimation"),
+         ("DTF Apparel Transfer", "DTF Apparel"),
+-        ("DTF Diary Branding", "DTF Apparel"),
+-        ("UV DTF Assorted Items", "UV DTF"),
+-        ("PVC Card Printing", "PVC Cards"),
+-        ("Cutting Stencils", "Cutting"),
++        ("Cap Branding", "DTF Apparel"),
++        ("UV DTF Hard Surface", "UV DTF"),
++        ("Fabric Embroidery", "Embroidery"),
+     ]
+     existing = {cap.name.lower(): cap for cap in Capability.query.all()}
+     created = []
+@@ -462,11 +437,6 @@ def run_full_upgrade():
+     # same ordering requirement documented above for prompt4/staff_assignment.
+     machine_capability_schema = ensure_machine_capability_schema()
+     default_capabilities = ensure_default_capabilities_seed()
+-    # Must run before anything does an ORM query against MaterialTransaction
+-    # (e.g. services/materials.py's stock/summary functions, or the new
+-    # build_materials_reconciliation() report), same ordering reason as
+-    # every other ALTER TABLE migration in this function.
+-    material_yield_schema = ensure_material_yield_schema()
+     normalized = normalize_legacy_job_statuses()
+     backfilled = backfill_invoice_jobs()
+     return {
+@@ -478,10 +448,9 @@ def run_full_upgrade():
+         "payment_invoice_nullable_schema_changes": payment_invoice_nullable,
+         "machine_capability_schema_changes": machine_capability_schema,
+         "default_capabilities_seed": default_capabilities,
+-        "material_yield_schema_changes": material_yield_schema,
+         "job_invoice_flow": {
+             "schema_changes": job_invoice_schema,
+             "statuses_normalized": normalized,
+             "invoice_jobs_backfilled": backfilled,
+         },
+-    }
+\ No newline at end of file
++    }
+diff --git a/print-dashboard/backend/app/seed.py b/print-dashboard/backend/app/seed.py
+index 0296093..ee97acd 100644
+--- a/print-dashboard/backend/app/seed.py
++++ b/print-dashboard/backend/app/seed.py
+@@ -1,7 +1,6 @@
+ # path: backend/app/seed.py
+ 
+ from datetime import date, datetime, time, timedelta
+-from decimal import Decimal
+ import random
+ 
+ from .extensions import db
+@@ -14,8 +13,6 @@ from .models import (
+     ExportJob,
+     Invoice,
+     Job,
+-    Material,
+-    MaterialTransaction,
+     Payment,
+     PettyCash,
+     PricingItem,
+@@ -51,7 +48,7 @@ def spread_days(month_start, month_end, count, force_first=False):
+ def seed_mock_data(reset=False):
+     random.seed(20250101)
+     if reset:
+-        for model in [ExportJob, AuditLog, PettyCash, Sale, Advance, Expense, ExpenseCategory, Payment, ProposalLineItem, Proposal, MaterialTransaction, Material, Invoice, Job, PricingItem, ProductionMachine, Vendor, Staff, Client]:
++        for model in [ExportJob, AuditLog, PettyCash, Sale, Advance, Expense, ExpenseCategory, Payment, ProposalLineItem, Proposal, Invoice, Job, PricingItem, ProductionMachine, Vendor, Staff, Client]:
+             db.session.query(model).delete()
+         db.session.commit()
+ 
+@@ -109,15 +106,14 @@ def seed_mock_data(reset=False):
+     db.session.flush()
+ 
+     machines = [
+-        ProductionMachine(machine_ref="MCH-PVC-01", name="Pebble Evolis Card Printer", category="PVC Cards", capability="PVC ID cards and card printing", image_path="/machines/pvc-card.svg"),
+-        ProductionMachine(machine_ref="MCH-SUB-01", name="Sublimation Printer", category="Sublimation", capability="Mug cups and coated gift items", image_path="/machines/sublimation.svg"),
+-        ProductionMachine(machine_ref="MCH-UVDTF-01", name="UV DTF Printer", category="UV DTF", capability="Assorted / other UV DTF items", image_path="/machines/uv-dtf.svg"),
+-        ProductionMachine(machine_ref="MCH-LF-01", name="Large Format Printer", category="Large Format", capability="Banners and stickers", image_path="/machines/large-format.svg"),
+-        ProductionMachine(machine_ref="MCH-DTF-01", name="DTF Printer", category="DTF Apparel", capability="T-shirts, diaries and other DTF items", image_path="/machines/dtf.svg"),
+-        ProductionMachine(machine_ref="MCH-PLOT-01", name="Plotter", category="Cutting", capability="Cutting stencils", image_path="/machines/plotter.svg"),
+-        ProductionMachine(machine_ref="MCH-DIGI-01", name="Digital Printer", category="Digital Print", capability="Books, magazines, calendars and other digital print items", image_path="/machines/digital-printer.svg"),
+-        ProductionMachine(machine_ref="MCH-BIND-01", name="Binder", category="Finishing", capability="Binding books", image_path="/machines/binder-cutter.svg"),
+-        ProductionMachine(machine_ref="MCH-KM-01", name="Konica Minolta", category="Digital Print", capability="Calendars, books and normal printing", image_path="/machines/digital-press.svg"),
++        ProductionMachine(machine_ref="MCH-DTF-01", name="DTF Print & Heat Press Line", category="DTF Apparel", capability="T-shirts, hoodies, caps, diaries and fabric transfers", image_path="/machines/dtf.svg", notes="Includes DTF printer, powdering/curing workflow and heat pressing machines."),
++        ProductionMachine(machine_ref="MCH-LF-01", name="Large Format Printer", category="Large Format", capability="Banners, stickers, vinyl, contra vision and window frosting", image_path="/machines/large-format.svg"),
++        ProductionMachine(machine_ref="MCH-KM-01", name="Konica Minolta Digital Press", category="Digital Print", capability="Documents, flyers, booklets, magazines and fast paper printing", image_path="/machines/digital-press.svg"),
++        ProductionMachine(machine_ref="MCH-BIND-01", name="Book Binder & Cutter Line", category="Finishing", capability="Books, magazines, newspapers, trimming and binding", image_path="/machines/binder-cutter.svg"),
++        ProductionMachine(machine_ref="MCH-SUB-01", name="Sublimation Station", category="Sublimation", capability="Mugs, cups, plates and coated gift items", image_path="/machines/sublimation.svg"),
++        ProductionMachine(machine_ref="MCH-UVDTF-01", name="UV DTF Printer", category="UV DTF", capability="Pens, key holders, labels, hard-surface branding and gift items", image_path="/machines/uv-dtf.svg"),
++        ProductionMachine(machine_ref="MCH-EMB-01", name="Embroidery Machine", category="Embroidery", capability="Fabric embroidery and branded apparel", status="active", image_path="/machines/embroidery.svg", notes="Activated: real embroidery pricing now available (logo, caps, front chest, cotton carrier bag, fishing jacket)."),
++        ProductionMachine(machine_ref="MCH-SWT-01", name="Automatic Sweater Machine", category="Apparel", capability="Future sweater production automation", status="planned", image_path="/machines/sweater.svg", notes="Planned future machine."),
+     ]
+     db.session.add_all(machines)
+     db.session.flush()
+@@ -129,29 +125,48 @@ def seed_mock_data(reset=False):
+     ensure_default_capabilities_seed()
+ 
+     machine_by_ref = {machine.machine_ref: machine for machine in machines}
+-    # Fixed price lists were dropped (2026-07-27 session): all job/invoice
+-    # prices are now entered manually per line item. PricingItem rows below
+-    # are kept only as lightweight reference/lookup entries (e.g. for
+-    # reporting on what a machine/category tends to produce) — price and
+-    # cost_estimate here are indicative starting points only, not enforced
+-    # anywhere in the job/invoice flow.
++    # Prices below marked "price list" come directly from the physical T-Tech
++    # price list the user photographed and provided (2026-07-25 session).
++    # Where a price-list category didn't map cleanly to one of the 8 seeded
++    # machines, the machine was chosen by the user's explicit instruction this
++    # session ("guess which machines would be suited") — see dev-log.md for
++    # the full mapping table and reasoning per item.
+     pricing_items = [
+-        PricingItem(code="PVC-CARD", name="PVC card printing", category="PVC Cards", machine_id=machine_by_ref["MCH-PVC-01"].id, unit="card", price=0, cost_estimate=0),
+-        PricingItem(code="SUB-MUG", name="Mug cup print", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="mug", price=0, cost_estimate=0),
+-        PricingItem(code="UVDTF-OTHER", name="UV DTF (other/assorted)", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="unit", price=0, cost_estimate=0),
+-        PricingItem(code="LF-BANNER", name="Banner printing", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=0, cost_estimate=0),
+-        PricingItem(code="LF-STICKER", name="Sticker printing", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=0, cost_estimate=0),
+-        PricingItem(code="DTF-TSHIRT", name="DTF t-shirt", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="print", price=0, cost_estimate=0),
+-        PricingItem(code="DTF-DIARY", name="DTF diary", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="diary", price=0, cost_estimate=0),
+-        PricingItem(code="DTF-OTHER", name="DTF other", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="unit", price=0, cost_estimate=0),
+-        PricingItem(code="PLOT-STENCIL", name="Cutting stencil", category="Cutting", machine_id=machine_by_ref["MCH-PLOT-01"].id, unit="unit", price=0, cost_estimate=0),
+-        PricingItem(code="DIGI-BOOK", name="Book printing", category="Digital Print", machine_id=machine_by_ref["MCH-DIGI-01"].id, unit="book", price=0, cost_estimate=0),
+-        PricingItem(code="DIGI-MAGAZINE", name="Magazine printing", category="Digital Print", machine_id=machine_by_ref["MCH-DIGI-01"].id, unit="magazine", price=0, cost_estimate=0),
+-        PricingItem(code="DIGI-CALENDAR", name="Calendar printing", category="Digital Print", machine_id=machine_by_ref["MCH-DIGI-01"].id, unit="calendar", price=0, cost_estimate=0),
+-        PricingItem(code="FIN-BIND", name="Book binding", category="Finishing", machine_id=machine_by_ref["MCH-BIND-01"].id, unit="book", price=0, cost_estimate=0),
+-        PricingItem(code="KM-CALENDAR", name="Calendar printing", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="calendar", price=0, cost_estimate=0),
+-        PricingItem(code="KM-BOOK", name="Book printing", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="book", price=0, cost_estimate=0),
+-        PricingItem(code="KM-NORMAL", name="Normal printing", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="page", price=0, cost_estimate=0),
++        PricingItem(code="DTF-TSHIRT-A4", name="DTF T-shirt print A4 area", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="print", price=8500, cost_estimate=3200),
++        PricingItem(code="DTF-CAP", name="DTF cap branding", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="cap", price=6500, cost_estimate=2500),
++        PricingItem(code="DTF-DIARY", name="DTF diary branding", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="diary", price=7500, cost_estimate=2800),
++        PricingItem(code="DTF-TSHIRT-TINT", name="T-shirt tinting (inclusive)", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="shirt", price=22000, cost_estimate=9500),
++        PricingItem(code="LF-BANNER-SQM", name="PVC banner print", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=18000, cost_estimate=7800),
++        PricingItem(code="LF-STICKER-SQM", name="Vinyl sticker print", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=22000, cost_estimate=9000),
++        PricingItem(code="LF-FROST-SQM", name="Window frosting film", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=28000, cost_estimate=12500),
++        PricingItem(code="LF-CONTRA-SQM", name="Contra vision print", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=30000, cost_estimate=14000),
++        PricingItem(code="LF-ROLLUP", name="Roll-up banner (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="banner", price=250000, cost_estimate=110000),
++        PricingItem(code="LF-STICKER-A4", name="A4 vinyl stickers, per pack (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="pack", price=4000, cost_estimate=1700),
++        PricingItem(code="LF-STICKER-A5", name="A5 vinyl stickers, per pack (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="pack", price=2500, cost_estimate=1050),
++        PricingItem(code="LF-STICKER-A3", name="A3 vinyl stickers, per pack (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="pack", price=7000, cost_estimate=3000),
++        PricingItem(code="LF-FOAMBOARD", name="Foam board printing (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="board", price=80000, cost_estimate=35000),
++        PricingItem(code="LF-ALU-A1", name="A1 aluminium frame with print (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="frame", price=85000, cost_estimate=38000),
++        PricingItem(code="KM-A4-BW", name="A4 black and white document print", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="page", price=150, cost_estimate=55),
++        PricingItem(code="KM-A4-COLOR", name="A4 colour document print", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="page", price=650, cost_estimate=260),
++        PricingItem(code="KM-FLYER-A5", name="A5 flyer full colour", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="flyer", price=210, cost_estimate=95),
++        PricingItem(code="KM-CARD-50", name="Business cards, 50/pack (price list)", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="pack", price=50000, cost_estimate=21000),
++        PricingItem(code="KM-CARD-100", name="Business cards, 100/pack (price list)", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="pack", price=100000, cost_estimate=42000),
++        PricingItem(code="KM-INVOICE-BOOK", name="Invoice book A5 (price list)", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="book", price=25000, cost_estimate=11000),
++        PricingItem(code="KM-RECEIPT-BOOK", name="Receipt book A5 (price list)", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="book", price=25000, cost_estimate=11000),
++        PricingItem(code="FIN-BIND", name="Book binding", category="Finishing", machine_id=machine_by_ref["MCH-BIND-01"].id, unit="book", price=3500, cost_estimate=1200),
++        PricingItem(code="SUB-MUG", name="Sublimation mug print", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="mug", price=7500, cost_estimate=3300),
++        PricingItem(code="SUB-PLATE", name="Sublimation plate print", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="plate", price=9500, cost_estimate=4300),
++        PricingItem(code="SUB-MUG-NORMAL", name="Normal mug, min order 5 (price list)", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="mug", price=11000, cost_estimate=4800),
++        PricingItem(code="SUB-TRAVEL-JUG", name="Sublimation travelling jug (price list)", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="jug", price=20000, cost_estimate=8800),
++        PricingItem(code="UVDTF-PEN", name="UV DTF pen branding", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="pen", price=1800, cost_estimate=650),
++        PricingItem(code="UVDTF-KEY", name="UV DTF key holder branding", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="key holder", price=2500, cost_estimate=900),
++        PricingItem(code="UV-A5", name="UV printing A5, 21x29cm (price list)", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="print", price=12500, cost_estimate=5500),
++        PricingItem(code="UV-A3", name="UV printing A3, 29x42cm (price list)", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="print", price=17000, cost_estimate=7500),
++        PricingItem(code="UV-A1", name="UV printing A1, 59x84cm (price list)", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="print", price=35000, cost_estimate=15500),
++        PricingItem(code="EMB-LOGO", name="Embroidery logo, small (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="logo", price=6000, cost_estimate=2500),
++        PricingItem(code="EMB-CAP", name="Embroidery caps (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="cap", price=5000, cost_estimate=2100),
++        PricingItem(code="EMB-FRONT-CHEST", name="Embroidery front chest (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="piece", price=8000, cost_estimate=3400),
++        PricingItem(code="EMB-JACKET", name="Embroidery fishing jacket (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="jacket", price=12000, cost_estimate=5200),
+     ]
+     db.session.add_all(pricing_items)
+     db.session.flush()
+@@ -247,47 +262,47 @@ def seed_mock_data(reset=False):
+     # ── INVOICES: ~8–13 per month Apr 2026 → today ──────────────────────────
+     invoice_line_pools = [
+         [
+-            {"description": "A4 full-colour event posters", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-NORMAL"].id, "quantity": 250, "unit": "prints", "unit_price": 1850},
+-            {"description": "Stage backdrop banner 3m x 2m", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-BANNER"].id, "quantity": 1, "unit": "banner", "unit_price": 315000},
++            {"description": "A4 full-colour event posters", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-A4-COLOR"].id, "quantity": 250, "unit": "prints", "unit_price": 1850},
++            {"description": "Stage backdrop banner 3m x 2m", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-BANNER-SQM"].id, "quantity": 1, "unit": "banner", "unit_price": 315000},
+         ],
+         [
+-            {"description": "Waterproof product stickers", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-STICKER"].id, "quantity": 1800, "unit": "stickers", "unit_price": 320},
++            {"description": "Waterproof product stickers", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-STICKER-SQM"].id, "quantity": 1800, "unit": "stickers", "unit_price": 320},
+             {"description": "Freezer vinyl decals", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "quantity": 24, "unit": "decals", "unit_price": 9500},
+         ],
+         [
+-            {"description": "A5 double-sided campaign flyers", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-NORMAL"].id, "quantity": 5000, "unit": "flyers", "unit_price": 210},
++            {"description": "A5 double-sided campaign flyers", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-FLYER-A5"].id, "quantity": 5000, "unit": "flyers", "unit_price": 210},
+             {"description": "Layout and copy cleanup", "product_type": "Design & Prepress", "quantity": 1, "unit": "service", "unit_price": 55000},
+         ],
+         [
+-            {"description": "Frosted window vinyl panels", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-BANNER"].id, "quantity": 12, "unit": "panels", "unit_price": 28000},
++            {"description": "Frosted window vinyl panels", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-FROST-SQM"].id, "quantity": 12, "unit": "panels", "unit_price": 28000},
+             {"description": "On-site installation", "product_type": "Installation", "quantity": 1, "unit": "service", "unit_price": 120000},
+         ],
+         [
+-            {"description": "Branded DTF T-shirts", "product_type": "DTF Apparel", "machine_id": machine_by_ref["MCH-DTF-01"].id, "pricing_item_id": pricing_by_code["DTF-TSHIRT"].id, "quantity": 100, "unit": "prints", "unit_price": 8500},
++            {"description": "Branded DTF T-shirts", "product_type": "DTF Apparel", "machine_id": machine_by_ref["MCH-DTF-01"].id, "pricing_item_id": pricing_by_code["DTF-TSHIRT-A4"].id, "quantity": 100, "unit": "prints", "unit_price": 8500},
+         ],
+         [
+             {"description": "Sublimation mugs for AGM", "product_type": "Sublimation", "machine_id": machine_by_ref["MCH-SUB-01"].id, "pricing_item_id": pricing_by_code["SUB-MUG"].id, "quantity": 150, "unit": "mugs", "unit_price": 7500},
+         ],
+         [
+-            {"description": "DTF branded caps", "product_type": "DTF Apparel", "machine_id": machine_by_ref["MCH-DTF-01"].id, "pricing_item_id": pricing_by_code["DTF-OTHER"].id, "quantity": 80, "unit": "caps", "unit_price": 6500},
++            {"description": "DTF branded caps", "product_type": "DTF Apparel", "machine_id": machine_by_ref["MCH-DTF-01"].id, "pricing_item_id": pricing_by_code["DTF-CAP"].id, "quantity": 80, "unit": "caps", "unit_price": 6500},
+             {"description": "Artwork and layout", "product_type": "Design & Prepress", "quantity": 1, "unit": "service", "unit_price": 35000},
+         ],
+         [
+-            {"description": "UV DTF pen branding", "product_type": "UV DTF", "machine_id": machine_by_ref["MCH-UVDTF-01"].id, "pricing_item_id": pricing_by_code["UVDTF-OTHER"].id, "quantity": 200, "unit": "pens", "unit_price": 1800},
+-            {"description": "UV DTF key holders", "product_type": "UV DTF", "machine_id": machine_by_ref["MCH-UVDTF-01"].id, "pricing_item_id": pricing_by_code["UVDTF-OTHER"].id, "quantity": 500, "unit": "key holders", "unit_price": 2500},
++            {"description": "UV DTF pen branding", "product_type": "UV DTF", "machine_id": machine_by_ref["MCH-UVDTF-01"].id, "pricing_item_id": pricing_by_code["UVDTF-PEN"].id, "quantity": 200, "unit": "pens", "unit_price": 1800},
++            {"description": "UV DTF key holders", "product_type": "UV DTF", "machine_id": machine_by_ref["MCH-UVDTF-01"].id, "pricing_item_id": pricing_by_code["UVDTF-KEY"].id, "quantity": 500, "unit": "key holders", "unit_price": 2500},
+         ],
+         [
+-            {"description": "Annual report booklets", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-NORMAL"].id, "quantity": 300, "unit": "booklets", "unit_price": 4500},
++            {"description": "Annual report booklets", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-A4-COLOR"].id, "quantity": 300, "unit": "booklets", "unit_price": 4500},
+             {"description": "Book binding", "product_type": "Finishing", "machine_id": machine_by_ref["MCH-BIND-01"].id, "pricing_item_id": pricing_by_code["FIN-BIND"].id, "quantity": 300, "unit": "books", "unit_price": 3500},
+         ],
+         [
+-            {"description": "PVC banner prints", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-BANNER"].id, "quantity": 6, "unit": "banners", "unit_price": 18000},
++            {"description": "PVC banner prints", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-BANNER-SQM"].id, "quantity": 6, "unit": "banners", "unit_price": 18000},
+         ],
+         [
+-            {"description": "A4 BW exam papers", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-NORMAL"].id, "quantity": 3000, "unit": "pages", "unit_price": 150},
++            {"description": "A4 BW exam papers", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-A4-BW"].id, "quantity": 3000, "unit": "pages", "unit_price": 150},
+         ],
+         [
+-            {"description": "Sublimation award plates", "product_type": "Sublimation", "machine_id": machine_by_ref["MCH-SUB-01"].id, "pricing_item_id": pricing_by_code["SUB-MUG"].id, "quantity": 50, "unit": "plates", "unit_price": 9500},
++            {"description": "Sublimation award plates", "product_type": "Sublimation", "machine_id": machine_by_ref["MCH-SUB-01"].id, "pricing_item_id": pricing_by_code["SUB-PLATE"].id, "quantity": 50, "unit": "plates", "unit_price": 9500},
+         ],
+     ]
+ 
+@@ -757,10 +772,10 @@ def seed_mock_data(reset=False):
+     loyal_issued_on = today - timedelta(days=6)
+     loyal_due_on = loyal_issued_on + timedelta(days=14)
+     loyal_line_items = [
+-        {"description": "Branded retail shelf stickers, full store rollout", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-STICKER"].id, "quantity": 60, "unit": "sqm", "unit_price": 22000},
++        {"description": "Branded retail shelf stickers, full store rollout", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-STICKER-SQM"].id, "quantity": 60, "unit": "sqm", "unit_price": 22000},
+         {"description": "Freezer and cold-room decals, all branches", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "quantity": 48, "unit": "decals", "unit_price": 9500},
+-        {"description": "Promotional rollup banners x6", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-BANNER"].id, "quantity": 6, "unit": "banners", "unit_price": 250000},
+-        {"description": "Staff branded DTF t-shirts", "product_type": "DTF Apparel", "machine_id": machine_by_ref["MCH-DTF-01"].id, "pricing_item_id": pricing_by_code["DTF-TSHIRT"].id, "quantity": 60, "unit": "shirts", "unit_price": 5000},
++        {"description": "Promotional rollup banners x6", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-ROLLUP"].id, "quantity": 6, "unit": "banners", "unit_price": 250000},
++        {"description": "Staff branded caps (embroidered)", "product_type": "Embroidery", "machine_id": machine_by_ref["MCH-EMB-01"].id, "pricing_item_id": pricing_by_code["EMB-CAP"].id, "quantity": 60, "unit": "caps", "unit_price": 5000},
+     ]
+     loyal_subtotal = sum(li["unit_price"] * li["quantity"] for li in loyal_line_items)
+     loyal_discount = round(loyal_subtotal * 0.12 / 1000) * 1000  # 12% loyalty discount, rounded to a clean thousand
+@@ -824,148 +839,6 @@ def seed_mock_data(reset=False):
+     jobs.append(loyal_job)
+     sales.append(loyal_sale)
+ 
+-    # ── MATERIALS (periodic inventory ledger) ────────────────────────────────
+-    # Wayne's ask: "bought this much, used this much, made this much" per
+-    # material, reconciled month-end against a physical count. Material rows
+-    # are the stock items; MaterialTransaction rows are the ledger (purchase/
+-    # usage/adjustment/count) that material_stock_summary() and
+-    # build_materials_reconciliation() derive on_hand and consumption from -
+-    # see services/materials.py and services/reports.py for the math this
+-    # data is meant to exercise. Tied to the real seeded vendors/machines/jobs
+-    # above rather than invented in isolation, so Revenue Generated and the
+-    # per-job usage links in Materials.jsx actually resolve to something.
+-    materials = [
+-        Material(material_ref="MAT-0001", name="PVC Banner", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=4200, reorder_point=40, notes="Standard outdoor banner stock."),
+-        Material(material_ref="MAT-0002", name="Vinyl Sticker", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=5800, reorder_point=30, notes="Self-adhesive vinyl for stickers and general cut vinyl."),
+-        Material(material_ref="MAT-0003", name="Large Format Ink", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=32000, reorder_point=8, notes="CMYK ink set for the large format printer, shared across banner/sticker jobs."),
+-        Material(material_ref="MAT-0004", name="Grayback Banner", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=3800, reorder_point=30, notes="Grayback banner stock."),
+-        Material(material_ref="MAT-0005", name="Contra Vision", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=6500, reorder_point=20, notes="Perforated window vision film."),
+-        Material(material_ref="MAT-0006", name="DTF Film", category="Large format ink", machine_id=machine_by_ref["MCH-DTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="m", unit_cost=8500, reorder_point=20, notes="DTF transfer film roll."),
+-        Material(material_ref="MAT-0007", name="DTF Powder", category="Large format ink", machine_id=machine_by_ref["MCH-DTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="kg", unit_cost=15500, reorder_point=5, notes="Hot-melt adhesive powder for DTF transfers."),
+-        Material(material_ref="MAT-0008", name="Digital Printer Ink", category="Large format ink", machine_id=machine_by_ref["MCH-DIGI-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=28000, reorder_point=8, notes="Ink for the digital printer (books, magazines, calendars)."),
+-        Material(material_ref="MAT-0009", name="Digital Printer Paper", category="Paper & card stock", machine_id=machine_by_ref["MCH-DIGI-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="ream", unit_cost=17500, reorder_point=15, notes="Paper stock for the digital printer."),
+-        Material(material_ref="MAT-0010", name="Staples", category="Paper & card stock", machine_id=machine_by_ref["MCH-BIND-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="box", unit_cost=3200, reorder_point=10, notes="Staples for binding/finishing."),
+-        Material(material_ref="MAT-0011", name="UV DTF Film", category="Large format ink", machine_id=machine_by_ref["MCH-UVDTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="m", unit_cost=9500, reorder_point=15, notes="UV DTF transfer film roll."),
+-        Material(material_ref="MAT-0012", name="UV DTF Ink", category="Large format ink", machine_id=machine_by_ref["MCH-UVDTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=34000, reorder_point=6, notes="Ink set for the UV DTF printer."),
+-        Material(material_ref="MAT-0013", name="Pebble Ribbon", category="Large format ink", machine_id=machine_by_ref["MCH-PVC-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="roll", unit_cost=22000, reorder_point=5, notes="Ribbon for the Pebble/Evolis card printer."),
+-        Material(material_ref="MAT-0014", name="PVC Cards", category="Paper & card stock", machine_id=machine_by_ref["MCH-PVC-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="card", unit_cost=450, reorder_point=100, notes="Blank PVC cards for the Pebble/Evolis card printer."),
+-        Material(material_ref="MAT-0015", name="Konica Minolta Paper", category="Paper & card stock", machine_id=machine_by_ref["MCH-KM-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="ream", unit_cost=18500, reorder_point=15, notes="Paper stock for the Konica Minolta press (calendars, books, normal printing)."),
+-        Material(material_ref="MAT-0016", name="Konica Minolta Ink", category="Large format ink", machine_id=machine_by_ref["MCH-KM-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=30000, reorder_point=8, notes="Ink/toner for the Konica Minolta press."),
+-        Material(material_ref="MAT-0017", name="Sublimation Paper", category="Paper & card stock", machine_id=machine_by_ref["MCH-SUB-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="ream", unit_cost=12500, reorder_point=15, notes="Transfer paper for the sublimation printer."),
+-        Material(material_ref="MAT-0018", name="Sublimation Ink", category="Large format ink", machine_id=machine_by_ref["MCH-SUB-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=27000, reorder_point=6, notes="Ink set for the sublimation printer (mug cups)."),
+-    ]
+-    db.session.add_all(materials)
+-    db.session.flush()
+-    material_by_ref = {material.material_ref: material for material in materials}
+-
+-    # Jobs whose machine/category naturally consumes each material, so usage
+-    # rows link to a real Job (and therefore a real Invoice) rather than
+-    # floating unattributed - this is what lets "Revenue Generated" on the
+-    # Materials directory card resolve to a non-zero figure.
+-    jobs_by_machine_ref = {}
+-    for job in jobs:
+-        jobs_by_machine_ref.setdefault(job.machine_id, []).append(job)
+-    machine_ref_by_id = {machine.id: ref for ref, machine in machine_by_ref.items()}
+-
+-    material_transactions = []
+-
+-    def month_starts(from_date, to_date):
+-        cursor = date(from_date.year, from_date.month, 1)
+-        out = []
+-        while cursor <= to_date:
+-            out.append(cursor)
+-            nxt = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+-            cursor = nxt
+-        return out
+-
+-    all_months = month_starts(start_date, today)
+-    current_month_start = date(today.year, today.month, 1)
+-
+-    for material in materials:
+-        candidate_jobs = [job for job in jobs_by_machine_ref.get(material.machine_id, []) if job.status != "cancelled"]
+-        on_hand_running = Decimal("0")
+-        for i, m_start in enumerate(all_months):
+-            m_end = min((m_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1), today)
+-            is_current_month = m_start == current_month_start
+-
+-            # Purchase early in the month - restock roughly what the month is
+-            # expected to consume plus a buffer, so on_hand stays positive and
+-            # "days remaining" projections are meaningful rather than trivially
+-            # zero.
+-            purchase_qty = Decimal(str(random.randint(40, 90))) if material.unit in ("sqm", "ream") else Decimal(str(random.randint(3, 10)))
+-            purchase_date = min(m_start + timedelta(days=random.randint(1, 4)), today)
+-            material_transactions.append(MaterialTransaction(
+-                material_id=material.id, transaction_type="purchase", quantity=purchase_qty,
+-                unit_cost=material.unit_cost, transaction_date=purchase_date,
+-                notes=f"Restock from {material.vendor.name}" if material.vendor else "Restock",
+-            ))
+-            on_hand_running += purchase_qty
+-
+-            # Usage rows: one per candidate job that actually falls in this
+-            # month, each with an output_quantity/description - this is the
+-            # literal "from this much vinyl, made this much stickers" figure.
+-            month_jobs = [job for job in candidate_jobs if job.created_at and m_start <= job.created_at.date() <= m_end]
+-            for job in month_jobs[:4]:  # cap per month so on_hand doesn't run negative on a busy month
+-                usage_qty = Decimal(str(round(random.uniform(1.5, 6.0), 2))) if material.unit in ("sqm",) else Decimal(str(random.randint(1, 3))) if material.unit in ("ream", "kg", "L") else Decimal(str(random.randint(5, 20)))
+-                if usage_qty > on_hand_running:
+-                    continue
+-                output_qty = job.total_count or job.copies or 0
+-                job_machine_ref = machine_ref_by_id.get(job.machine_id)
+-                output_label = {
+-                    "MCH-LF-01": "sqm of banners/stickers produced",
+-                    "MCH-KM-01": "cards/books/calendars produced",
+-                    "MCH-DIGI-01": "books/magazines/calendars produced",
+-                    "MCH-SUB-01": "mug cups produced",
+-                    "MCH-DTF-01": "garments produced",
+-                    "MCH-UVDTF-01": "units produced",
+-                    "MCH-PVC-01": "PVC cards produced",
+-                    "MCH-BIND-01": "books bound",
+-                }.get(job_machine_ref, "units produced")
+-                material_transactions.append(MaterialTransaction(
+-                    material_id=material.id, transaction_type="usage", quantity=usage_qty,
+-                    transaction_date=min(job.created_at.date() + timedelta(days=1), today),
+-                    job_id=job.id,
+-                    output_quantity=output_qty if output_qty else None,
+-                    output_description=output_label if output_qty else None,
+-                    notes=f"Used on {job.job_ref}",
+-                ))
+-                on_hand_running -= usage_qty
+-
+-            # Occasional waste/spoilage adjustment (negative) - misprints,
+-            # cutting mistakes, damaged stock - roughly one every couple of
+-            # months, small relative to purchase volume so it reads as
+-            # realistic spoilage rather than dominating the ledger.
+-            if i % 3 == 1 and on_hand_running > 5:
+-                waste_qty = Decimal(str(round(random.uniform(0.5, 2.5), 2))) if material.unit == "sqm" else Decimal("1")
+-                material_transactions.append(MaterialTransaction(
+-                    material_id=material.id, transaction_type="adjustment", quantity=-waste_qty,
+-                    transaction_date=min(m_start + timedelta(days=random.randint(10, 20)), today),
+-                    notes="Spoilage - misprint/cutting waste",
+-                ))
+-                on_hand_running -= waste_qty
+-
+-            # Month-end physical count for every month except the current one
+-            # (leaves this month genuinely "not yet counted", so the
+-            # Month-End Report's unreconciled-count flag has something real
+-            # to show rather than being permanently empty). Small deliberate
+-            # variance most months, so the reconciliation table has a
+-            # non-trivial count-variance case to display too, not just
+-            # perfect matches.
+-            if not is_current_month:
+-                variance = Decimal(str(random.choice([0, 0, 0, 1, -1, 2]))) if material.unit != "sqm" else Decimal(str(random.choice([0, 0, 0.5, -0.75, 1.2])))
+-                counted_qty = max(on_hand_running + variance, Decimal("0"))
+-                material_transactions.append(MaterialTransaction(
+-                    material_id=material.id, transaction_type="count", quantity=counted_qty,
+-                    transaction_date=m_end,
+-                    notes="Month-end physical count",
+-                ))
+-
+-    for txn in material_transactions:
+-        txn.created_at = as_datetime(txn.transaction_date)
+-        txn.updated_at = as_datetime(txn.transaction_date)
+-    db.session.add_all(material_transactions)
+-    db.session.flush()
+-
+     # ── AUDIT LOGS ─────────────────────────────────────────────────────────
+     audit_entries = [
+         AuditLog(actor="system", action="Seeded professional print dashboard mock data", entity_type="system", created_at=as_datetime(start_date)),
+@@ -994,6 +867,4 @@ def seed_mock_data(reset=False):
+         "sales": len(sales),
+         "petty_cash_entries": len(petty_cash_entries),
+         "expense_categories": len(expense_categories),
+-        "materials": len(materials),
+-        "material_transactions": len(material_transactions),
+     }
+\ No newline at end of file
+diff --git a/print-dashboard/backend/app/services/materials.py b/print-dashboard/backend/app/services/materials.py
+index 947a356..1f90f78 100644
+--- a/print-dashboard/backend/app/services/materials.py
++++ b/print-dashboard/backend/app/services/materials.py
+@@ -35,14 +35,6 @@ def material_stock_summary(material_id, transactions=None):
+     in the material's own unit. transactions can be pre-fetched (batch list
+     view) or omitted (single-material view, queried here) - same optional-
+     precompute pattern as vendor_balance_summary()/vendor_balance_summaries().
+-
+-    "count" rows are deliberately excluded from this ledger math - they are
+-    a labelled physical-count snapshot (see Material Transaction.transaction_
+-    type comment in models.py), not a movement of stock. Folding a count
+-    into on_hand here would let a mistyped count silently overwrite the
+-    ledger-derived figure with no record of the disagreement; instead,
+-    reconcile_material_count() below compares the two explicitly and reports
+-    the variance, leaving this function's on_hand as the ledger's own answer.
+     """
+     if transactions is None:
+         transactions = MaterialTransaction.query.filter(MaterialTransaction.material_id == material_id).all()
+@@ -57,69 +49,15 @@ def material_stock_summary(material_id, transactions=None):
+         elif txn.transaction_type == "usage":
+             used += qty
+         elif txn.transaction_type == "adjustment":
+-            # Adjustment quantity is signed by the caller (+ for found stock,
+-            # - for waste/damage/loss), so it's added directly rather than
+-            # bucketed like purchase/usage.
++            # Adjustment quantity is signed by the caller (+ for a stock
++            # count that found more than expected, - for waste/damage/loss),
++            # so it's added directly rather than bucketed like purchase/usage.
+             adjusted += qty
+-        # "count" rows: intentionally not summed into any bucket - see
+-        # docstring above.
+ 
+     on_hand = purchased - used + adjusted
+     return {"purchased": purchased, "used": used, "adjusted": adjusted, "on_hand": on_hand}
+ 
+ 
+-def latest_count(material_id, transactions=None, as_of=None):
+-    """Most recent "count" transaction for a material, optionally as of a
+-    given date (for a specific month's reconciliation rather than the
+-    latest count overall). Returns None if no count has ever been logged -
+-    the caller decides how to handle that (reconciliation just omits a
+-    variance figure rather than guessing at a count that was never taken).
+-    """
+-    if transactions is None:
+-        transactions = MaterialTransaction.query.filter(MaterialTransaction.material_id == material_id).all()
+-
+-    counts = [txn for txn in transactions if txn.transaction_type == "count"]
+-    if as_of is not None:
+-        counts = [txn for txn in counts if txn.transaction_date and txn.transaction_date <= as_of]
+-    if not counts:
+-        return None
+-    return max(counts, key=lambda txn: (txn.transaction_date, txn.id))
+-
+-
+-def reconcile_material_count(material_id, transactions=None, as_of=None):
+-    """Compares the ledger-derived on_hand figure against the most recent
+-    physical count (as of `as_of`, or the latest count overall if omitted).
+-    Returns None if no count exists to compare against - callers should
+-    treat that as "not yet reconciled", not as "variance is zero".
+-    """
+-    if transactions is None:
+-        transactions = MaterialTransaction.query.filter(MaterialTransaction.material_id == material_id).all()
+-
+-    count_txn = latest_count(material_id, transactions, as_of=as_of)
+-    if count_txn is None:
+-        return None
+-
+-    # Only ledger movements up to (and including) the count date are fair to
+-    # compare against - transactions logged after the count happened aren't
+-    # what the counted stock reflected at the time.
+-    relevant = [
+-        txn for txn in transactions
+-        if txn.transaction_date and txn.transaction_date <= count_txn.transaction_date
+-    ]
+-    ledger_on_hand = material_stock_summary(material_id, relevant)["on_hand"]
+-    counted_quantity = _qty(count_txn.quantity)
+-    variance = counted_quantity - ledger_on_hand
+-
+-    return {
+-        "count_transaction_id": count_txn.id,
+-        "count_date": count_txn.transaction_date.isoformat() if count_txn.transaction_date else None,
+-        "counted_quantity": float(counted_quantity),
+-        "ledger_on_hand": float(ledger_on_hand),
+-        "variance": float(variance),
+-        "notes": count_txn.notes,
+-    }
+-
+-
+ def material_revenue_summary(material_id, transactions=None):
+     """Revenue and profit attributed to a material, read from the invoices of
+     jobs its usage rows are linked to. A usage row with no job_id (material
+@@ -243,11 +181,3 @@ def serialize_transaction(txn):
+     data["material_name"] = txn.material.name if txn.material else None
+     data["job_ref"] = txn.job.job_ref if txn.job else None
+     return data
+-
+-
+-def serialize_material_unit(material):
+-    """Small helper used by the reconciliation report so each row can show
+-    its own unit label (e.g. "sq.m", "L") next to quantities, without the
+-    report builder needing to re-fetch/join Material itself for that one field.
+-    """
+-    return material.unit
+\ No newline at end of file
+diff --git a/print-dashboard/backend/app/services/reports.py b/print-dashboard/backend/app/services/reports.py
+index 93ff3c7..626c785 100644
+--- a/print-dashboard/backend/app/services/reports.py
++++ b/print-dashboard/backend/app/services/reports.py
+@@ -4,17 +4,10 @@ from collections import defaultdict
+ from datetime import date, timedelta
+ from decimal import Decimal
+ 
+-from ..models import Expense, Invoice, Job, Material, MaterialTransaction, ProductionMachine
++from ..models import Expense, Invoice, Job, ProductionMachine
+ from .invoices import invoice_status_from_totals, invoice_totals
+ from .vendors import PAID_STATUSES
+ 
+-# material_stock_summary/reconcile_material_count are imported inside
+-# build_materials_reconciliation() below, not at module level here - this
+-# file (reports.py) is itself imported BY services/materials.py (for the
+-# shared money() helper), so a module-level import in this direction would
+-# be a circular import. A local import inside the one function that needs
+-# them avoids that without having to move money() out of this file.
+-
+ 
+ def money(value):
+     if value is None:
+@@ -356,233 +349,6 @@ def build_job_throughput():
+     }
+ 
+ 
+-def _month_bounds(month_str):
+-    """month_str is 'YYYY-MM'. Returns (period_start, period_end) as dates,
+-    period_end being the last day of that month (inclusive)."""
+-    year, month = (int(part) for part in month_str.split("-"))
+-    period_start = date(year, month, 1)
+-    period_end = add_months(period_start, 1) - timedelta(days=1)
+-    return period_start, period_end
+-
+-
+-def build_materials_reconciliation(month=None):
+-    """The month-end periodic inventory report: for each material,
+-    Opening + Purchased - Consumed = Closing (the formula Wayne described -
+-    count what's on the shelf, work backward from what was bought and what's
+-    left to find what was actually used), cross-checked in two ways:
+-
+-      1. Against a physical count, if one was logged for this material this
+-         month (reconcile_material_count()) - flags a variance if the shelf
+-         count disagrees with what the ledger says should be there.
+-      2. Against recorded output ("this much vinyl became this much
+-         stickers") - summed from MaterialTransaction.output_quantity on
+-         usage rows dated within the month, which is exactly Wayne's boss's
+-         question ("for this much vinyl, we made this much stickers").
+-
+-    `month` is 'YYYY-MM'; defaults to the current calendar month. Opening
+-    stock for the month is derived the same way as closing stock - not
+-    stored anywhere - by running material_stock_summary() over only the
+-    transactions dated before the period starts, then again over
+-    transactions dated up to and including the period end. This keeps the
+-    report honest against the "derive, don't store" convention used
+-    everywhere else in this file/services/materials.py: an opening-balance
+-    column would be one more place a stale, hand-edited number could drift
+-    from what the ledger actually shows.
+-    """
+-    from .materials import material_stock_summary, reconcile_material_count
+-
+-    if month is None:
+-        month = date.today().strftime("%Y-%m")
+-    period_start, period_end = _month_bounds(month)
+-
+-    materials = Material.query.order_by(Material.name.asc()).all()
+-    rows = []
+-    for material in materials:
+-        all_transactions = MaterialTransaction.query.filter(
+-            MaterialTransaction.material_id == material.id
+-        ).all()
+-
+-        opening_transactions = [
+-            txn for txn in all_transactions
+-            if txn.transaction_date and txn.transaction_date < period_start
+-        ]
+-        closing_transactions = [
+-            txn for txn in all_transactions
+-            if txn.transaction_date and txn.transaction_date <= period_end
+-        ]
+-        month_transactions = [
+-            txn for txn in all_transactions
+-            if txn.transaction_date and period_start <= txn.transaction_date <= period_end
+-        ]
+-
+-        opening_stock = material_stock_summary(material.id, opening_transactions)["on_hand"]
+-        closing_summary = material_stock_summary(material.id, closing_transactions)
+-        closing_stock = closing_summary["on_hand"]
+-
+-        purchased_this_month = sum(
+-            (money(txn.quantity) for txn in month_transactions if txn.transaction_type == "purchase"),
+-            0.0,
+-        )
+-        consumed_this_month = sum(
+-            (money(txn.quantity) for txn in month_transactions if txn.transaction_type == "usage"),
+-            0.0,
+-        )
+-        adjusted_this_month = sum(
+-            (money(txn.quantity) for txn in month_transactions if txn.transaction_type == "adjustment"),
+-            0.0,
+-        )
+-
+-        # Formula check: opening + purchased - consumed + adjusted should
+-        # equal closing. Any gap here means a transaction was dated outside
+-        # [period_start, period_end] in a way that doesn't add up, or (more
+-        # usually) simply confirms the two independent calculations agree -
+-        # this is a sanity check on the report's own arithmetic, not a
+-        # comparison against a physical count (that's count_variance below).
+-        expected_closing = money(opening_stock) + purchased_this_month - consumed_this_month + adjusted_this_month
+-        formula_variance = round(money(closing_stock) - expected_closing, 3)
+-
+-        output_rows = defaultdict(float)
+-        for txn in month_transactions:
+-            if txn.transaction_type == "usage" and txn.output_quantity:
+-                label = txn.output_description or "Output"
+-                output_rows[label] += money(txn.output_quantity)
+-
+-        count_check = reconcile_material_count(material.id, all_transactions, as_of=period_end)
+-
+-        rows.append({
+-            "material_id": material.id,
+-            "material_ref": material.material_ref,
+-            "name": material.name,
+-            "unit": material.unit,
+-            "opening_stock": money(opening_stock),
+-            "purchased": purchased_this_month,
+-            "consumed": consumed_this_month,
+-            "adjusted": adjusted_this_month,
+-            "closing_stock": money(closing_stock),
+-            "formula_variance": formula_variance,
+-            "output_produced": dict(output_rows),
+-            "physical_count_check": count_check,
+-            "low_stock": bool(material.reorder_point is not None and money(closing_stock) <= money(material.reorder_point)),
+-        })
+-
+-    return {
+-        "month": month,
+-        "period_start": period_start.isoformat(),
+-        "period_end": period_end.isoformat(),
+-        "method": "periodic",
+-        "formula": "Opening Stock + Purchased - Consumed + Adjusted = Closing Stock",
+-        "materials": rows,
+-        "flags": {
+-            "unreconciled_count": [row["material_ref"] for row in rows if row["physical_count_check"] is None],
+-            "count_variance": [
+-                row["material_ref"] for row in rows
+-                if row["physical_count_check"] and abs(row["physical_count_check"]["variance"]) > 0.001
+-            ],
+-        },
+-    }
+-
+-
+-def build_materials_waste_report(month=None):
+-    """Item 1 (flagged gap): a spoilage/waste-% report. The data model has
+-    two candidate sources for "waste": MaterialTransaction.output_quantity
+-    (what a usage row was recorded as producing) and the signed "adjustment"
+-    transaction_type (negative = waste/damage/loss, positive = found stock -
+-    see the type comment on MaterialTransaction in models.py and the signing
+-    comment in material_stock_summary() above).
+-
+-    Output-based yield is NOT used here as the waste measure: output_quantity
+-    is in a different unit to the material consumed (e.g. sqm of vinyl in ->
+-    count of stickers out), so a "waste %" from that pairing would require an
+-    expected-yield-per-unit figure that doesn't exist anywhere in this model.
+-    Building one would mean inventing a conversion factor with no data behind
+-    it - fabricated precision, not a real number.
+-
+-    What the ledger DOES support honestly is: of everything that moved as
+-    stock this month (purchased + found-stock adjustments), what fraction
+-    was written off as waste/damage/loss (negative adjustments)? That's a
+-    real, derivable percentage, so that is what this report measures.
+-
+-    Returns one row per material with any adjustment activity in the period,
+-    plus a fleet-wide total. Materials with zero adjustment rows in the
+-    period are omitted from `materials` (nothing to report) but still count
+-    toward `all_materials_reviewed` for visibility that they were checked.
+-    """
+-    if month is None:
+-        month = date.today().strftime("%Y-%m")
+-    period_start, period_end = _month_bounds(month)
+-
+-    materials = Material.query.order_by(Material.name.asc()).all()
+-    rows = []
+-    total_waste_value = 0.0
+-    total_stock_in_value = 0.0
+-
+-    for material in materials:
+-        month_transactions = MaterialTransaction.query.filter(
+-            MaterialTransaction.material_id == material.id,
+-            MaterialTransaction.transaction_date >= period_start,
+-            MaterialTransaction.transaction_date <= period_end,
+-        ).all()
+-
+-        purchased_qty = sum(
+-            (money(txn.quantity) for txn in month_transactions if txn.transaction_type == "purchase"),
+-            0.0,
+-        )
+-        # Adjustments are signed: positive = found stock (add to "came in"),
+-        # negative = waste/damage/loss (the thing this report measures).
+-        found_qty = sum(
+-            (money(txn.quantity) for txn in month_transactions
+-             if txn.transaction_type == "adjustment" and money(txn.quantity) > 0),
+-            0.0,
+-        )
+-        waste_qty = sum(
+-            (-money(txn.quantity) for txn in month_transactions
+-             if txn.transaction_type == "adjustment" and money(txn.quantity) < 0),
+-            0.0,
+-        )
+-
+-        stock_in_qty = purchased_qty + found_qty
+-        waste_pct = round((waste_qty / stock_in_qty) * 100, 2) if stock_in_qty > 0 else None
+-
+-        unit_cost = money(material.unit_cost)
+-        waste_value = round(waste_qty * unit_cost, 2)
+-
+-        if waste_qty > 0 or found_qty > 0:
+-            rows.append({
+-                "material_id": material.id,
+-                "material_ref": material.material_ref,
+-                "name": material.name,
+-                "unit": material.unit,
+-                "purchased_qty": purchased_qty,
+-                "found_qty": found_qty,
+-                "stock_in_qty": stock_in_qty,
+-                "waste_qty": waste_qty,
+-                "waste_pct": waste_pct,
+-                "waste_value": waste_value,
+-                "waste_transaction_count": len([
+-                    txn for txn in month_transactions
+-                    if txn.transaction_type == "adjustment" and money(txn.quantity) < 0
+-                ]),
+-            })
+-            total_waste_value += waste_value
+-            total_stock_in_value += round(stock_in_qty * unit_cost, 2)
+-
+-    rows.sort(key=lambda r: r["waste_value"], reverse=True)
+-    overall_waste_pct = round((total_waste_value / total_stock_in_value) * 100, 2) if total_stock_in_value > 0 else None
+-
+-    return {
+-        "month": month,
+-        "period_start": period_start.isoformat(),
+-        "period_end": period_end.isoformat(),
+-        "method": "Waste % = negative-adjustment quantity / (purchased + found-stock adjustment quantity) this period, per material. Reflects only logged adjustment rows - not a yield/output-based estimate (see docstring).",
+-        "materials": rows,
+-        "all_materials_reviewed": len(materials),
+-        "summary": {
+-            "total_waste_value": round(total_waste_value, 2),
+-            "overall_waste_pct": overall_waste_pct,
+-        },
+-    }
+-
+-
+ def build_report_library():
+     financials = build_financial_report()
+     dashboard = build_dashboard_summary()
+@@ -627,22 +393,4 @@ def build_report_library():
+             "notes": "Revenue by DTF, large format, digital print, binding, sublimation, UV DTF and finishing machines.",
+             "metrics": {"machine_revenue": financials["machine_revenue"]},
+         },
+-        {
+-            "id": "RPT-MATERIALS-RECON",
+-            "name": "Monthly Materials Reconciliation",
+-            "type": "Monthly",
+-            "status": "ready",
+-            "generated_by": "System",
+-            "notes": "Periodic inventory method: opening stock, purchases, and closing stock reconcile to consumption per material, cross-checked against physical counts and against units produced. Call GET /api/reports/materials?month=YYYY-MM for the full table.",
+-            "metrics": {},
+-        },
+-        {
+-            "id": "RPT-MATERIALS-WASTE",
+-            "name": "Materials Spoilage / Waste Report",
+-            "type": "Monthly",
+-            "status": "ready",
+-            "generated_by": "System",
+-            "notes": "Waste % per material, from logged waste/damage/loss adjustment rows against stock that moved in this period. Call GET /api/reports/materials/waste?month=YYYY-MM for the full table.",
+-            "metrics": {},
+-        },
+     ]
+\ No newline at end of file

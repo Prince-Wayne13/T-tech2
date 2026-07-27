@@ -109,8 +109,7 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(payload),
   }),
-  // Materials/inventory - full UI on the Materials page (Materials.jsx) plus
-  // a read-only month-end reconciliation view under Reports > Analytics.
+  // Materials/inventory - backend built this session, no UI wired to it yet.
   materials: (params = '') => request(`/materials${params}`),
   materialsSummary: () => request('/materials/summary'),
   getMaterial: (id) => request(`/materials/${id}`),
@@ -128,14 +127,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
-  updateMaterialTransaction: (id, payload) => request(`/materials/transactions/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  }),
   deleteMaterialTransaction: (id) => request(`/materials/transactions/${id}`, { method: 'DELETE' }),
-  materialReconciliation: (materialId, params = '') => request(`/materials/${materialId}/reconciliation${params}`),
-  materialsReconciliationReport: (month) => request(`/reports/materials${month ? `?month=${month}` : ''}`),
-  materialsWasteReport: (month) => request(`/reports/materials/waste${month ? `?month=${month}` : ''}`),
   advances: (params = '') => request(`/advances${params}`),
   createAdvance: (payload) => request('/advances', {
     method: 'POST',
@@ -152,13 +144,6 @@ export const api = {
   createPricingItem: (payload) => request('/machines/pricing', {
     method: 'POST',
     body: JSON.stringify(payload),
-  }),
-  updatePricingItem: (id, payload) => request(`/machines/pricing/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  }),
-  deletePricingItem: (id) => request(`/machines/pricing/${id}`, {
-    method: 'DELETE',
   }),
   exports: () => request('/exports'),
   createExport: (payload) => request('/exports', {

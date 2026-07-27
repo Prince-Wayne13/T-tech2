@@ -3,7 +3,6 @@ import './styles.css';
 import { api } from './api/client';
 import { money } from './utils/format';
 import { ModuleHeader, StatsGrid } from './components/ModuleStandard';
-import { PrintPreviewModal } from './components/PrintLayouts';
 
 // ── Reports rebuild (nav/reports consolidation session) ──────────────────
 // Replaces the previous generic report-library list with two tabs:
@@ -19,7 +18,7 @@ import { PrintPreviewModal } from './components/PrintLayouts';
 // confusing" — a 7-tab bar was judged more likely to overwhelm a first-time
 // user than a single tab with clear sub-section headers).
 const TABS = ['Cashflow', 'Income Statement', 'Analytics'];
-const ANALYTICS_SECTIONS = ['Vendor Spend', 'Client Performance', 'Projections', 'Sales vs Expenses', 'Machine Revenue', 'Quantity Made', 'Job Throughput', 'Materials'];
+const ANALYTICS_SECTIONS = ['Vendor Spend', 'Client Performance', 'Projections', 'Sales vs Expenses', 'Machine Revenue', 'Quantity Made', 'Job Throughput'];
 
 function formatMonthLabel(month) {
   if (!month || month === 'All') return 'All Months';
@@ -689,141 +688,13 @@ function JobThroughputSection() {
   );
 }
 
-// Reads the same GET /api/reports/materials month-end reconciliation the
-// full Materials page's "Month-End Report" view uses (Materials.jsx) - not a
-// re-implementation, just a second, lighter-weight place to see it from,
-// since Wayne wanted the bought/used/made picture visible from Reports
-// without having to know the Materials nav item has its own report tab
-// buried inside it. The full per-material transaction log, physical-count
-// logging, and material CRUD still live only on the Materials page - this
-// section is deliberately read-only and links there for that.
-function currentMonthValue() {
-  return new Date().toISOString().slice(0, 7);
-}
-
-function MaterialsSection() {
-  const [month, setMonth] = useState(currentMonthValue());
-  const { data, loading, error } = useAnalyticsData(() => api.materialsReconciliationReport(month), [month]);
-  const rows = data?.materials || [];
-  const unreconciledCount = data?.flags?.unreconciled_count?.length || 0;
-  const varianceCount = data?.flags?.count_variance?.length || 0;
-  // Item 3 (flagged gap, fixed this pass): print/export for this report.
-  // preview holds the same payload useAnalyticsData already fetched -
-  // PrintPreviewModal's 'materials_reconciliation' type (PrintLayouts.jsx)
-  // renders it, and the browser's native print dialog (triggered by
-  // window.print(), same mechanism every other print layout in this app
-  // uses) handles the actual PDF/paper output.
-  const [preview, setPreview] = useState(null);
-
-  return (
-    <SectionShell title="Materials - Month-End Reconciliation" loading={loading} error={error} empty={false}>
-      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '12px', lineHeight: 1.5 }}>
-        Periodic inventory method: Opening Stock + Purchased - Consumed + Adjusted = Closing Stock, per
-        material, cross-checked against a physical count where one was logged. "Output Produced" is what
-        each material's usage was recorded as making (e.g. sqm of vinyl consumed to make N stickers).
-        For full transaction history or to log a purchase/usage/count, use the Materials page.
-      </div>
-      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
-        <input
-          type="month"
-          value={month}
-          onChange={e => setMonth(e.target.value)}
-          style={{
-            padding: '6px 10px',
-            borderRadius: '6px',
-            border: '1px solid var(--border-faint)',
-            background: '#fff',
-            color: 'var(--text-head)',
-            colorScheme: 'light',
-            fontSize: '11px',
-            outline: 'none',
-          }}
-        />
-        <button
-          className="filter-btn"
-          disabled={loading || !data}
-          onClick={() => setPreview(data)}
-          style={{ fontSize: '11px' }}
-        >
-          Print / Export
-        </button>
-        {(unreconciledCount > 0 || varianceCount > 0) && !loading && (
-          <span style={{ fontSize: '10px' }}>
-            {varianceCount > 0 && <span style={{ marginRight: '12px' }}><strong style={{ color: 'var(--red)' }}>{varianceCount}</strong> with a count variance</span>}
-            {unreconciledCount > 0 && <span><strong style={{ color: 'var(--warning)' }}>{unreconciledCount}</strong> not yet counted this month</span>}
-          </span>
-        )}
-      </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-          <thead>
-            <tr>
-              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)' }}>Material</th>
-              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>Opening</th>
-              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>Purchased</th>
-              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>Consumed</th>
-              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>Closing</th>
-              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)' }}>Output Produced</th>
-              <th style={{ textAlign: 'right', padding: '8px', color: 'var(--text-muted)' }}>Count Variance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={7} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)' }}>No materials on record.</td>
-              </tr>
-            )}
-            {rows.map(row => {
-              const variance = row.physical_count_check?.variance;
-              const hasVariance = row.physical_count_check && Math.abs(variance) > 0.001;
-              const outputEntries = Object.entries(row.output_produced || {});
-              return (
-                <tr key={row.material_id} style={{ borderBottom: '1px solid var(--border-faint)' }}>
-                  <td style={{ padding: '8px', fontWeight: 600 }}>{row.name}<div style={{ fontSize: '9px', color: 'var(--text-muted)', fontWeight: 400 }}>{row.material_ref}</div></td>
-                  <td style={{ padding: '8px', textAlign: 'right' }}>{row.opening_stock.toLocaleString()}</td>
-                  <td style={{ padding: '8px', textAlign: 'right', color: 'var(--teal)' }}>+{row.purchased.toLocaleString()}</td>
-                  <td style={{ padding: '8px', textAlign: 'right', color: 'var(--red)' }}>-{row.consumed.toLocaleString()}</td>
-                  <td style={{ padding: '8px', textAlign: 'right', fontWeight: 700 }}>{row.closing_stock.toLocaleString()} {row.unit}</td>
-                  <td style={{ padding: '8px', color: 'var(--text-muted)' }}>
-                    {outputEntries.length === 0 ? '-' : outputEntries.map(([label, qty]) => (
-                      <div key={label}>{qty.toLocaleString()} {label}</div>
-                    ))}
-                  </td>
-                  <td style={{ padding: '8px', textAlign: 'right' }}>
-                    {!row.physical_count_check ? (
-                      <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Not counted</span>
-                    ) : (
-                      <span className={`status-badge ${hasVariance ? 'overdue' : 'active'}`}>
-                        {variance >= 0 ? '+' : ''}{variance.toLocaleString()}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <PrintPreviewModal
-        type="materials_reconciliation"
-        title={`Materials Reconciliation - ${month}`}
-        data={preview}
-        onClose={() => setPreview(null)}
-        actions={
-          <button className="filter-btn active" onClick={() => window.print()}>Print</button>
-        }
-      />
-    </SectionShell>
-  );
-}
-
 function AnalyticsTab() {
   const [section, setSection] = useState(ANALYTICS_SECTIONS[0]);
   return (
     <>
-      <div className="chart-filters on-canvas" style={{ marginBottom: '14px', width: 'fit-content', flexWrap: 'wrap' }}>
+      <div className="chart-filters" style={{ marginBottom: '14px', width: 'fit-content', flexWrap: 'wrap' }}>
         {ANALYTICS_SECTIONS.map(s => (
-          <button key={s} className={`filter-btn on-canvas ${section === s ? 'active' : ''}`} onClick={() => setSection(s)}>{s}</button>
+          <button key={s} className={`filter-btn ${section === s ? 'active' : ''}`} onClick={() => setSection(s)}>{s}</button>
         ))}
       </div>
       {section === 'Vendor Spend' && <VendorSpendSection />}
@@ -833,7 +704,6 @@ function AnalyticsTab() {
       {section === 'Machine Revenue' && <MachineRevenueSection />}
       {section === 'Quantity Made' && <QuantityMadeSection />}
       {section === 'Job Throughput' && <JobThroughputSection />}
-      {section === 'Materials' && <MaterialsSection />}
     </>
   );
 }
@@ -911,9 +781,9 @@ export default function Reports() {
     <main className="main-canvas" style={{ display: 'block' }}>
       <ModuleHeader title="Reports" subtitle="Cashflow and income statement" actionLabel={null} />
 
-      <div className="chart-filters on-canvas" style={{ marginBottom: '14px', width: 'fit-content' }}>
+      <div className="chart-filters" style={{ marginBottom: '14px', width: 'fit-content' }}>
         {TABS.map(t => (
-          <button key={t} className={`filter-btn on-canvas ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</button>
+          <button key={t} className={`filter-btn ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>{t}</button>
         ))}
       </div>
 

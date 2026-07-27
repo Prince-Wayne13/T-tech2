@@ -1,7 +1,6 @@
 // PreviewModal.jsx — PrintOps BMS (Elegant Document Layout)
 import React from 'react';
 import { downloadInvoicePDF } from './InvoicePDF';
-import ttechIcon from '../assets/ttech-icon.png';
 
 /* ═══════════════════════════════════════
    ICON SYSTEM
@@ -95,7 +94,7 @@ export default function PreviewModal({ title, data, onClose }) {
     : [];
 
   return (
-    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(6px)', animation: 'fadeIn 0.15s ease' }} onClick={onClose}>
+    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(6px)', animation: 'fadeIn 0.15s ease' }} onClick={onClose}>
       <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--r-card)', width: 'min(640px, 96vw)', maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 60px rgba(0,0,0,0.22)', border: '1px solid var(--border-light)', overflow: 'hidden', animation: 'slideUp 0.2s ease' }} onClick={e => e.stopPropagation()}>
         
         {/* ── Header ─ */}
@@ -103,8 +102,8 @@ export default function PreviewModal({ title, data, onClose }) {
           <div style={{ position: 'absolute', top: 0, left: '20px', right: '20px', height: '3px', background: 'linear-gradient(90deg, transparent, var(--primary), transparent)', borderRadius: '4px' }} />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#fff', border: '1px solid var(--border-faint)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px', overflow: 'hidden' }}>
-                <img src={ttechIcon} alt="T-Tech" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'var(--primary-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary)' }}>
+                <Icon d={D.fileText} size={16} />
               </div>
               <div>
                 <h3 className="card-title" style={{ fontSize: '14px', margin: 0, lineHeight: 1.2, color: 'var(--text-head)' }}>{title}</h3>

@@ -35,14 +35,6 @@ def material_stock_summary(material_id, transactions=None):
     in the material's own unit. transactions can be pre-fetched (batch list
     view) or omitted (single-material view, queried here) - same optional-
     precompute pattern as vendor_balance_summary()/vendor_balance_summaries().
-
-    "count" rows are deliberately excluded from this ledger math - they are
-    a labelled physical-count snapshot (see Material Transaction.transaction_
-    type comment in models.py), not a movement of stock. Folding a count
-    into on_hand here would let a mistyped count silently overwrite the
-    ledger-derived figure with no record of the disagreement; instead,
-    reconcile_material_count() below compares the two explicitly and reports
-    the variance, leaving this function's on_hand as the ledger's own answer.
     """
     if transactions is None:
         transactions = MaterialTransaction.query.filter(MaterialTransaction.material_id == material_id).all()
@@ -57,67 +49,13 @@ def material_stock_summary(material_id, transactions=None):
         elif txn.transaction_type == "usage":
             used += qty
         elif txn.transaction_type == "adjustment":
-            # Adjustment quantity is signed by the caller (+ for found stock,
-            # - for waste/damage/loss), so it's added directly rather than
-            # bucketed like purchase/usage.
+            # Adjustment quantity is signed by the caller (+ for a stock
+            # count that found more than expected, - for waste/damage/loss),
+            # so it's added directly rather than bucketed like purchase/usage.
             adjusted += qty
-        # "count" rows: intentionally not summed into any bucket - see
-        # docstring above.
 
     on_hand = purchased - used + adjusted
     return {"purchased": purchased, "used": used, "adjusted": adjusted, "on_hand": on_hand}
-
-
-def latest_count(material_id, transactions=None, as_of=None):
-    """Most recent "count" transaction for a material, optionally as of a
-    given date (for a specific month's reconciliation rather than the
-    latest count overall). Returns None if no count has ever been logged -
-    the caller decides how to handle that (reconciliation just omits a
-    variance figure rather than guessing at a count that was never taken).
-    """
-    if transactions is None:
-        transactions = MaterialTransaction.query.filter(MaterialTransaction.material_id == material_id).all()
-
-    counts = [txn for txn in transactions if txn.transaction_type == "count"]
-    if as_of is not None:
-        counts = [txn for txn in counts if txn.transaction_date and txn.transaction_date <= as_of]
-    if not counts:
-        return None
-    return max(counts, key=lambda txn: (txn.transaction_date, txn.id))
-
-
-def reconcile_material_count(material_id, transactions=None, as_of=None):
-    """Compares the ledger-derived on_hand figure against the most recent
-    physical count (as of `as_of`, or the latest count overall if omitted).
-    Returns None if no count exists to compare against - callers should
-    treat that as "not yet reconciled", not as "variance is zero".
-    """
-    if transactions is None:
-        transactions = MaterialTransaction.query.filter(MaterialTransaction.material_id == material_id).all()
-
-    count_txn = latest_count(material_id, transactions, as_of=as_of)
-    if count_txn is None:
-        return None
-
-    # Only ledger movements up to (and including) the count date are fair to
-    # compare against - transactions logged after the count happened aren't
-    # what the counted stock reflected at the time.
-    relevant = [
-        txn for txn in transactions
-        if txn.transaction_date and txn.transaction_date <= count_txn.transaction_date
-    ]
-    ledger_on_hand = material_stock_summary(material_id, relevant)["on_hand"]
-    counted_quantity = _qty(count_txn.quantity)
-    variance = counted_quantity - ledger_on_hand
-
-    return {
-        "count_transaction_id": count_txn.id,
-        "count_date": count_txn.transaction_date.isoformat() if count_txn.transaction_date else None,
-        "counted_quantity": float(counted_quantity),
-        "ledger_on_hand": float(ledger_on_hand),
-        "variance": float(variance),
-        "notes": count_txn.notes,
-    }
 
 
 def material_revenue_summary(material_id, transactions=None):
@@ -243,11 +181,3 @@ def serialize_transaction(txn):
     data["material_name"] = txn.material.name if txn.material else None
     data["job_ref"] = txn.job.job_ref if txn.job else None
     return data
-
-
-def serialize_material_unit(material):
-    """Small helper used by the reconciliation report so each row can show
-    its own unit label (e.g. "sq.m", "L") next to quantities, without the
-    report builder needing to re-fetch/join Material itself for that one field.
-    """
-    return material.unit
