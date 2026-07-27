@@ -1,0 +1,134 @@
+diff --git a/print-dashboard/src/App.jsx b/print-dashboard/src/App.jsx
+index fafc8dc..e373f8c 100644
+--- a/print-dashboard/src/App.jsx
++++ b/print-dashboard/src/App.jsx
+@@ -549,7 +549,7 @@ function ActionModal({ action, onClose, onSubmit }) {
+   if (!action) return null;
+ 
+   return (
+-    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'grid', placeItems: 'center', padding: '18px', background: 'rgba(5, 12, 18, 0.62)' }} onClick={onClose}>
++    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'grid', placeItems: 'center', padding: '18px', background: 'rgba(5, 12, 18, 0.62)' }} onClick={onClose}>
+       <section className="card" style={{ width: 'min(520px, 94vw)', borderTop: '2px solid var(--primary)' }} onClick={(event) => event.stopPropagation()}>
+         <div className="card-header" style={{ marginBottom: '12px' }}>
+           <h3 className="card-title">{action}</h3>
+diff --git a/print-dashboard/src/Settings.jsx b/print-dashboard/src/Settings.jsx
+index bd16c0b..6dfa607 100644
+--- a/print-dashboard/src/Settings.jsx
++++ b/print-dashboard/src/Settings.jsx
+@@ -424,7 +424,7 @@ export default function Settings() {
+       
+       {/* 1. ADD ITEM MODAL */}
+       {showAddModal && (
+-        <div style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
++        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
+           <div style={modalCardStyle}>
+             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+               <h3 className="card-title">Add New Item</h3>
+@@ -488,7 +488,7 @@ export default function Settings() {
+ 
+       {/* 2. DELETE CONFIRMATION MODAL */}
+       {deleteId && (
+-        <div style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
++        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
+           <div style={modalCardStyle}>
+             <div style={{ textAlign: 'center' }}>
+               <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--red-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', color: 'var(--red)' }}>
+diff --git a/print-dashboard/src/components/ActionModal.jsx b/print-dashboard/src/components/ActionModal.jsx
+index af04bbb..91660b8 100644
+--- a/print-dashboard/src/components/ActionModal.jsx
++++ b/print-dashboard/src/components/ActionModal.jsx
+@@ -40,7 +40,7 @@ export default function ActionModal({ isOpen, onClose, title, children, buttons,
+         display: 'flex',
+         alignItems: 'center',
+         justifyContent: 'center',
+-        zIndex: 'var(--z-modal-overlay)',
++        zIndex: 1000,
+         animation: 'fadeIn 0.2s ease',
+       }}
+       onClick={handleBackdropClick}
+diff --git a/print-dashboard/src/components/Modals.jsx b/print-dashboard/src/components/Modals.jsx
+index 8846509..6efce2e 100644
+--- a/print-dashboard/src/components/Modals.jsx
++++ b/print-dashboard/src/components/Modals.jsx
+@@ -95,7 +95,7 @@ function ModalWrapper({ isOpen, onClose, title, children, footer, wide = false }
+ 
+   return (
+     <div
+-      style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', animation: 'fadeIn 0.15s ease' }}
++      style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', animation: 'fadeIn 0.15s ease' }}
+       onClick={event => event.target === event.currentTarget && onClose()}
+     >
+       <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--r-card)', padding: 0, width: '95%', maxWidth: wide ? '950px' : '500px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 50px rgba(0,0,0,0.2)', border: '1px solid var(--border-light)', position: 'relative', animation: 'fadeIn 0.2s ease', overflow: 'hidden' }}>
+@@ -1419,7 +1419,7 @@ export function SearchResultsModal({ isOpen, onClose, results, onSelect }) {
+     ...(results?.pricing || []).map(i => ({ title: i.name, type: 'Pricing', sub: `${i.category || ''} ${i.price ? `- MK ${Number(i.price).toLocaleString()}` : ''}`, raw: i })),
+   ];
+   return (
+-    <div style={{ position: 'fixed', top: '60px', left: '50%', transform: 'translateX(-50%)', zIndex: 'var(--z-toast)', width: '90%', maxWidth: '420px', background: 'var(--bg-card)', borderRadius: 'var(--r-card)', border: '1px solid var(--border-faint)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)', animation: 'fadeIn 0.15s ease' }}>
++    <div style={{ position: 'fixed', top: '60px', left: '50%', transform: 'translateX(-50%)', zIndex: 950, width: '90%', maxWidth: '420px', background: 'var(--bg-card)', borderRadius: 'var(--r-card)', border: '1px solid var(--border-faint)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)', animation: 'fadeIn 0.15s ease' }}>
+       <div style={{ padding: '12px', borderBottom: '1px solid var(--border-faint)', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>Search Results</div>
+       <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+         {rows.length === 0
+diff --git a/print-dashboard/src/components/PreviewModal.jsx b/print-dashboard/src/components/PreviewModal.jsx
+index 194cb51..8f41a6a 100644
+--- a/print-dashboard/src/components/PreviewModal.jsx
++++ b/print-dashboard/src/components/PreviewModal.jsx
+@@ -95,7 +95,7 @@ export default function PreviewModal({ title, data, onClose }) {
+     : [];
+ 
+   return (
+-    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(6px)', animation: 'fadeIn 0.15s ease' }} onClick={onClose}>
++    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(6px)', animation: 'fadeIn 0.15s ease' }} onClick={onClose}>
+       <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--r-card)', width: 'min(640px, 96vw)', maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 60px rgba(0,0,0,0.22)', border: '1px solid var(--border-light)', overflow: 'hidden', animation: 'slideUp 0.2s ease' }} onClick={e => e.stopPropagation()}>
+         
+         {/* ── Header ─ */}
+diff --git a/print-dashboard/src/styles.css b/print-dashboard/src/styles.css
+index b4cc279..de39f64 100644
+--- a/print-dashboard/src/styles.css
++++ b/print-dashboard/src/styles.css
+@@ -57,19 +57,6 @@
+   --sb-w:           230px;
+   --sb-gap:         10px;
+   --sidebar-w: 241px;
+-
+-  /* ─── Z-INDEX SCALE ───────────────────────────────────
+-     Sidebar & topbar always stay ABOVE modals so they
+-     remain sharp/unblurred while a modal is open, exactly
+-     like the reference layout. Any new overlay must use
+-     one of these tokens instead of a hardcoded number. */
+-  --z-base:           1;     /* page background layers */
+-  --z-content:        10;    /* normal page content */
+-  --z-modal-overlay:  500;   /* modal backdrop + dialog */
+-  --z-toast:          600;   /* toasts/alerts above modals */
+-  --z-sidebar-overlay: 900;  /* mobile sidebar scrim */
+-  --z-sidebar:        950;   /* sidebar */
+-  --z-topbar:         960;   /* topbar, highest of the persistent chrome */
+ }
+ 
+ /* ─── RESET ─────────────────────────────────────────── */
+@@ -124,7 +111,7 @@ svg { display: block; flex-shrink: 0; }
+   height: var(--topbar-h);
+   background: var(--bg-card);
+   border-radius: 0px var(--r-card) var(--r-card) 0px;
+-  z-index: var(--z-topbar);
++  z-index: 100;
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+@@ -265,7 +252,7 @@ svg { display: block; flex-shrink: 0; }
+   width: var(--sb-w);
+   background: var(--bg-sidebar);
+   border-radius: 12px 0px 0px 12px;
+-  z-index: var(--z-sidebar);
++  z-index: 90;
+   overflow-x: hidden;
+   overflow-y: auto;
+   scrollbar-width: thin;
+@@ -282,7 +269,7 @@ svg { display: block; flex-shrink: 0; }
+   position: fixed;
+   inset: 0;
+   background: rgba(0, 0, 0, 0.4);
+-  z-index: var(--z-sidebar-overlay);
++  z-index: 85;
+   backdrop-filter: blur(2px);
+ }
+ 
