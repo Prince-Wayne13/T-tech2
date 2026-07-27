@@ -2292,3 +2292,128 @@ browser/OS combination — this is the standard, correct fix for this exact clas
 recommend the user visually confirms the Month-End Report month picker (and the other date
 inputs, as a secondary check) render legibly after deploying, in case there's a second contributing
 factor specific to their environment that this doesn't fully address.
+
+session.
+2026-07-27 18:01 UTC — Fix: modals rendering tucked under sidebar/topbar (z-index regression)
+
+Author: Sam Claude Date: 2026-07-27 Scope: Bug fix per user report — New Job / New Proposal (and per this session's audit, every other modal in the app) rendering visually clipped under the left sidebar and top bar, as shown in an attached screenshot. User asked for the real commit history to be checked directly rather than theorized from prior dev-log entries, since none of the file diffs previously reviewed in this log actually contain a working copy of the repo.
+
+Method — actually cloned the repo this session, did not diff from memory:
+
+Cloned https://github.com/Prince-Wayne13/T-tech2 (git clone, since the GitHub REST API was rate-limited on this sandbox's shared egress IP, and the GitHub web UI blocks automated fetches via robots.txt — git clone over the standard git protocol worked where both of those didn't).
+Real commit list (git log --oneline) does not contain any commit literally titled "materials" or "update progress" as the user recalled them — closest matches: 4683a07 added materials page and 6098294 New machine list, manual pricing, materials update, settings fixes. No commit titled anything progress-related exists as its own commit; that work was folded into other commits. Confirmed via git log --oneline --all | grep -i progress.
+Diffed Modals.jsx between 356df62 (commit immediately before 4683a07 added materials page) and 4683a07 itself: confirmed the materials commit only added two new modal components (NewMaterialModal, RecordMaterialTransactionModal) and one categories-picker tweak to AddExpenseModal. It did not touch ModalWrapper, did not touch any z-index/positioning code anywhere in the file. Ruled out materials as the cause, confirmed rather than assumed.
+
+Root cause, found by tracing --z- CSS variables across every commit that touched styles.css:
+
+git log --oneline -- print-dashboard/src/styles.css shows only 5 commits ever touched this file: 24f3c4c (initial), a6e4e27, e94f341, 5c7739f, and dacaf49 (current HEAD, "fixed ui, invoces, previews still the same").
+Checked all 5 for --z- tokens: none exist before dacaf49. The semantic z-index variable system (--z-base, --z-content, --z-modal-overlay, --z-toast, --z-sidebar-overlay, --z-sidebar, --z-topbar) was introduced whole-cloth in the single most recent commit, same session as "fixed ui, invoices, previews" — not gradually, not in materials, not in progress.
+At 5c7739f (the commit right before HEAD): ModalWrapper's overlay used a hardcoded zIndex: 1000. Sidebar was z-index: 100, topbar-type chrome was 90/85 in styles.css. Modals correctly rendered on top of everything — this is the working state the user remembered.
+At dacaf49 (HEAD, before this session's fix): ModalWrapper was switched from the hardcoded 1000 to zIndex: 'var(--z-modal-overlay)' → 500. But in the same commit, --z-sidebar was set to 950 and --z-topbar to 960 — both higher than the modal. A code comment in styles.css directly above the block stated this was intentional: "Sidebar & topbar always stay ABOVE modals so they remain sharp/unblurred while a modal is open, exactly like the reference layout." That assumption was the bug — correct-looking reasoning, wrong for a blocking full-form modal, and it silently inverted the stacking order for every modal in the app in one commit.
+Confirmed impact via grep across the whole frontend: 8 call sites in 6 files all correctly reference var(--z-modal-overlay) — Modals.jsx (ModalWrapper + toast), ActionModal.jsx, PreviewModal.jsx, UnifiedPreviewModal.jsx, App.jsx's confirm dialog, and two dialogs in Settings.jsx. None of these files needed editing — they were never the bug. The bug was entirely in the token values defined once in styles.css, so every consumer inherited it.
+
+Fix (print-dashboard/src/styles.css only):
+
+Reordered the z-index scale so modal-related layers sit above persistent-chrome layers: --z-base:1 → --z-content:10 → --z-sidebar-overlay:100 → --z-sidebar:150 → --z-topbar:160 → --z-modal-overlay:500 → --z-toast:600. This restores the pre-dacaf49 relationship (chrome below modals) while keeping the token system itself, rather than reverting to hardcoded per-component numbers.
+Replaced the incorrect justification comment with one explaining the actual reasoning and pointing at this dev-log entry, so a future session doesn't reintroduce the same inversion under the same "keep chrome sharp" logic.
+No changes made to any .jsx file — confirmed unnecessary, since every call site already referenced the token correctly and the bug was 100% in the token definitions.
+
+Not investigated / out of scope this session: the mobile sidebar scrim previously sat at 900 (above the sidebar's 950 in the old broken ordering, which was itself backwards — a scrim should sit below the thing it's dimming). Correcting the fix also naturally fixes this: scrim (100) is now below sidebar (150), which is the correct relationship, though this wasn't reported as a symptom and wasn't independently visually verified against a live app this session — flagging as a side-effect-of-the-fix, not an independently confirmed repair.
+
+Verification performed: re-read the full styles.css file after the edit and grepped for every remaining z-index/--z- usage to confirm the new ordering resolves correctly and no leftover hardcoded number (z-index: 0, z-index: 1 on unrelated background layers) now conflicts with the new scale. Not run against a live dev server this session — static/code-level confirmation only, consistent with this log's established convention when no execution environment is attached.
+
+Files changed this session: print-dashboard/src/styles.css only.
+
+2026-07-27 18:09 UTC — Follow-up: confirmed Quick Actions has no separate modal, found and unified remaining hardcoded z-index values
+
+Author: Sam Claude Date: 2026-07-27 Scope: Direct follow-up to the same-day z-index fix. User pushed back on two specific claims in the prior entry — (1) that "the modals on Quick Actions are working fine" (implying they're a different, correct code path), and (2) asked explicitly for the z-index values to live in exactly one place with no duplication across the codebase. Investigated both rather than taking the first fix as complete.
+
+Claim 1 checked — "Quick Actions modals work fine, make them match":
+
+Traced QuickActions (App.jsx) → its buttons call onAction, which is setActionModal (App.jsx line 742) → actionModal state gates the same NewJobModal/NewProposalModal/ AddExpenseModal/NewVendorModal/AddPettyCashModal/QuickEntryModal components imported from Modals.jsx (confirmed at lines 756–761) — the exact same ModalWrapper-based components used everywhere else in the app (Jobs page, Proposals page, etc.). There is no second, working modal implementation behind Quick Actions. It was already using the same code, same token, same bug. This corrects the prior entry's framing, which didn't push back on the user's premise and should have.
+Separately found and ruled out a red herring: App.jsx line 545 defines a locally-scoped function also named ActionModal (different from the actual components/ActionModal.jsx file). Confirmed via grep that this local one is never rendered anywhere (<ActionModal has zero matches in App.jsx's JSX) and is not imported from the real file either — it's dead code, not a shadowing import, not the thing Quick Actions uses. Left untouched (out of scope to delete unrelated dead code without being asked), but flagging its existence explicitly since having two same-named components in the codebase is exactly the kind of thing that causes future confusion about "which modal is which."
+
+Claim 2 checked — hardcoded z-index values outside the shared token system: Grepped every zIndex:/z-index: occurrence across the entire src/ tree (all .jsx/.css/.js files), not just the files already known to be involved. Found two real duplicates that were never migrated to the --z-* token system introduced in dacaf49:
+
+components/ModuleStandard.jsx:123 — ModuleToast (a toast notification component reused across several pages) had its own independent hardcoded zIndex: 1200, unrelated to and inconsistent with the shared --z-toast: 600 used by Modals.jsx's toast. Migrated to zIndex: 'var(--z-toast)'.
+components/PrintLayouts.jsx:340 — PrintPreviewModal (the shared preview modal used for invoice/proposal/job-ticket/materials-reconciliation/report previews) had its own independent hardcoded zIndex: 1000, predating the token system and never updated when it was introduced. This is a real, non-cosmetic finding: this modal stacks differently from every other modal in the app and always has, since dacaf49. Migrated to zIndex: 'var(--z-modal-overlay)'.
+Confirmed via a second full-tree grep after both edits: every remaining overlay/modal/toast in the app (10 call sites across ActionModal.jsx, Modals.jsx ×2, PreviewModal.jsx, ModuleStandard.jsx, PrintLayouts.jsx, UnifiedPreviewModal.jsx, App.jsx, Settings.jsx ×2) now references one of the shared --z-* tokens defined once in styles.css — zero hardcoded overlay z-index values remain anywhere in the frontend.
+Explicitly checked the remaining raw z-index: 0/z-index: 1 values still present in styles.css (body::before, .main-canvas) and App.css (.base/.framework/.vite — leftover Vite/React scaffold splash CSS, likely unused). Confirmed by reading context that these are unrelated background/base-layer stacking, not overlay/modal concerns, and correctly left untouched rather than swept into the token system where they don't belong.
+
+Net effect: the z-index scale is now genuinely single-sourced — one block of 7 CSS custom properties in styles.css, zero duplicate numeric definitions anywhere else in the codebase for modal/toast/sidebar/topbar layering. Previously there were 3 independent numbering schemes in play at once (the shared tokens, ModuleStandard.jsx's own 1200, and PrintLayouts.jsx's own 1000) — this is likely part of why behavior looked inconsistent across different modals/previews even before the sidebar/topbar ordering bug fixed in the prior entry.
+
+Files changed this session: print-dashboard/src/components/ModuleStandard.jsx, print-dashboard/src/components/PrintLayouts.jsx. (styles.css unchanged from the prior entry's fix — re-verified, not re-edited.)
+
+Not done, flagged rather than silently skipped: did not delete the dead unused ActionModal function in App.jsx (line 545) — real cleanup, but a different, unrelated change from what was asked; noting it here so it can be a deliberate decision next session rather than a surprise find.
+
+2026-07-27 18:15 UTC — Revert package: clean backend + frontend snapshot at 0c667de (pre-materials, pre-5pm-26th)
+
+Author: Sam Claude Date: 2026-07-27 Scope: User decided, after two same-day z-index fix passes still didn't visually resolve for them, to rebuild the frontend from a known-good point rather than keep patching forward. Requested a clean backend patch plus a snapshot of "how the front pages look, not how they are layered" from the last commit before 5pm yesterday (2026-07-26, Africa/Blantyre / CAT, UTC+2).
+
+Commit identification — done by converting real git timestamps, not by guessing:
+
+git log --date=iso-local defaults to the sandbox's UTC timezone, which would have misidentified the cutoff by 2 hours. Re-ran with TZ='Africa/Blantyre' (CAT, matches the user's Malawi location context) to get true local timestamps before picking a commit.
+Commits on 2026-07-26 in local time, in order: a6e4e27 11:26, c0f5e50 00:17 (technically just after midnight, still same calendar day), 0c667de 13:21, 4683a07 17:21 ("added materials page"), e94f341 18:23 ("fixing ui"), 5c7739f 18:43. The last commit strictly before 17:00 is 0c667de — "Add Job Throughput + Quantity Made analytics reports." Confirmed with the user directly before building anything (asked via a yes/no check), rather than assuming — user confirmed 0c667de is correct.
+Noted for the record: even at 0c667de, backend/app/routes/materials.py and backend/app/services/materials.py already existed — so backend materials support predates this cutoff. What came later (4683a07) was the frontend Materials.jsx page plus backend materials-endpoint expansion, not the feature's origin. Flagging this so "pre-materials" isn't misread as "no materials code at all" if this commit is compared against later ones.
+Confirmed via git ls-tree that no --z- CSS variable tokens exist anywhere in styles.css at this commit (matches the earlier finding that the whole z-index token system was introduced fresh in today's dacaf49) — so this snapshot is naturally free of the layering issue by construction, not because anything was stripped out of it.
+
+Delivered — four files, two formats per side, so the user can pick whichever fits their workflow:
+
+backend_0c667de.zip — full clean snapshot of print-dashboard/backend/ at 0c667de, extracted via git archive (not a manual copy), 46 files. Ran python3 -m py_compile across every .py file in the snapshot — all compile cleanly, zero syntax errors.
+frontend_0c667de.zip — full clean snapshot of print-dashboard/src/ at the same commit, same git archive method, 36 files. Confirmed via git ls-tree that this predates Materials.jsx, the standalone machines page, and the sales/reports rework that came in the 17:21+ commits later that day.
+backend_revert.patch / frontend_revert.patch — actual git diff output from current HEAD (dacaf49) back to 0c667de, scoped separately to backend/ and src/, so the user can apply either as a real patch (git apply / patch -p1) instead of wholesale file replacement if they want a reviewable diff rather than a drop-in overwrite.
+
+Not done this session: did not merge, cherry-pick, or selectively carry forward any post- 0c667de work (materials backend expansion, discount fields, proposal/job parity, vendor-name join fix, etc.) into either snapshot — this was requested and delivered as a clean point-in-time revert target, not a selective merge. Everything listed as "still open" in prior entries from sessions after 0c667de would need to be re-evaluated for whether it's wanted again once the frontend rebuild is underway.
+
+Files delivered to /mnt/user-data/outputs/: backend_0c667de.zip, frontend_0c667de.zip, backend_revert.patch, frontend_revert.patch.
+
+2026-07-27 18:23 UTC — Fix: frontend_revert.patch failed on binary PNGs, regenerated and verified
+
+Author: Sam Claude Date: 2026-07-27 Scope: User followed the patch-apply instructions from the prior session, tagged a checkpoint (before-revert-2026-07-27 at commit 40af5f0) correctly, and ran git apply --check on both patches as instructed. Backend patch passed silently. Frontend patch failed with two errors.
+
+Error reported by user:
+
+error: cannot apply binary patch to 'print-dashboard/src/assets/ttech-icon.png' without full index line
+error: print-dashboard/src/assets/ttech-icon.png: patch does not apply
+error: cannot apply binary patch to 'print-dashboard/src/assets/ttech-logo.png' without full index line
+error: print-dashboard/src/assets/ttech-logo.png: patch does not apply
+
+Root cause: the original frontend_revert.patch was generated with plain git diff (no --binary flag). For binary files, git diff without --binary only emits a reference line, not enough data to reconstruct the file — git apply correctly refused rather than silently producing a corrupt PNG. ttech-icon.png/ttech-logo.png didn't exist yet at the revert target (0c667de), so the patch needed to delete them, which requires the same binary-diff machinery. This wasn't a user error — the patch file itself was incomplete as originally generated.
+
+Fix:
+
+Regenerated with git diff --binary dacaf49 0c667de -- print-dashboard/src, which embeds full binary content/deletion data instead of just a reference line.
+Did not just re-run --check and trust a clean exit — actually applied the new patch against a fresh local clone of the exact dacaf49-state tree in an isolated test directory, then ran diff -rq between the patched result and a separate git archive 0c667de extraction of the real target commit. Zero diff output — byte-for-byte identical, confirmed rather than assumed from an exit code alone.
+backend_revert.patch was not touched — it had no binary files in its diff (backend is pure Python) and passed --check cleanly the first time; no reason to regenerate it.
+
+File replaced in /mnt/user-data/outputs/: frontend_revert.patch (old version superseded, same filename). backend_revert.patch, backend_0c667de.zip, frontend_0c667de.zip unchanged from the prior session's delivery.
+
+User's current repo state, confirmed via their own paste: HEAD is 40af5f0 (checkpoint commit, clean tree, same file contents as dacaf49), tagged before-revert-2026-07-27 — safety net correctly in place before applying either patch.
+
+2026-07-27 18:29 UTC — Dropped patch approach, back to zip-only delivery; commit target unchanged (0c667de)
+
+Author: Sam Claude Date: 2026-07-27 Scope: User reported the regenerated frontend_revert.patch also failed to apply ("we did a wrong patch... even this one is broken"), without pasting the specific error this time, and asked to go back a commit further, before materials. Did not have the actual error text to diagnose a second patch-format issue, and two patch failures in a row on the same file format is a signal to stop trying to fix the patch mechanism itself rather than guess at a third variant.
+
+Decision made: abandoned the git apply patch approach entirely and went back to the zip snapshot method from two sessions ago, which does not depend on patch-header correctness, base-tree alignment, or binary-diff formatting at all — it's a direct file copy. Re-verified both snapshots byte-for-byte against a fresh independent git archive of the same commit before packaging (diff -rq, zero output on both), rather than trusting the previous session's already-built zips were still good.
+
+Commit target — did not move it, and explained why: the user's message conflated two different complaints — "the patch is broken" (a mechanical/format problem) and "go back further, before materials" (a which-commit problem). Re-checked the actual commit timeline in local time (Africa/Blantyre) before assuming the second one was warranted: there are no frontend-touching commits between 0c667de (13:21) and 4683a07 "added materials page" (17:21) on 2026-07-26 — a 4-hour gap. If the user's 5pm screenshots showed a working, pre-materials UI, that state and 0c667de's committed state are the same thing; there is no separate intermediate commit to move to. Did not silently re-target to an earlier commit without being able to see the actual patch error, since the failure described matches "patch mechanism problem" far better than "wrong commit problem" — moving the target commit without evidence would have been guessing in a new direction instead of fixing the actual reported failure.
+
+Files replaced in /mnt/user-data/outputs/: backend_0c667de.zip, frontend_0c667de.zip (rebuilt fresh, re-verified, same commit target 0c667de as two sessions ago). Removed backend_revert.patch and frontend_revert.patch from the output set — patch approach no longer recommended for this revert.
+
+Open question carried forward, not resolved this session: the user has not yet confirmed whether 0c667de is in fact the wrong target, or whether the patch mechanism was the sole problem. If the zip-based revert still doesn't match what the user saw at 5pm, that would be new evidence the commit target itself needs revisiting — worth explicitly asking the user to confirm once they've tried the zip swap, rather than assuming either way.
+
+2026-07-27 18:36 UTC — Confirmed: zip-based revert to 0c667de worked, user committed
+
+Author: Sam Claude Date: 2026-07-27 Scope: Closing entry for the revert effort spanning this session. User confirmed the frontend matched what they remembered from ~5pm on 2026-07-26 after the manual zip-swap (delete backend/app and src, copy in the unzipped 0c667de snapshots, per the Windows-specific copy/delete commands given once the user's platform — Windows, path under C:\Users\PRINCE\... — was identified). User is committing the result as "Revert to 0c667de via clean copy."
+
+This resolves the open question flagged in the prior entry (whether 0c667de was the correct target or whether only the patch mechanism was broken) — it was the patch mechanism, not the commit choice. 0c667de is confirmed by the user as visually matching their 5pm memory, not just inferred from commit timestamps.
+
+State of the repo going forward:
+
+Current HEAD (after user's commit): reverted backend/app and src matching 0c667de exactly, sitting on top of the before-revert-2026-07-27 tag / 40af5f0 checkpoint, which itself sits on top of dacaf49 (today's pre-revert state, materials + both z-index fix passes + earlier patch-generation attempts all preserved there, retrievable via the tag).
+backend_0c667de.zip / frontend_0c667de.zip (last delivered, re-verified byte-for-byte against the commit via git archive + diff -rq before delivery) are the files actually used for this revert — confirmed working, not just delivered.
+The .patch-based approach (git apply) was tried twice this session and abandoned after the second failure went unreported in detail — flagging for future sessions: prefer the zip/direct- copy method for any future revert-to-commit work in this repo, patch files have caused two dead-end sessions here.
+
+Not yet done, worth a follow-up once the user is ready: rebuilding the frontend forward from this point (the original stated goal — "we will rebuild the frontend") hasn't started yet; this session only got the starting point confirmed and checked out. The z-index/layering fixes made earlier today (styles.css token reordering, ModuleStandard.jsx + PrintLayouts.jsx token migration) are not present in this reverted state, by design — those were exactly what didn't visually work for the user and prompted the revert. If/when the frontend rebuild reaches modals again, that work should be redone deliberately rather than reapplied blind from today's now-reverted commits.
+
+<!-- New entries go above this line, most recent first --> <!-- New entries go above this line, most recent first -->
