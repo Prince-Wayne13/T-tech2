@@ -120,7 +120,7 @@ export function ModuleToast({ toast }) {
       position: 'fixed',
       right: '18px',
       bottom: '18px',
-      zIndex: 1200,
+      zIndex: 'var(--z-toast)',
       padding: '10px 12px',
       borderRadius: '8px',
       background: toast.type === 'error' ? 'var(--red)' : 'var(--primary)',

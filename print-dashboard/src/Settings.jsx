@@ -56,32 +56,16 @@ const modalCardStyle = {
 };
 
 const DEFAULT_MACHINES = [
-  { machine_ref: 'MCH-DTF-01', name: 'DTF Print & Heat Press Line', category: 'DTF Apparel', capability: 'T-shirts, diaries, caps, fabric transfers and heat-pressed apparel', image_path: '/machines/dtf.svg' },
-  { machine_ref: 'MCH-LF-01', name: 'Large Format Printer', category: 'Large Format', capability: 'Banners, stickers, contra vision and window frosting', image_path: '/machines/large-format.svg' },
-  { machine_ref: 'MCH-KM-01', name: 'Konica Minolta Digital Press', category: 'Digital Print', capability: 'Printing papers, documents, booklets, magazines and fast document runs', image_path: '/machines/digital-press.svg' },
-  { machine_ref: 'MCH-BIND-01', name: 'Book Binder & Cutter Line', category: 'Finishing', capability: 'Book binding, cutting, magazines, newspapers and finishing', image_path: '/machines/binder-cutter.svg' },
-  { machine_ref: 'MCH-SUB-01', name: 'Sublimation Station', category: 'Sublimation', capability: 'Mugs, cups, plates and coated gifts', image_path: '/machines/sublimation.svg' },
-  { machine_ref: 'MCH-UVDTF-01', name: 'UV DTF Printer', category: 'UV DTF', capability: 'Pens, key holders, labels and hard-surface gifts', image_path: '/machines/uv-dtf.svg' },
-  { machine_ref: 'MCH-EMB-01', name: 'Embroidery Machine', category: 'Embroidery', capability: 'Fabric embroidery and branded apparel', status: 'planned', image_path: '/machines/embroidery.svg' },
-  { machine_ref: 'MCH-SWT-01', name: 'Automatic Sweater Machine', category: 'Apparel', capability: 'Future sweater production automation', status: 'planned', image_path: '/machines/sweater.svg' },
+  { machine_ref: 'MCH-PVC-01', name: 'Pebble Evolis Card Printer', category: 'PVC Cards', capability: 'PVC ID cards and card printing', image_path: '/machines/pvc-card.svg' },
+  { machine_ref: 'MCH-SUB-01', name: 'Sublimation Printer', category: 'Sublimation', capability: 'Mug cups and coated gift items', image_path: '/machines/sublimation.svg' },
+  { machine_ref: 'MCH-UVDTF-01', name: 'UV DTF Printer', category: 'UV DTF', capability: 'Assorted / other UV DTF items', image_path: '/machines/uv-dtf.svg' },
+  { machine_ref: 'MCH-LF-01', name: 'Large Format Printer', category: 'Large Format', capability: 'Banners and stickers', image_path: '/machines/large-format.svg' },
+  { machine_ref: 'MCH-DTF-01', name: 'DTF Printer', category: 'DTF Apparel', capability: 'T-shirts, diaries and other DTF items', image_path: '/machines/dtf.svg' },
+  { machine_ref: 'MCH-PLOT-01', name: 'Plotter', category: 'Cutting', capability: 'Cutting stencils', image_path: '/machines/plotter.svg' },
+  { machine_ref: 'MCH-DIGI-01', name: 'Digital Printer', category: 'Digital Print', capability: 'Books, magazines, calendars and other digital print items', image_path: '/machines/digital-printer.svg' },
+  { machine_ref: 'MCH-BIND-01', name: 'Binder', category: 'Finishing', capability: 'Binding books', image_path: '/machines/binder-cutter.svg' },
+  { machine_ref: 'MCH-KM-01', name: 'Konica Minolta', category: 'Digital Print', capability: 'Calendars, books and normal printing', image_path: '/machines/digital-press.svg' },
 ];
-
-const DEFAULT_PRICING = [
-  ['DTF-TSHIRT-A4', 'DTF T-shirt print A4 area', 'DTF Apparel', 'print', 8500, 3200],
-  ['DTF-CAP', 'DTF cap branding', 'DTF Apparel', 'cap', 6500, 2500],
-  ['DTF-DIARY', 'DTF diary branding', 'DTF Apparel', 'diary', 7500, 2800],
-  ['LF-BANNER-SQM', 'PVC banner print', 'Large Format', 'sqm', 18000, 7800],
-  ['LF-STICKER-SQM', 'Vinyl sticker print', 'Large Format', 'sqm', 22000, 9000],
-  ['LF-FROST-SQM', 'Window frosting film', 'Large Format', 'sqm', 28000, 12500],
-  ['LF-CONTRA-SQM', 'Contra vision print', 'Large Format', 'sqm', 30000, 14000],
-  ['KM-A4-BW', 'A4 black and white document print', 'Digital Print', 'page', 150, 55],
-  ['KM-A4-COLOR', 'A4 colour document print', 'Digital Print', 'page', 650, 260],
-  ['FIN-BIND', 'Book binding', 'Finishing', 'book', 3500, 1200],
-  ['SUB-MUG', 'Sublimation mug print', 'Sublimation', 'mug', 7500, 3300],
-  ['SUB-PLATE', 'Sublimation plate print', 'Sublimation', 'plate', 9500, 4300],
-  ['UVDTF-PEN', 'UV DTF pen branding', 'UV DTF', 'pen', 1800, 650],
-  ['UVDTF-KEY', 'UV DTF key holder branding', 'UV DTF', 'key holder', 2500, 900],
-].map(([code, name, category, unit, price, cost_estimate]) => ({ code, name, category, unit, price, cost_estimate }));
 
 export default function Settings() {
   const [saving, setSaving] = useState(false);
@@ -97,19 +81,25 @@ export default function Settings() {
   const [deleteId, setDeleteId] = useState(null); // If set, show delete confirmation
   const [newItem, setNewItem] = useState({ name: '', value: '', category: 'Digital Print', unit: 'unit', cost: '' });
 
+  const [loadError, setLoadError] = useState(null);
+
   const loadPricing = async () => {
     setLoadingPricing(true);
+    setLoadError(null);
     try {
       const [machineData, pricingData] = await Promise.all([api.machines('?per_page=100'), api.pricingItems('?per_page=200')]);
       setMachines(machineData.items || []);
       setPricingItems(pricingData.items || []);
+    } catch (error) {
+      console.error('Failed to load settings data:', error);
+      setLoadError(error.message || 'Failed to load settings data.');
     } finally {
       setLoadingPricing(false);
     }
   };
 
   useEffect(() => {
-    loadPricing().catch(() => setLoadingPricing(false));
+    loadPricing();
   }, []);
 
   // Handlers
@@ -146,10 +136,16 @@ export default function Settings() {
     setDeleteId(id);
   };
 
-  const confirmDelete = () => {
-    if (deleteId) {
-      setPricingItems(prev => prev.filter(item => item.id !== deleteId));
-      setDeleteId(null);
+  const confirmDelete = async () => {
+    if (!deleteId) return;
+    const targetId = deleteId;
+    setDeleteId(null);
+    try {
+      await api.deletePricingItem(targetId);
+      setPricingItems(prev => prev.filter(item => item.id !== targetId));
+    } catch (error) {
+      console.error('Failed to delete pricing item:', error);
+      await loadPricing();
     }
   };
 
@@ -158,16 +154,8 @@ export default function Settings() {
     try {
       const currentMachines = await api.machines('?per_page=200');
       const existingRefs = new Set((currentMachines.items || []).map(machine => machine.machine_ref));
-      const createdMachines = [];
       for (const machine of DEFAULT_MACHINES) {
-        if (!existingRefs.has(machine.machine_ref)) createdMachines.push(await api.createMachine(machine));
-      }
-      const allMachines = [...(currentMachines.items || []), ...createdMachines];
-      const byCategory = Object.fromEntries(allMachines.map(machine => [machine.category, machine.id]));
-      const currentPricing = await api.pricingItems('?per_page=300');
-      const existingCodes = new Set((currentPricing.items || []).map(item => item.code));
-      for (const item of DEFAULT_PRICING) {
-        if (!existingCodes.has(item.code)) await api.createPricingItem({ ...item, machine_id: byCategory[item.category] });
+        if (!existingRefs.has(machine.machine_ref)) await api.createMachine(machine);
       }
       await loadPricing();
       setSaved(true);
@@ -269,7 +257,7 @@ export default function Settings() {
       {/* ✅ PRICING & FIXED COSTS - Clean Grid */}
       <div className="card" style={{ marginBottom: '14px', borderTop: '2px solid var(--secondary)', position: 'relative' }}>
         <div className="card-header" style={{ marginBottom: '14px' }}>
-          <div><h3 className="card-title">Pricing & Fixed Costs</h3><span className="card-sub">{loadingPricing ? 'Loading backend pricing...' : `${machines.length} machines, ${pricingItems.length} active prices`}</span></div>
+          <div><h3 className="card-title">Machines & Reference Prices</h3><span className="card-sub">{loadingPricing ? 'Loading backend data...' : `${machines.length} machines, ${pricingItems.length} saved reference prices (all job/invoice prices are entered manually)`}</span></div>
           
           {/* Add Button */}
           <div style={{ display: 'flex', gap: '8px' }}>
@@ -295,6 +283,13 @@ export default function Settings() {
             </button>
           </div>
         </div>
+
+        {loadError && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '10px 12px', marginBottom: '12px', borderRadius: '8px', background: 'var(--red-dim, #fdecea)', border: '1px solid var(--red, #c0392b)', color: 'var(--red, #c0392b)', fontSize: '11px', fontWeight: 600 }}>
+            <span>Could not load machines/pricing: {loadError}</span>
+            <button onClick={loadPricing} style={{ background: 'transparent', border: '1px solid currentColor', borderRadius: '6px', padding: '4px 10px', fontSize: '10px', fontWeight: 700, color: 'inherit', cursor: 'pointer' }}>Retry</button>
+          </div>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '10px', marginBottom: '14px' }}>
           {machines.map(machine => (
@@ -429,7 +424,7 @@ export default function Settings() {
       
       {/* 1. ADD ITEM MODAL */}
       {showAddModal && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
           <div style={modalCardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 className="card-title">Add New Item</h3>
@@ -493,7 +488,7 @@ export default function Settings() {
 
       {/* 2. DELETE CONFIRMATION MODAL */}
       {deleteId && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>
           <div style={modalCardStyle}>
             <div style={{ textAlign: 'center' }}>
               <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--red-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', color: 'var(--red)' }}>

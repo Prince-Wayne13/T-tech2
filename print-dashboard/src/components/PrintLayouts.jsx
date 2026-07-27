@@ -261,9 +261,75 @@ export function ReportPrintLayout({ title, rows = [], footer }) {
   );
 }
 
+// Item 3 (flagged gap, fixed this pass): dedicated print layout for the
+// Month-End Materials Reconciliation report (services/reports.py's
+// build_materials_reconciliation()). Not squeezed into the generic
+// ReportPrintLayout above - that layout's fixed 4-column shape (name/
+// category/amount/status) would silently drop most of this report's real
+// columns (opening/purchased/consumed/closing/output produced/count
+// variance). Every other bespoke print layout in this file (Invoice,
+// Proposal, JobTicket) is purpose-built the same way, so this follows that
+// existing convention rather than forcing a bad fit into the generic one.
+export function MaterialsReconciliationPrintLayout({ data }) {
+  if (!data) return null;
+  const rows = Array.isArray(data.materials) ? data.materials : [];
+  return (
+    <>
+      <style dangerouslySetInnerHTML={{ __html: printStyles }} />
+      <div className="print-layout" style={{ fontFamily: 'Inter, sans-serif', maxWidth: '1000px', margin: '0 auto', padding: '30px', background: '#fff' }}>
+        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+          <div style={{ fontSize: '18px', fontWeight: 700, color: '#3A506B' }}>Materials - Month-End Reconciliation</div>
+          <div style={{ fontSize: '10px', color: '#8B9BB0' }}>
+            {data.period_start && data.period_end ? `${shortDate(data.period_start)} - ${shortDate(data.period_end)}` : data.month}
+          </div>
+          <div style={{ fontSize: '9px', color: '#8B9BB0', marginTop: '4px' }}>{data.formula}</div>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th>Material</th>
+              <th style={{ textAlign: 'right' }}>Opening</th>
+              <th style={{ textAlign: 'right' }}>Purchased</th>
+              <th style={{ textAlign: 'right' }}>Consumed</th>
+              <th style={{ textAlign: 'right' }}>Adjusted</th>
+              <th style={{ textAlign: 'right' }}>Closing</th>
+              <th>Output Produced</th>
+              <th style={{ textAlign: 'right' }}>Count Variance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(row => {
+              const outputEntries = Object.entries(row.output_produced || {});
+              const variance = row.physical_count_check?.variance;
+              return (
+                <tr key={row.material_id}>
+                  <td>{row.name}<div style={{ fontSize: '9px', color: '#8B9BB0' }}>{row.material_ref}</div></td>
+                  <td style={{ textAlign: 'right' }}>{Number(row.opening_stock || 0).toLocaleString()}</td>
+                  <td style={{ textAlign: 'right' }}>+{Number(row.purchased || 0).toLocaleString()}</td>
+                  <td style={{ textAlign: 'right' }}>-{Number(row.consumed || 0).toLocaleString()}</td>
+                  <td style={{ textAlign: 'right' }}>{Number(row.adjusted || 0).toLocaleString()}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 700 }}>{Number(row.closing_stock || 0).toLocaleString()} {row.unit}</td>
+                  <td>{outputEntries.length === 0 ? '-' : outputEntries.map(([label, qty]) => `${Number(qty).toLocaleString()} ${label}`).join(', ')}</td>
+                  <td style={{ textAlign: 'right' }}>{row.physical_count_check ? `${variance >= 0 ? '+' : ''}${Number(variance).toLocaleString()}` : 'Not counted'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {(data.flags?.count_variance?.length > 0 || data.flags?.unreconciled_count?.length > 0) && (
+          <div style={{ marginTop: '20px', fontSize: '10px', color: '#8B9BB0', borderTop: '1px solid #E5E8ED', paddingTop: '12px' }}>
+            {data.flags?.count_variance?.length > 0 && <div>Count variance: {data.flags.count_variance.join(', ')}</div>}
+            {data.flags?.unreconciled_count?.length > 0 && <div>Not yet counted this month: {data.flags.unreconciled_count.join(', ')}</div>}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 export function PrintPreviewModal({ type, title, data, onClose, actions }) {
   if (!data) return null;
-  const Layout = type === 'proposal' ? ProposalPrintLayout : type === 'job' ? JobTicketPrintLayout : type === 'report' ? ReportPrintLayout : InvoicePrintLayout;
+  const Layout = type === 'proposal' ? ProposalPrintLayout : type === 'job' ? JobTicketPrintLayout : type === 'materials_reconciliation' ? MaterialsReconciliationPrintLayout : type === 'report' ? ReportPrintLayout : InvoicePrintLayout;
   const reportRows = Array.isArray(data.rows) ? data.rows : [];
 
   // `actions` lets a caller (e.g. Jobs.jsx) inject its own quick-action
@@ -271,7 +337,7 @@ export function PrintPreviewModal({ type, title, data, onClose, actions }) {
   // closing this shared modal first. Optional and type-agnostic: invoice/
   // proposal/report previews simply don't pass it and get the old header.
   return (
-    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', padding: '18px', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={onClose}>
+    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'grid', placeItems: 'center', padding: '18px', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={onClose}>
       <section className="card no-print" style={{ width: 'min(920px, 96vw)', maxHeight: '90vh', overflow: 'auto', borderTop: '2px solid var(--primary)' }} onClick={event => event.stopPropagation()}>
         <div className="card-header" style={{ marginBottom: '12px' }}>
           <h3 className="card-title">{title || 'Preview'}</h3>
