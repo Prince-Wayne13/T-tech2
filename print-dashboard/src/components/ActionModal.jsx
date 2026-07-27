@@ -40,7 +40,7 @@ export default function ActionModal({ isOpen, onClose, title, children, buttons,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 1000,
+        zIndex: 'var(--z-modal-overlay)',
         animation: 'fadeIn 0.2s ease',
       }}
       onClick={handleBackdropClick}

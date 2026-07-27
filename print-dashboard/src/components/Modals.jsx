@@ -95,7 +95,7 @@ function ModalWrapper({ isOpen, onClose, title, children, footer, wide = false }
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', animation: 'fadeIn 0.15s ease' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)', animation: 'fadeIn 0.15s ease' }}
       onClick={event => event.target === event.currentTarget && onClose()}
     >
       <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--r-card)', padding: 0, width: '95%', maxWidth: wide ? '950px' : '500px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 50px rgba(0,0,0,0.2)', border: '1px solid var(--border-light)', position: 'relative', animation: 'fadeIn 0.2s ease', overflow: 'hidden' }}>
@@ -1419,7 +1419,7 @@ export function SearchResultsModal({ isOpen, onClose, results, onSelect }) {
     ...(results?.pricing || []).map(i => ({ title: i.name, type: 'Pricing', sub: `${i.category || ''} ${i.price ? `- MK ${Number(i.price).toLocaleString()}` : ''}`, raw: i })),
   ];
   return (
-    <div style={{ position: 'fixed', top: '60px', left: '50%', transform: 'translateX(-50%)', zIndex: 950, width: '90%', maxWidth: '420px', background: 'var(--bg-card)', borderRadius: 'var(--r-card)', border: '1px solid var(--border-faint)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)', animation: 'fadeIn 0.15s ease' }}>
+    <div style={{ position: 'fixed', top: '60px', left: '50%', transform: 'translateX(-50%)', zIndex: 'var(--z-toast)', width: '90%', maxWidth: '420px', background: 'var(--bg-card)', borderRadius: 'var(--r-card)', border: '1px solid var(--border-faint)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)', animation: 'fadeIn 0.15s ease' }}>
       <div style={{ padding: '12px', borderBottom: '1px solid var(--border-faint)', fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>Search Results</div>
       <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
         {rows.length === 0

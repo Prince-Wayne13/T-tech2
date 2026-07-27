@@ -18,6 +18,7 @@ import Settings from './Settings';
 import { api } from './api/client';
 import { compactDate, money } from './utils/format';
 import PreviewModal from './components/PreviewModal';
+import ttechIcon from './assets/ttech-icon.png';
 import { downloadPreviewPdf, recordToPdfHtml, shareText } from './utils/downloads';
 import {
   AddExpenseModal,
@@ -314,7 +315,7 @@ function TopBar({ onMenuToggle, search, setSearch, onSearchOpen }) {
       
       <div className="topbar-logo">
         <div className="logo-mark">
-          <Icon d={D.printer} size={14} />
+          <img src={ttechIcon} alt="T-Tech" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
         </div>
         <span>T-Tech</span>
       </div>
@@ -353,6 +354,10 @@ function Sidebar({ active, setActive, isOpen, onClose }) {
       <div className={`sidebar-overlay ${isOpen ? 'active' : ''}`} onClick={onClose} />
       
       <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
+        <div className="sidebar-brand">
+          <img src={ttechIcon} alt="T-Tech" className="sidebar-brand-icon" />
+        </div>
+
         <div className="sidebar-profile">
           <div className="profile-avatar">
             W
@@ -544,7 +549,7 @@ function ActionModal({ action, onClose, onSubmit }) {
   if (!action) return null;
 
   return (
-    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'grid', placeItems: 'center', padding: '18px', background: 'rgba(5, 12, 18, 0.62)' }} onClick={onClose}>
+    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'grid', placeItems: 'center', padding: '18px', background: 'rgba(5, 12, 18, 0.62)' }} onClick={onClose}>
       <section className="card" style={{ width: 'min(520px, 94vw)', borderTop: '2px solid var(--primary)' }} onClick={(event) => event.stopPropagation()}>
         <div className="card-header" style={{ marginBottom: '12px' }}>
           <h3 className="card-title">{action}</h3>

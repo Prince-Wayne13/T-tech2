@@ -21,16 +21,24 @@ class BaseConfig:
     REPORT_EXPORT_DIR = os.getenv("REPORT_EXPORT_DIR", str(BASE_DIR / "exports"))
     COMPANY_PROFILE = {
         "name": os.getenv("COMPANY_NAME", "T-Tech Suppliers & General Dealers Ltd"),
+        "tagline": os.getenv(
+            "COMPANY_TAGLINE",
+            "Screen printing, large format printing, offset printing, sublimation printing, "
+            "DTF and UV, wallpapers, Portraits, cashsale books, Digital printing, lamination, "
+            "Photocopying, Scanning and many more.",
+        ),
         "contact": {
-            "phone": os.getenv("COMPANY_PHONE", "+265 988 231 291"),
+            "phone": os.getenv("COMPANY_PHONE", "0988 231 291"),
             "email": os.getenv("COMPANY_EMAIL", "ttechsuppliers@gmail.com"),
-            "address": os.getenv("COMPANY_ADDRESS", "Lilongwe, City Mall, Standard Bank Corridor"),
+            "address": os.getenv("COMPANY_ADDRESS", "Lilongwe, City Mall"),
         },
         "banking": {
-            "bank": os.getenv("COMPANY_BANK", "National Bank of Malawi"),
-            "account_name": os.getenv("COMPANY_ACCOUNT_NAME", "T-Tech Suppliers & General Dealers Ltd"),
-            "account_number": os.getenv("COMPANY_ACCOUNT_NUMBER", "1234567890"),
+            "standard_bank": os.getenv("COMPANY_STANDARD_BANK", "9100008349182"),
+            "nbs": os.getenv("COMPANY_NBS", "25058402"),
+            "airtel_money": os.getenv("COMPANY_AIRTEL_MONEY", "0988 231 291"),
+            "code": os.getenv("COMPANY_CODE", "10156932"),
         },
+        "vat_rate": float(os.getenv("COMPANY_VAT_RATE", "0.175")),
     }
 
 
