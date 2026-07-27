@@ -223,3 +223,35 @@ def create_pricing_item():
     db.session.add(AuditLog(action=f"Created pricing item {item.code}", entity_type="pricing_item", entity_id=item.id))
     db.session.commit()
     return jsonify(item.to_dict() | {"machine_name": item.machine.name if item.machine else None}), 201
+
+
+@bp.get("/pricing/<int:item_id>")
+def get_pricing_item(item_id):
+    item = PricingItem.query.get_or_404(item_id)
+    return jsonify(item.to_dict() | {"machine_name": item.machine.name if item.machine else None})
+
+
+@bp.put("/pricing/<int:item_id>")
+def update_pricing_item(item_id):
+    item = PricingItem.query.get_or_404(item_id)
+    data = request.get_json() or {}
+    for field in ["code", "name", "category", "unit", "price", "cost_estimate", "currency", "notes"]:
+        if field in data:
+            setattr(item, field, data[field])
+    if "machine_id" in data:
+        item.machine_id = data["machine_id"]
+    if "active" in data:
+        item.active = bool(data["active"])
+    db.session.add(AuditLog(action=f"Updated pricing item {item.code}", entity_type="pricing_item", entity_id=item.id))
+    db.session.commit()
+    return jsonify(item.to_dict() | {"machine_name": item.machine.name if item.machine else None})
+
+
+@bp.delete("/pricing/<int:item_id>")
+def delete_pricing_item(item_id):
+    item = PricingItem.query.get_or_404(item_id)
+    code = item.code
+    db.session.delete(item)
+    db.session.add(AuditLog(action=f"Deleted pricing item {code}", entity_type="pricing_item", entity_id=item_id))
+    db.session.commit()
+    return "", 204

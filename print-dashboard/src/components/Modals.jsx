@@ -25,32 +25,35 @@ const D = {
    SERVICE DATA
 ═══════════════════════════════════════ */
 const SERVICES = [
-  { category: 'Digital Print', items: [
-    { name: 'A4 B&W Document', rate: 150, unit: 'page' },
-    { name: 'A4 Color Document', rate: 650, unit: 'page' },
-    { name: 'A5 Flyer Full Color', rate: 210, unit: 'flyer' },
-  ]},
-  { category: 'DTF Apparel', items: [
-    { name: 'DTF T-Shirt (A4)', rate: 8500, unit: 'print' },
-    { name: 'DTF Cap Branding', rate: 6500, unit: 'cap' },
-    { name: 'DTF Diary Branding', rate: 7500, unit: 'diary' },
-  ]},
-  { category: 'Large Format', items: [
-    { name: 'PVC Banner', rate: 18000, unit: 'sqm' },
-    { name: 'Vinyl Sticker', rate: 22000, unit: 'sqm' },
-    { name: 'Window Frosting', rate: 28000, unit: 'sqm' },
-    { name: 'Contra Vision', rate: 30000, unit: 'sqm' },
-  ]},
-  { category: 'Finishing', items: [
-    { name: 'Book Binding', rate: 3500, unit: 'book' },
+  { category: 'PVC Cards', items: [
+    { name: 'PVC Card Printing', unit: 'card' },
   ]},
   { category: 'Sublimation', items: [
-    { name: 'Mug Print', rate: 7500, unit: 'mug' },
-    { name: 'Plate Print', rate: 9500, unit: 'plate' },
+    { name: 'Mug Cup Print', unit: 'mug' },
   ]},
   { category: 'UV DTF', items: [
-    { name: 'Pen Branding', rate: 1800, unit: 'pen' },
-    { name: 'Key Holder', rate: 2500, unit: 'key holder' },
+    { name: 'UV DTF (Other/Assorted)', unit: 'unit' },
+  ]},
+  { category: 'Large Format', items: [
+    { name: 'Banner Printing', unit: 'sqm' },
+    { name: 'Sticker Printing', unit: 'sqm' },
+  ]},
+  { category: 'DTF Apparel', items: [
+    { name: 'DTF T-Shirt', unit: 'print' },
+    { name: 'DTF Diary', unit: 'diary' },
+    { name: 'DTF Other', unit: 'unit' },
+  ]},
+  { category: 'Cutting', items: [
+    { name: 'Cutting Stencil', unit: 'unit' },
+  ]},
+  { category: 'Digital Print', items: [
+    { name: 'Book Printing', unit: 'book' },
+    { name: 'Magazine Printing', unit: 'magazine' },
+    { name: 'Calendar Printing', unit: 'calendar' },
+    { name: 'Normal Printing', unit: 'page' },
+  ]},
+  { category: 'Finishing', items: [
+    { name: 'Book Binding', unit: 'book' },
   ]},
 ];
 
@@ -216,7 +219,7 @@ function ServiceDropdown({ selectedService, onSelect }) {
           <optgroup key={cat.category} label={cat.category}>
             {cat.items.map(item => (
               <option key={item.name} value={item.name}>
-                {item.name} (MK {item.rate.toLocaleString()}/{item.unit})
+                {item.name} (per {item.unit})
               </option>
             ))}
           </optgroup>
@@ -228,17 +231,22 @@ function ServiceDropdown({ selectedService, onSelect }) {
 
 function AddItemBar({ selectedService, form, setForm, onAdd }) {
   if (!selectedService) return null;
+  const canAdd = Number(form.qty) > 0 && Number(form.rate) > 0;
   return (
-    <div style={{ padding: '12px 20px', background: 'var(--bg-canvas)', borderTop: '1px solid var(--border-faint)', display: 'flex', alignItems: 'flex-end', gap: '10px', flexShrink: 0 }}>
-      <div style={{ flex: 1 }}>
+    <div style={{ padding: '12px 20px', background: 'var(--bg-canvas)', borderTop: '1px solid var(--border-faint)', display: 'flex', alignItems: 'flex-end', gap: '10px', flexShrink: 0, flexWrap: 'wrap' }}>
+      <div style={{ flex: 1, minWidth: '120px' }}>
         <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-head)', marginBottom: '2px' }}>{selectedService.name}</div>
-        <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>MK {Number(selectedService.rate).toLocaleString()} per {selectedService.unit}</div>
+        <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>Priced per {selectedService.unit}</div>
       </div>
       <div style={{ width: '70px' }}>
         <label style={{ ...labelStyle, marginBottom: '2px' }}>Qty</label>
         <input type="number" min="1" style={{ ...inputStyle, padding: '6px', textAlign: 'center' }} value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })} />
       </div>
-      <button onClick={onAdd} style={{ ...createButton, padding: '6px 12px' }}>
+      <div style={{ width: '100px' }}>
+        <label style={{ ...labelStyle, marginBottom: '2px' }}>Price (MK)</label>
+        <input type="number" min="0" placeholder="0" style={{ ...inputStyle, padding: '6px', textAlign: 'center' }} value={form.rate} onChange={e => setForm({ ...form, rate: e.target.value })} />
+      </div>
+      <button onClick={onAdd} disabled={!canAdd} style={{ ...createButton, padding: '6px 12px', opacity: canAdd ? 1 : 0.5, cursor: canAdd ? 'pointer' : 'not-allowed' }}>
         <Icon d={D.plus} size={14} />
       </button>
     </div>
@@ -440,6 +448,7 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
   const [form, setForm] = useState({ client: '', items: [], due: '', notes: '', discount: 0, taxRate: 0 });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
+  const [rate, setRate] = useState('');
   const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
@@ -461,13 +470,13 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
       // backend applies it in - not a percentage int needing /100 either side).
       taxRate: Number(initialData?.tax_rate || 0),
     });
-    setSelectedService(null); setQty('1'); setShowPreview(false);
+    setSelectedService(null); setQty('1'); setRate(''); setShowPreview(false);
   }, [isOpen, initialData]);
 
   const addItem = () => {
-    if (selectedService && qty > 0) {
-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: selectedService.rate }] }));
-      setQty('1'); setSelectedService(null);
+    if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
+      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate) }] }));
+      setQty('1'); setRate(''); setSelectedService(null);
     }
   };
   const removeItem = i => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }));
@@ -528,7 +537,7 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
               <span>Total</span><span>MK {total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
             </div>
           </div>
-          <AddItemBar selectedService={selectedService} form={{ qty }} setForm={f => setQty(f.qty)} onAdd={addItem} />
+          <AddItemBar selectedService={selectedService} form={{ qty, rate }} setForm={f => { setQty(f.qty); setRate(f.rate); }} onAdd={addItem} />
         </>}
         previewContent={<InvoicePreviewFrame data={form} total={total} />}
       />
@@ -541,6 +550,7 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
   const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', validDays: '', contact: '', notes: '', discount: 0, priority: 'medium', assignedStaffId: '' });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
+  const [rate, setRate] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const [clients, setClients] = useState([]);
   const [staffList, setStaffList] = useState([]);
@@ -586,7 +596,7 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
       priority: initialData?.priority || 'medium',
       assignedStaffId: initialData?.assignedStaffId || initialData?.assigned_staff_id || '',
     });
-    setSelectedService(null); setQty('1'); setShowPreview(false);
+    setSelectedService(null); setQty('1'); setRate(''); setShowPreview(false);
     api.clients('?per_page=500').then(data => setClients(data.items || [])).catch(() => setClients([]));
     api.staff('?active=true').then(data => setStaffList(data.items || [])).catch(() => setStaffList([]));
   }, [isOpen, initialData]);
@@ -631,9 +641,9 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
   };
 
   const addItem = () => {
-    if (selectedService) {
-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: selectedService.rate, unit: selectedService.unit }] }));
-      setQty('1'); setSelectedService(null);
+    if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
+      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate), unit: selectedService.unit }] }));
+      setQty('1'); setRate(''); setSelectedService(null);
     }
   };
   const subtotal = calculateTotal(form.items);
@@ -730,7 +740,7 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
               <span>Total</span><span>MK {total.toLocaleString()}</span>
             </div>
           </div>
-          <AddItemBar selectedService={selectedService} form={{ qty }} setForm={f => setQty(f.qty)} onAdd={addItem} />
+          <AddItemBar selectedService={selectedService} form={{ qty, rate }} setForm={f => { setQty(f.qty); setRate(f.rate); }} onAdd={addItem} />
         </>}
         previewContent={<ProposalPreviewFrame data={form} total={total} />}
       />
@@ -753,6 +763,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
   const [form, setForm] = useState({ client: '', title: '', items: [], specs: [], priority: 'medium', due: '', dueDays: '', machineId: '', assignedStaffId: '', notes: '', discount: 0 });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
+  const [rate, setRate] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const [clients, setClients] = useState([]);
   const [staffList, setStaffList] = useState([]);
@@ -786,7 +797,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
       notes: initialData?.notes || '',
       discount: Number(initialData?.discount_amount || initialData?.discount || 0),
     });
-    setSelectedService(null); setQty('1'); setShowPreview(false);
+    setSelectedService(null); setQty('1'); setRate(''); setShowPreview(false);
     // Non-fatal fetches, same pattern as AddExpenseModal's categories/vendors
     // load — this modal must still open and work even if either call fails.
     api.clients('?per_page=500').then(data => setClients(data.items || [])).catch(() => setClients([]));
@@ -815,9 +826,9 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
   };
 
   const addItem = () => {
-    if (selectedService && qty > 0) {
-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: selectedService.rate }] }));
-      setQty('1'); setSelectedService(null);
+    if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
+      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate) }] }));
+      setQty('1'); setRate(''); setSelectedService(null);
     }
   };
   const removeItem = i => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }));
@@ -899,7 +910,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
               <span>Total</span><span>MK {total.toLocaleString()}</span>
             </div>
           </div>
-          <AddItemBar selectedService={selectedService} form={{ qty }} setForm={f => setQty(f.qty)} onAdd={addItem} />
+          <AddItemBar selectedService={selectedService} form={{ qty, rate }} setForm={f => { setQty(f.qty); setRate(f.rate); }} onAdd={addItem} />
           <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-faint)', flexShrink: 0 }}>
             <label style={labelStyle}>Notes</label>
             <textarea style={{ ...inputStyle, minHeight: '60px', resize: 'vertical' }} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />

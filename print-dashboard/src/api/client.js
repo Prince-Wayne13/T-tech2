@@ -153,6 +153,13 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
+  updatePricingItem: (id, payload) => request(`/machines/pricing/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  deletePricingItem: (id) => request(`/machines/pricing/${id}`, {
+    method: 'DELETE',
+  }),
   exports: () => request('/exports'),
   createExport: (payload) => request('/exports', {
     method: 'POST',

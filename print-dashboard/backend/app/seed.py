@@ -109,14 +109,15 @@ def seed_mock_data(reset=False):
     db.session.flush()
 
     machines = [
-        ProductionMachine(machine_ref="MCH-DTF-01", name="DTF Print & Heat Press Line", category="DTF Apparel", capability="T-shirts, hoodies, caps, diaries and fabric transfers", image_path="/machines/dtf.svg", notes="Includes DTF printer, powdering/curing workflow and heat pressing machines."),
-        ProductionMachine(machine_ref="MCH-LF-01", name="Large Format Printer", category="Large Format", capability="Banners, stickers, vinyl, contra vision and window frosting", image_path="/machines/large-format.svg"),
-        ProductionMachine(machine_ref="MCH-KM-01", name="Konica Minolta Digital Press", category="Digital Print", capability="Documents, flyers, booklets, magazines and fast paper printing", image_path="/machines/digital-press.svg"),
-        ProductionMachine(machine_ref="MCH-BIND-01", name="Book Binder & Cutter Line", category="Finishing", capability="Books, magazines, newspapers, trimming and binding", image_path="/machines/binder-cutter.svg"),
-        ProductionMachine(machine_ref="MCH-SUB-01", name="Sublimation Station", category="Sublimation", capability="Mugs, cups, plates and coated gift items", image_path="/machines/sublimation.svg"),
-        ProductionMachine(machine_ref="MCH-UVDTF-01", name="UV DTF Printer", category="UV DTF", capability="Pens, key holders, labels, hard-surface branding and gift items", image_path="/machines/uv-dtf.svg"),
-        ProductionMachine(machine_ref="MCH-EMB-01", name="Embroidery Machine", category="Embroidery", capability="Fabric embroidery and branded apparel", status="active", image_path="/machines/embroidery.svg", notes="Activated: real embroidery pricing now available (logo, caps, front chest, cotton carrier bag, fishing jacket)."),
-        ProductionMachine(machine_ref="MCH-SWT-01", name="Automatic Sweater Machine", category="Apparel", capability="Future sweater production automation", status="planned", image_path="/machines/sweater.svg", notes="Planned future machine."),
+        ProductionMachine(machine_ref="MCH-PVC-01", name="Pebble Evolis Card Printer", category="PVC Cards", capability="PVC ID cards and card printing", image_path="/machines/pvc-card.svg"),
+        ProductionMachine(machine_ref="MCH-SUB-01", name="Sublimation Printer", category="Sublimation", capability="Mug cups and coated gift items", image_path="/machines/sublimation.svg"),
+        ProductionMachine(machine_ref="MCH-UVDTF-01", name="UV DTF Printer", category="UV DTF", capability="Assorted / other UV DTF items", image_path="/machines/uv-dtf.svg"),
+        ProductionMachine(machine_ref="MCH-LF-01", name="Large Format Printer", category="Large Format", capability="Banners and stickers", image_path="/machines/large-format.svg"),
+        ProductionMachine(machine_ref="MCH-DTF-01", name="DTF Printer", category="DTF Apparel", capability="T-shirts, diaries and other DTF items", image_path="/machines/dtf.svg"),
+        ProductionMachine(machine_ref="MCH-PLOT-01", name="Plotter", category="Cutting", capability="Cutting stencils", image_path="/machines/plotter.svg"),
+        ProductionMachine(machine_ref="MCH-DIGI-01", name="Digital Printer", category="Digital Print", capability="Books, magazines, calendars and other digital print items", image_path="/machines/digital-printer.svg"),
+        ProductionMachine(machine_ref="MCH-BIND-01", name="Binder", category="Finishing", capability="Binding books", image_path="/machines/binder-cutter.svg"),
+        ProductionMachine(machine_ref="MCH-KM-01", name="Konica Minolta", category="Digital Print", capability="Calendars, books and normal printing", image_path="/machines/digital-press.svg"),
     ]
     db.session.add_all(machines)
     db.session.flush()
@@ -128,48 +129,29 @@ def seed_mock_data(reset=False):
     ensure_default_capabilities_seed()
 
     machine_by_ref = {machine.machine_ref: machine for machine in machines}
-    # Prices below marked "price list" come directly from the physical T-Tech
-    # price list the user photographed and provided (2026-07-25 session).
-    # Where a price-list category didn't map cleanly to one of the 8 seeded
-    # machines, the machine was chosen by the user's explicit instruction this
-    # session ("guess which machines would be suited") — see dev-log.md for
-    # the full mapping table and reasoning per item.
+    # Fixed price lists were dropped (2026-07-27 session): all job/invoice
+    # prices are now entered manually per line item. PricingItem rows below
+    # are kept only as lightweight reference/lookup entries (e.g. for
+    # reporting on what a machine/category tends to produce) — price and
+    # cost_estimate here are indicative starting points only, not enforced
+    # anywhere in the job/invoice flow.
     pricing_items = [
-        PricingItem(code="DTF-TSHIRT-A4", name="DTF T-shirt print A4 area", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="print", price=8500, cost_estimate=3200),
-        PricingItem(code="DTF-CAP", name="DTF cap branding", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="cap", price=6500, cost_estimate=2500),
-        PricingItem(code="DTF-DIARY", name="DTF diary branding", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="diary", price=7500, cost_estimate=2800),
-        PricingItem(code="DTF-TSHIRT-TINT", name="T-shirt tinting (inclusive)", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="shirt", price=22000, cost_estimate=9500),
-        PricingItem(code="LF-BANNER-SQM", name="PVC banner print", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=18000, cost_estimate=7800),
-        PricingItem(code="LF-STICKER-SQM", name="Vinyl sticker print", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=22000, cost_estimate=9000),
-        PricingItem(code="LF-FROST-SQM", name="Window frosting film", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=28000, cost_estimate=12500),
-        PricingItem(code="LF-CONTRA-SQM", name="Contra vision print", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=30000, cost_estimate=14000),
-        PricingItem(code="LF-ROLLUP", name="Roll-up banner (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="banner", price=250000, cost_estimate=110000),
-        PricingItem(code="LF-STICKER-A4", name="A4 vinyl stickers, per pack (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="pack", price=4000, cost_estimate=1700),
-        PricingItem(code="LF-STICKER-A5", name="A5 vinyl stickers, per pack (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="pack", price=2500, cost_estimate=1050),
-        PricingItem(code="LF-STICKER-A3", name="A3 vinyl stickers, per pack (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="pack", price=7000, cost_estimate=3000),
-        PricingItem(code="LF-FOAMBOARD", name="Foam board printing (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="board", price=80000, cost_estimate=35000),
-        PricingItem(code="LF-ALU-A1", name="A1 aluminium frame with print (price list)", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="frame", price=85000, cost_estimate=38000),
-        PricingItem(code="KM-A4-BW", name="A4 black and white document print", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="page", price=150, cost_estimate=55),
-        PricingItem(code="KM-A4-COLOR", name="A4 colour document print", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="page", price=650, cost_estimate=260),
-        PricingItem(code="KM-FLYER-A5", name="A5 flyer full colour", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="flyer", price=210, cost_estimate=95),
-        PricingItem(code="KM-CARD-50", name="Business cards, 50/pack (price list)", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="pack", price=50000, cost_estimate=21000),
-        PricingItem(code="KM-CARD-100", name="Business cards, 100/pack (price list)", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="pack", price=100000, cost_estimate=42000),
-        PricingItem(code="KM-INVOICE-BOOK", name="Invoice book A5 (price list)", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="book", price=25000, cost_estimate=11000),
-        PricingItem(code="KM-RECEIPT-BOOK", name="Receipt book A5 (price list)", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="book", price=25000, cost_estimate=11000),
-        PricingItem(code="FIN-BIND", name="Book binding", category="Finishing", machine_id=machine_by_ref["MCH-BIND-01"].id, unit="book", price=3500, cost_estimate=1200),
-        PricingItem(code="SUB-MUG", name="Sublimation mug print", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="mug", price=7500, cost_estimate=3300),
-        PricingItem(code="SUB-PLATE", name="Sublimation plate print", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="plate", price=9500, cost_estimate=4300),
-        PricingItem(code="SUB-MUG-NORMAL", name="Normal mug, min order 5 (price list)", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="mug", price=11000, cost_estimate=4800),
-        PricingItem(code="SUB-TRAVEL-JUG", name="Sublimation travelling jug (price list)", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="jug", price=20000, cost_estimate=8800),
-        PricingItem(code="UVDTF-PEN", name="UV DTF pen branding", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="pen", price=1800, cost_estimate=650),
-        PricingItem(code="UVDTF-KEY", name="UV DTF key holder branding", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="key holder", price=2500, cost_estimate=900),
-        PricingItem(code="UV-A5", name="UV printing A5, 21x29cm (price list)", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="print", price=12500, cost_estimate=5500),
-        PricingItem(code="UV-A3", name="UV printing A3, 29x42cm (price list)", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="print", price=17000, cost_estimate=7500),
-        PricingItem(code="UV-A1", name="UV printing A1, 59x84cm (price list)", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="print", price=35000, cost_estimate=15500),
-        PricingItem(code="EMB-LOGO", name="Embroidery logo, small (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="logo", price=6000, cost_estimate=2500),
-        PricingItem(code="EMB-CAP", name="Embroidery caps (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="cap", price=5000, cost_estimate=2100),
-        PricingItem(code="EMB-FRONT-CHEST", name="Embroidery front chest (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="piece", price=8000, cost_estimate=3400),
-        PricingItem(code="EMB-JACKET", name="Embroidery fishing jacket (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="jacket", price=12000, cost_estimate=5200),
+        PricingItem(code="PVC-CARD", name="PVC card printing", category="PVC Cards", machine_id=machine_by_ref["MCH-PVC-01"].id, unit="card", price=0, cost_estimate=0),
+        PricingItem(code="SUB-MUG", name="Mug cup print", category="Sublimation", machine_id=machine_by_ref["MCH-SUB-01"].id, unit="mug", price=0, cost_estimate=0),
+        PricingItem(code="UVDTF-OTHER", name="UV DTF (other/assorted)", category="UV DTF", machine_id=machine_by_ref["MCH-UVDTF-01"].id, unit="unit", price=0, cost_estimate=0),
+        PricingItem(code="LF-BANNER", name="Banner printing", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=0, cost_estimate=0),
+        PricingItem(code="LF-STICKER", name="Sticker printing", category="Large Format", machine_id=machine_by_ref["MCH-LF-01"].id, unit="sqm", price=0, cost_estimate=0),
+        PricingItem(code="DTF-TSHIRT", name="DTF t-shirt", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="print", price=0, cost_estimate=0),
+        PricingItem(code="DTF-DIARY", name="DTF diary", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="diary", price=0, cost_estimate=0),
+        PricingItem(code="DTF-OTHER", name="DTF other", category="DTF Apparel", machine_id=machine_by_ref["MCH-DTF-01"].id, unit="unit", price=0, cost_estimate=0),
+        PricingItem(code="PLOT-STENCIL", name="Cutting stencil", category="Cutting", machine_id=machine_by_ref["MCH-PLOT-01"].id, unit="unit", price=0, cost_estimate=0),
+        PricingItem(code="DIGI-BOOK", name="Book printing", category="Digital Print", machine_id=machine_by_ref["MCH-DIGI-01"].id, unit="book", price=0, cost_estimate=0),
+        PricingItem(code="DIGI-MAGAZINE", name="Magazine printing", category="Digital Print", machine_id=machine_by_ref["MCH-DIGI-01"].id, unit="magazine", price=0, cost_estimate=0),
+        PricingItem(code="DIGI-CALENDAR", name="Calendar printing", category="Digital Print", machine_id=machine_by_ref["MCH-DIGI-01"].id, unit="calendar", price=0, cost_estimate=0),
+        PricingItem(code="FIN-BIND", name="Book binding", category="Finishing", machine_id=machine_by_ref["MCH-BIND-01"].id, unit="book", price=0, cost_estimate=0),
+        PricingItem(code="KM-CALENDAR", name="Calendar printing", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="calendar", price=0, cost_estimate=0),
+        PricingItem(code="KM-BOOK", name="Book printing", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="book", price=0, cost_estimate=0),
+        PricingItem(code="KM-NORMAL", name="Normal printing", category="Digital Print", machine_id=machine_by_ref["MCH-KM-01"].id, unit="page", price=0, cost_estimate=0),
     ]
     db.session.add_all(pricing_items)
     db.session.flush()
@@ -265,47 +247,47 @@ def seed_mock_data(reset=False):
     # ── INVOICES: ~8–13 per month Apr 2026 → today ──────────────────────────
     invoice_line_pools = [
         [
-            {"description": "A4 full-colour event posters", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-A4-COLOR"].id, "quantity": 250, "unit": "prints", "unit_price": 1850},
-            {"description": "Stage backdrop banner 3m x 2m", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-BANNER-SQM"].id, "quantity": 1, "unit": "banner", "unit_price": 315000},
+            {"description": "A4 full-colour event posters", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-NORMAL"].id, "quantity": 250, "unit": "prints", "unit_price": 1850},
+            {"description": "Stage backdrop banner 3m x 2m", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-BANNER"].id, "quantity": 1, "unit": "banner", "unit_price": 315000},
         ],
         [
-            {"description": "Waterproof product stickers", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-STICKER-SQM"].id, "quantity": 1800, "unit": "stickers", "unit_price": 320},
+            {"description": "Waterproof product stickers", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-STICKER"].id, "quantity": 1800, "unit": "stickers", "unit_price": 320},
             {"description": "Freezer vinyl decals", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "quantity": 24, "unit": "decals", "unit_price": 9500},
         ],
         [
-            {"description": "A5 double-sided campaign flyers", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-FLYER-A5"].id, "quantity": 5000, "unit": "flyers", "unit_price": 210},
+            {"description": "A5 double-sided campaign flyers", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-NORMAL"].id, "quantity": 5000, "unit": "flyers", "unit_price": 210},
             {"description": "Layout and copy cleanup", "product_type": "Design & Prepress", "quantity": 1, "unit": "service", "unit_price": 55000},
         ],
         [
-            {"description": "Frosted window vinyl panels", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-FROST-SQM"].id, "quantity": 12, "unit": "panels", "unit_price": 28000},
+            {"description": "Frosted window vinyl panels", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-BANNER"].id, "quantity": 12, "unit": "panels", "unit_price": 28000},
             {"description": "On-site installation", "product_type": "Installation", "quantity": 1, "unit": "service", "unit_price": 120000},
         ],
         [
-            {"description": "Branded DTF T-shirts", "product_type": "DTF Apparel", "machine_id": machine_by_ref["MCH-DTF-01"].id, "pricing_item_id": pricing_by_code["DTF-TSHIRT-A4"].id, "quantity": 100, "unit": "prints", "unit_price": 8500},
+            {"description": "Branded DTF T-shirts", "product_type": "DTF Apparel", "machine_id": machine_by_ref["MCH-DTF-01"].id, "pricing_item_id": pricing_by_code["DTF-TSHIRT"].id, "quantity": 100, "unit": "prints", "unit_price": 8500},
         ],
         [
             {"description": "Sublimation mugs for AGM", "product_type": "Sublimation", "machine_id": machine_by_ref["MCH-SUB-01"].id, "pricing_item_id": pricing_by_code["SUB-MUG"].id, "quantity": 150, "unit": "mugs", "unit_price": 7500},
         ],
         [
-            {"description": "DTF branded caps", "product_type": "DTF Apparel", "machine_id": machine_by_ref["MCH-DTF-01"].id, "pricing_item_id": pricing_by_code["DTF-CAP"].id, "quantity": 80, "unit": "caps", "unit_price": 6500},
+            {"description": "DTF branded caps", "product_type": "DTF Apparel", "machine_id": machine_by_ref["MCH-DTF-01"].id, "pricing_item_id": pricing_by_code["DTF-OTHER"].id, "quantity": 80, "unit": "caps", "unit_price": 6500},
             {"description": "Artwork and layout", "product_type": "Design & Prepress", "quantity": 1, "unit": "service", "unit_price": 35000},
         ],
         [
-            {"description": "UV DTF pen branding", "product_type": "UV DTF", "machine_id": machine_by_ref["MCH-UVDTF-01"].id, "pricing_item_id": pricing_by_code["UVDTF-PEN"].id, "quantity": 200, "unit": "pens", "unit_price": 1800},
-            {"description": "UV DTF key holders", "product_type": "UV DTF", "machine_id": machine_by_ref["MCH-UVDTF-01"].id, "pricing_item_id": pricing_by_code["UVDTF-KEY"].id, "quantity": 500, "unit": "key holders", "unit_price": 2500},
+            {"description": "UV DTF pen branding", "product_type": "UV DTF", "machine_id": machine_by_ref["MCH-UVDTF-01"].id, "pricing_item_id": pricing_by_code["UVDTF-OTHER"].id, "quantity": 200, "unit": "pens", "unit_price": 1800},
+            {"description": "UV DTF key holders", "product_type": "UV DTF", "machine_id": machine_by_ref["MCH-UVDTF-01"].id, "pricing_item_id": pricing_by_code["UVDTF-OTHER"].id, "quantity": 500, "unit": "key holders", "unit_price": 2500},
         ],
         [
-            {"description": "Annual report booklets", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-A4-COLOR"].id, "quantity": 300, "unit": "booklets", "unit_price": 4500},
+            {"description": "Annual report booklets", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-NORMAL"].id, "quantity": 300, "unit": "booklets", "unit_price": 4500},
             {"description": "Book binding", "product_type": "Finishing", "machine_id": machine_by_ref["MCH-BIND-01"].id, "pricing_item_id": pricing_by_code["FIN-BIND"].id, "quantity": 300, "unit": "books", "unit_price": 3500},
         ],
         [
-            {"description": "PVC banner prints", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-BANNER-SQM"].id, "quantity": 6, "unit": "banners", "unit_price": 18000},
+            {"description": "PVC banner prints", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-BANNER"].id, "quantity": 6, "unit": "banners", "unit_price": 18000},
         ],
         [
-            {"description": "A4 BW exam papers", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-A4-BW"].id, "quantity": 3000, "unit": "pages", "unit_price": 150},
+            {"description": "A4 BW exam papers", "product_type": "Digital Print", "machine_id": machine_by_ref["MCH-KM-01"].id, "pricing_item_id": pricing_by_code["KM-NORMAL"].id, "quantity": 3000, "unit": "pages", "unit_price": 150},
         ],
         [
-            {"description": "Sublimation award plates", "product_type": "Sublimation", "machine_id": machine_by_ref["MCH-SUB-01"].id, "pricing_item_id": pricing_by_code["SUB-PLATE"].id, "quantity": 50, "unit": "plates", "unit_price": 9500},
+            {"description": "Sublimation award plates", "product_type": "Sublimation", "machine_id": machine_by_ref["MCH-SUB-01"].id, "pricing_item_id": pricing_by_code["SUB-MUG"].id, "quantity": 50, "unit": "plates", "unit_price": 9500},
         ],
     ]
 
@@ -775,10 +757,10 @@ def seed_mock_data(reset=False):
     loyal_issued_on = today - timedelta(days=6)
     loyal_due_on = loyal_issued_on + timedelta(days=14)
     loyal_line_items = [
-        {"description": "Branded retail shelf stickers, full store rollout", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-STICKER-SQM"].id, "quantity": 60, "unit": "sqm", "unit_price": 22000},
+        {"description": "Branded retail shelf stickers, full store rollout", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-STICKER"].id, "quantity": 60, "unit": "sqm", "unit_price": 22000},
         {"description": "Freezer and cold-room decals, all branches", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "quantity": 48, "unit": "decals", "unit_price": 9500},
-        {"description": "Promotional rollup banners x6", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-ROLLUP"].id, "quantity": 6, "unit": "banners", "unit_price": 250000},
-        {"description": "Staff branded caps (embroidered)", "product_type": "Embroidery", "machine_id": machine_by_ref["MCH-EMB-01"].id, "pricing_item_id": pricing_by_code["EMB-CAP"].id, "quantity": 60, "unit": "caps", "unit_price": 5000},
+        {"description": "Promotional rollup banners x6", "product_type": "Large Format", "machine_id": machine_by_ref["MCH-LF-01"].id, "pricing_item_id": pricing_by_code["LF-BANNER"].id, "quantity": 6, "unit": "banners", "unit_price": 250000},
+        {"description": "Staff branded DTF t-shirts", "product_type": "DTF Apparel", "machine_id": machine_by_ref["MCH-DTF-01"].id, "pricing_item_id": pricing_by_code["DTF-TSHIRT"].id, "quantity": 60, "unit": "shirts", "unit_price": 5000},
     ]
     loyal_subtotal = sum(li["unit_price"] * li["quantity"] for li in loyal_line_items)
     loyal_discount = round(loyal_subtotal * 0.12 / 1000) * 1000  # 12% loyalty discount, rounded to a clean thousand
@@ -853,12 +835,24 @@ def seed_mock_data(reset=False):
     # above rather than invented in isolation, so Revenue Generated and the
     # per-job usage links in Materials.jsx actually resolve to something.
     materials = [
-        Material(material_ref="MAT-0001", name="SRA3 Card Stock 300gsm", category="Paper & card stock", machine_id=machine_by_ref["MCH-KM-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="ream", unit_cost=18500, reorder_point=15, notes="250 sheets/ream, primary stock for business cards and flyers."),
-        Material(material_ref="MAT-0002", name="PVC Banner Vinyl (13oz)", category="Banner vinyl", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=4200, reorder_point=40, notes="Standard outdoor banner stock."),
-        Material(material_ref="MAT-0003", name="Self-Adhesive Vinyl - White Gloss", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=5800, reorder_point=30, notes="Stickers, contra vision backing, general cut vinyl."),
-        Material(material_ref="MAT-0004", name="CMYK Large-Format Ink Set", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=32000, reorder_point=8, notes="4-colour set, shared across banner/sticker/frosting jobs."),
-        Material(material_ref="MAT-0005", name="Sublimation Mug Blanks (11oz)", category="Paper & card stock", machine_id=machine_by_ref["MCH-SUB-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="unit", unit_cost=2600, reorder_point=50, notes="White ceramic, standard stock mug."),
-        Material(material_ref="MAT-0006", name="DTF Powder", category="Large format ink", machine_id=machine_by_ref["MCH-DTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="kg", unit_cost=15500, reorder_point=5, notes="Hot-melt adhesive powder for DTF transfers."),
+        Material(material_ref="MAT-0001", name="PVC Banner", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=4200, reorder_point=40, notes="Standard outdoor banner stock."),
+        Material(material_ref="MAT-0002", name="Vinyl Sticker", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=5800, reorder_point=30, notes="Self-adhesive vinyl for stickers and general cut vinyl."),
+        Material(material_ref="MAT-0003", name="Large Format Ink", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=32000, reorder_point=8, notes="CMYK ink set for the large format printer, shared across banner/sticker jobs."),
+        Material(material_ref="MAT-0004", name="Grayback Banner", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=3800, reorder_point=30, notes="Grayback banner stock."),
+        Material(material_ref="MAT-0005", name="Contra Vision", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=6500, reorder_point=20, notes="Perforated window vision film."),
+        Material(material_ref="MAT-0006", name="DTF Film", category="Large format ink", machine_id=machine_by_ref["MCH-DTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="m", unit_cost=8500, reorder_point=20, notes="DTF transfer film roll."),
+        Material(material_ref="MAT-0007", name="DTF Powder", category="Large format ink", machine_id=machine_by_ref["MCH-DTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="kg", unit_cost=15500, reorder_point=5, notes="Hot-melt adhesive powder for DTF transfers."),
+        Material(material_ref="MAT-0008", name="Digital Printer Ink", category="Large format ink", machine_id=machine_by_ref["MCH-DIGI-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=28000, reorder_point=8, notes="Ink for the digital printer (books, magazines, calendars)."),
+        Material(material_ref="MAT-0009", name="Digital Printer Paper", category="Paper & card stock", machine_id=machine_by_ref["MCH-DIGI-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="ream", unit_cost=17500, reorder_point=15, notes="Paper stock for the digital printer."),
+        Material(material_ref="MAT-0010", name="Staples", category="Paper & card stock", machine_id=machine_by_ref["MCH-BIND-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="box", unit_cost=3200, reorder_point=10, notes="Staples for binding/finishing."),
+        Material(material_ref="MAT-0011", name="UV DTF Film", category="Large format ink", machine_id=machine_by_ref["MCH-UVDTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="m", unit_cost=9500, reorder_point=15, notes="UV DTF transfer film roll."),
+        Material(material_ref="MAT-0012", name="UV DTF Ink", category="Large format ink", machine_id=machine_by_ref["MCH-UVDTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=34000, reorder_point=6, notes="Ink set for the UV DTF printer."),
+        Material(material_ref="MAT-0013", name="Pebble Ribbon", category="Large format ink", machine_id=machine_by_ref["MCH-PVC-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="roll", unit_cost=22000, reorder_point=5, notes="Ribbon for the Pebble/Evolis card printer."),
+        Material(material_ref="MAT-0014", name="PVC Cards", category="Paper & card stock", machine_id=machine_by_ref["MCH-PVC-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="card", unit_cost=450, reorder_point=100, notes="Blank PVC cards for the Pebble/Evolis card printer."),
+        Material(material_ref="MAT-0015", name="Konica Minolta Paper", category="Paper & card stock", machine_id=machine_by_ref["MCH-KM-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="ream", unit_cost=18500, reorder_point=15, notes="Paper stock for the Konica Minolta press (calendars, books, normal printing)."),
+        Material(material_ref="MAT-0016", name="Konica Minolta Ink", category="Large format ink", machine_id=machine_by_ref["MCH-KM-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=30000, reorder_point=8, notes="Ink/toner for the Konica Minolta press."),
+        Material(material_ref="MAT-0017", name="Sublimation Paper", category="Paper & card stock", machine_id=machine_by_ref["MCH-SUB-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="ream", unit_cost=12500, reorder_point=15, notes="Transfer paper for the sublimation printer."),
+        Material(material_ref="MAT-0018", name="Sublimation Ink", category="Large format ink", machine_id=machine_by_ref["MCH-SUB-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=27000, reorder_point=6, notes="Ink set for the sublimation printer (mug cups)."),
     ]
     db.session.add_all(materials)
     db.session.flush()
@@ -918,10 +912,14 @@ def seed_mock_data(reset=False):
                 output_qty = job.total_count or job.copies or 0
                 job_machine_ref = machine_ref_by_id.get(job.machine_id)
                 output_label = {
-                    "MCH-LF-01": "sqm of banners produced" if material.category == "Banner vinyl" else "stickers/banners produced",
-                    "MCH-KM-01": "cards/flyers produced",
-                    "MCH-SUB-01": "mugs produced",
+                    "MCH-LF-01": "sqm of banners/stickers produced",
+                    "MCH-KM-01": "cards/books/calendars produced",
+                    "MCH-DIGI-01": "books/magazines/calendars produced",
+                    "MCH-SUB-01": "mug cups produced",
                     "MCH-DTF-01": "garments produced",
+                    "MCH-UVDTF-01": "units produced",
+                    "MCH-PVC-01": "PVC cards produced",
+                    "MCH-BIND-01": "books bound",
                 }.get(job_machine_ref, "units produced")
                 material_transactions.append(MaterialTransaction(
                     material_id=material.id, transaction_type="usage", quantity=usage_qty,
