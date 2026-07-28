@@ -101,12 +101,18 @@ def install_crash_hook() -> None:
     sys.excepthook = handle_uncaught
 
 
-def build_backup_scheduler(data_dir: Path, log_path: Path):
+def build_backup_scheduler(data_dir: Path, log_path: Path, device_id: str | None = None):
     """
     Builds (but does not yet start) the BackupScheduler, wired up to
     notify.py so every backup event automatically shows a Windows
     notification. Also returns it so main.py can attach it to
     app.config["BACKUP_SCHEDULER"] for the manual "Backup Now" button.
+
+    device_id (cross-device backup/restore, this pass): this machine's
+    device_identity.py-assigned ID, so this device's backups land in
+    their own subfolder inside the shared synced backup folder rather
+    than one flat pile every device writes into -- see
+    backup_scheduler.py's copy_into_subfolder() for where this is used.
     """
     from . import notify
     from .backup_scheduler import BackupScheduler
@@ -128,6 +134,7 @@ def build_backup_scheduler(data_dir: Path, log_path: Path):
         local_backup_dir=local_backup_dir,
         log_file_path=str(log_path),
         sync_fallback_dir=sync_fallback_dir,
+        device_id=device_id,
         on_result=notify.on_backup_result,
     )
     return scheduler
@@ -158,14 +165,58 @@ def build_reports_scheduler(data_dir: Path, flask_app):
     )
 
 
-def bootstrap_app(config_name: str = "production"):
+def get_existing_device_identity():
+    """
+    Lets main.py check whether this machine has already been named,
+    WITHOUT running the rest of bootstrap_app() (Flask app creation,
+    database migrations, starting the backup scheduler) -- main.py
+    needs this answer before deciding whether to show the first-run
+    naming prompt, which must happen before the splash screen, well
+    before the rest of startup is appropriate to run.
+
+    Returns a device_identity.DeviceIdentity, or None if this machine
+    has never been named.
+    """
+    from . import device_identity
+
+    data_dir = get_data_dir()
+    return device_identity.load_device_identity(data_dir)
+
+
+def bootstrap_app(config_name: str = "production", device_name: str | None = None):
     """
     Runs the full startup sequence and returns everything main.py
-    needs: (flask_app, scheduler, reports_scheduler, log_path).
+    needs: (flask_app, scheduler, reports_scheduler, log_path, device_identity).
+
+    device_name: only used the FIRST time this machine ever starts up
+    (no device_identity.json yet). main.py is expected to call
+    bootstrap_app() once with device_name=None first; if the returned
+    device_identity is None, that's the signal to show the first-run
+    naming prompt, collect a name from the person, and call
+    bootstrap_app() again with device_name set. This two-call shape
+    (rather than bootstrap_app() blocking on its own input() prompt) is
+    what lets main.py show the prompt in the actual pywebview window
+    instead of a console nobody will see on the packaged .exe.
     """
     data_dir = get_data_dir()
     log_path = setup_logging(data_dir)
     install_crash_hook()
+
+    from . import device_identity
+    from .services import device_context
+
+    identity = device_identity.load_device_identity(data_dir)
+    if identity is None and device_name:
+        identity = device_identity.create_device_identity(data_dir, device_name)
+        logger.info("Device identity created: %s (%s)", identity.device_name, identity.device_id)
+    elif identity is not None:
+        logger.info("Device identity loaded: %s (%s)", identity.device_name, identity.device_id)
+    else:
+        logger.info("No device identity yet -- first-run naming prompt required before continuing")
+        return None, None, None, log_path, None
+
+    device_context.set_current_device_id(identity.device_id)
+    device_context.install_device_stamping()
 
     from . import create_app
     from .extensions import db
@@ -177,17 +228,18 @@ def bootstrap_app(config_name: str = "production"):
         db.create_all()
         run_full_upgrade()
 
-    scheduler = build_backup_scheduler(data_dir, log_path)
+    scheduler = build_backup_scheduler(data_dir, log_path, device_id=identity.device_id)
     flask_app.config["BACKUP_SCHEDULER"] = scheduler
+    flask_app.config["DEVICE_IDENTITY"] = identity
     scheduler.start()
 
     reports_scheduler = build_reports_scheduler(data_dir, flask_app)
     flask_app.config["REPORTS_SCHEDULER"] = reports_scheduler
     reports_scheduler.start()
 
-    logger.info("App lifecycle bootstrapped (data dir: %s)", data_dir)
+    logger.info("App lifecycle bootstrapped (data dir: %s, device: %s)", data_dir, identity.device_id)
 
-    return flask_app, scheduler, reports_scheduler, log_path
+    return flask_app, scheduler, reports_scheduler, log_path, identity
 
 
 def shutdown_app(scheduler, reports_scheduler=None) -> None:

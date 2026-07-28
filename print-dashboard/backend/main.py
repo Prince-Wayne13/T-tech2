@@ -23,6 +23,7 @@ import logging
 import threading
 
 from app import lifecycle
+from app.device_prompt import prompt_for_device_name
 from app.single_instance import SingleInstanceGuard
 from app.splash import show_splash
 
@@ -81,6 +82,31 @@ def _pick_port() -> int:
 
 
 def main() -> None:
+    # Cross-device backup/restore (this pass): this machine needs a
+    # permanent device identity before anything else happens. Checked
+    # BEFORE the splash/single-instance guard below, and deliberately
+    # NOT behind the splash screen -- a text-entry dialog appearing
+    # underneath/behind a topmost splash would be confusing, so on a
+    # true first run the naming prompt IS the first thing the person
+    # sees, replacing the splash for that one-time moment. Every
+    # subsequent launch skips this block entirely (device_identity.json
+    # already exists) and goes straight to the normal splash-first flow.
+    existing_identity = lifecycle.get_existing_device_identity()
+    device_name = None
+    if existing_identity is None:
+        device_name = prompt_for_device_name()
+        if device_name is None:
+            # Person closed the naming dialog without entering anything.
+            # Startup cannot continue without a device identity (every
+            # ref generated and every row written depends on it -- see
+            # ref_generator.py / device_context.py) -- rather than
+            # silently continuing unnamed, the app quits here so the
+            # person can just double-click it again to retry, the same
+            # familiar "try again" pattern as any other app that needs
+            # one piece of required setup info before it can run.
+            logger.warning("No device name provided -- exiting so the app can be relaunched to retry")
+            return
+
     splash = show_splash("T-Tech Studio", "Starting...")
 
     window_ref: dict = {}
@@ -104,7 +130,18 @@ def main() -> None:
         return
 
     try:
-        flask_app, scheduler, reports_scheduler, _log_path = lifecycle.bootstrap_app("production")
+        flask_app, scheduler, reports_scheduler, _log_path, identity = lifecycle.bootstrap_app(
+            "production", device_name=device_name
+        )
+        if flask_app is None:
+            # bootstrap_app() itself found no identity AND wasn't given
+            # a name either -- shouldn't be reachable given the prompt
+            # above already guarantees one of the two, but handled
+            # explicitly rather than letting a None flask_app crash
+            # further down with a confusing error.
+            logger.error("Startup aborted: no device identity available")
+            splash.close()
+            return
     except Exception:
         logger.exception("Startup failed")
         splash.close()

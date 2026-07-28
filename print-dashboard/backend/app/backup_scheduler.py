@@ -182,8 +182,15 @@ def size_is_reasonable(zip_path: str, previous_sizes: list[int]) -> bool:
     return size >= avg * 0.1
 
 
-def copy_into_subfolder(src_path: str, sync_root: str, subfolder: str) -> str:
+def copy_into_subfolder(src_path: str, sync_root: str, subfolder: str, device_subfolder: str | None = None) -> str:
+    """Copies src_path into sync_root/subfolder/, or sync_root/subfolder/
+    device_subfolder/ when device_subfolder is given -- e.g.
+    TTechStudio-Backups/OFFICE-PC-4F32/TTechStudio-backup-....zip, so
+    each device's own backups land in their own clearly-separated
+    folder rather than one shared pile every machine writes into."""
     dest_dir = os.path.join(sync_root, subfolder)
+    if device_subfolder:
+        dest_dir = os.path.join(dest_dir, device_subfolder)
     os.makedirs(dest_dir, exist_ok=True)
     dest_path = os.path.join(dest_dir, os.path.basename(src_path))
     shutil.copy2(src_path, dest_path)
@@ -207,6 +214,7 @@ class BackupScheduler:
         local_backup_dir: str,
         log_file_path: str | None,
         sync_fallback_dir: str,
+        device_id: str | None = None,
         on_result=None,
         check_interval_seconds: int = 30,
     ):
@@ -214,6 +222,17 @@ class BackupScheduler:
         self.local_backup_dir = local_backup_dir
         self.log_file_path = log_file_path
         self.sync_fallback_dir = sync_fallback_dir
+        # Cross-device backup/restore: which physical machine this
+        # scheduler instance is running on. Used to write this device's
+        # backups into their OWN subfolder inside the shared synced
+        # backup folder (TTechStudio-Backups/<device_id>/...) instead of
+        # one flat folder every device dumps into -- restore logic reads
+        # every device's subfolder separately rather than guessing which
+        # zip in a mixed pile came from which machine. None is accepted
+        # (falls back to the old flat-folder behavior) only for backward
+        # compatibility with any caller not yet passing a device id --
+        # main.py's real startup sequence always passes one.
+        self.device_id = device_id
         self.on_result = on_result  # optional callback(BackupResult) -- e.g. notify.py
         self.check_interval_seconds = check_interval_seconds
 
@@ -365,12 +384,12 @@ class BackupScheduler:
                 logger.warning(msg)
                 return BackupResult(ok=False, message=msg, zip_path=zip_path)
 
-            dest_path = copy_into_subfolder(zip_path, sync_folder, BACKUP_SUBFOLDER)
+            dest_path = copy_into_subfolder(zip_path, sync_folder, BACKUP_SUBFOLDER, device_subfolder=self.device_id)
             logger.info("Backup copied to synced folder: %s", dest_path)
 
             log_copy_path = None
             if self.log_file_path and os.path.exists(self.log_file_path):
-                log_copy_path = copy_into_subfolder(self.log_file_path, sync_folder, LOGS_SUBFOLDER)
+                log_copy_path = copy_into_subfolder(self.log_file_path, sync_folder, LOGS_SUBFOLDER, device_subfolder=self.device_id)
                 logger.info("Log file copied to synced folder: %s", log_copy_path)
 
             logger.info("Backup complete")
