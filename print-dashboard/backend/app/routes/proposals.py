@@ -6,25 +6,11 @@ from ..models import AuditLog, Invoice, Job, Proposal
 from ..services.jobs import ACTIVE_STATUS, create_invoice_for_job, serialize_job
 from ..services.invoices import serialize_invoice
 from ..services.proposals import apply_proposal_line_items, serialize_proposal
+from ..services.ref_generator import next_proposal_ref, next_invoice_ref, next_job_ref
 from ..utils import parse_date
 from .common import apply_search, list_response
 
 bp = Blueprint("proposals", __name__)
-
-
-def next_proposal_ref():
-    last = Proposal.query.order_by(Proposal.id.desc()).first()
-    return f"PROP-{((last.id if last else 0) + 1):04d}"
-
-
-def next_invoice_ref():
-    last = Invoice.query.order_by(Invoice.id.desc()).first()
-    return f"INV-{((last.id if last else 0) + 1):04d}"
-
-
-def next_job_ref():
-    last = Job.query.order_by(Job.id.desc()).first()
-    return f"JOB-{((last.id if last else 0) + 1):04d}"
 
 
 @bp.get("")

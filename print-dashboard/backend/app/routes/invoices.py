@@ -5,15 +5,11 @@ from flask import Blueprint, jsonify, request
 from ..extensions import db
 from ..models import AuditLog, Invoice
 from ..services.invoices import apply_line_items, apply_payments, serialize_invoice, sync_invoice_amount, update_payment as update_invoice_payment
+from ..services.ref_generator import next_invoice_ref
 from ..utils import parse_date
 from .common import apply_search, list_response
 
 bp = Blueprint("invoices", __name__)
-
-
-def next_invoice_ref():
-    last = Invoice.query.order_by(Invoice.id.desc()).first()
-    return f"INV-{((last.id if last else 0) + 1):04d}"
 
 
 @bp.get("")

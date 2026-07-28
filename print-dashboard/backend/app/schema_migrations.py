@@ -430,6 +430,52 @@ def ensure_material_transaction_output_schema():
     return changed
 
 
+def ensure_device_ownership_schema():
+    """Adds device_id to every table whose model inherits TimestampMixin
+    (see models.py -- device_id lives on the mixin itself, not repeated
+    per-class), for cross-device backup/restore merge logic.
+
+    Table list below was generated from db.metadata.tables directly
+    (every table with a device_id column in the ORM), not hand-typed --
+    see the migration's own dev notes for how to regenerate it if a new
+    TimestampMixin table is ever added and this list needs updating:
+
+        for name, table in db.metadata.tables.items():
+            if 'device_id' in table.columns: print(name)
+
+    Existing rows get device_id=NULL (not backfilled with a guess --
+    see models.py's TimestampMixin comment for why an honest "unknown"
+    beats a fabricated device for old data). New/edited rows going
+    forward are stamped automatically by
+    services/device_context.py's before_flush listener.
+    """
+    changed = []
+    tables_needing_device_id = [
+        "clients", "vendors", "capabilities", "production_machines",
+        "pricing_items", "materials", "material_transactions", "jobs",
+        "invoices", "invoice_line_items", "payments", "proposals",
+        "proposal_line_items", "expense_categories", "expenses",
+        "advances", "export_jobs", "staff", "sales", "petty_cash_entries",
+    ]
+    existing_tables = _tables()
+
+    for table_name in tables_needing_device_id:
+        if table_name not in existing_tables:
+            # Table itself doesn't exist yet on this database (very old
+            # dev DB predating that feature, or a fresh DB about to be
+            # created by db.create_all() -- either way, nothing to ALTER
+            # here; db.create_all() will include device_id from the ORM
+            # model directly when it creates the table for the first time.
+            continue
+        columns = _columns(table_name)
+        if "device_id" not in columns:
+            _add_column(table_name, "device_id VARCHAR(40)")
+            changed.append(f"{table_name}.device_id")
+
+    db.session.commit()
+    return changed
+
+
 def run_full_upgrade():
     """Single entry point covering every migration added so far, in order.
     Call this once (e.g. from a `flask shell` one-liner or a small script)
@@ -464,6 +510,7 @@ def run_full_upgrade():
     machine_capability_schema = ensure_machine_capability_schema()
     default_capabilities = ensure_default_capabilities_seed()
     material_transaction_output = ensure_material_transaction_output_schema()
+    device_ownership = ensure_device_ownership_schema()
     normalized = normalize_legacy_job_statuses()
     backfilled = backfill_invoice_jobs()
     return {
@@ -476,6 +523,7 @@ def run_full_upgrade():
         "machine_capability_schema_changes": machine_capability_schema,
         "default_capabilities_seed": default_capabilities,
         "material_transaction_output_schema_changes": material_transaction_output,
+        "device_ownership_schema_changes": device_ownership,
         "job_invoice_flow": {
             "schema_changes": job_invoice_schema,
             "statuses_normalized": normalized,

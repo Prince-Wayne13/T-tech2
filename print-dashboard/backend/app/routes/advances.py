@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request
 
 from ..extensions import db
 from ..models import Advance, AuditLog
+from ..services.ref_generator import next_advance_ref
 from ..utils import parse_date
 from .common import apply_search, list_response
 
@@ -16,11 +17,6 @@ def list_advances():
         query = query.filter(Advance.status == status.lower())
     query = apply_search(query, Advance, ["advance_ref", "recipient", "notes"])
     return jsonify(list_response(query.order_by(Advance.created_at.desc())))
-
-
-def next_advance_ref():
-    last = Advance.query.order_by(Advance.id.desc()).first()
-    return f"ADV-{((last.id if last else 0) + 1):04d}"
 
 
 @bp.post("")

@@ -7,17 +7,13 @@ from uuid import uuid4
 from ..extensions import db
 from ..models import Expense, PettyCash
 from .invoices import decimal_money
+from .ref_generator import next_expense_ref
 
 PETTY_CASH_CATEGORY = "Petty Cash"
 
 
 def next_entry_ref():
     return f"PC-{uuid4().hex[:8].upper()}"
-
-
-def next_expense_ref():
-    last = Expense.query.order_by(Expense.id.desc()).first()
-    return f"EXP-{((last.id if last else 0) + 1):04d}"
 
 
 def petty_cash_balance():

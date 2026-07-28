@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, request
 from ..extensions import db
 from ..models import AuditLog, Expense, ExpenseCategory
 from ..services.expenses import sync_expense_status
+from ..services.ref_generator import next_expense_ref
 from ..utils import parse_date
 from .common import apply_search, list_response
 
@@ -19,11 +20,6 @@ def list_expense_categories():
     # is a simple lookup-table read, not tied to any individual Expense row.
     categories = ExpenseCategory.query.order_by(ExpenseCategory.name.asc()).all()
     return jsonify({"items": [category.to_dict() for category in categories]})
-
-
-def next_expense_ref():
-    last = Expense.query.order_by(Expense.id.desc()).first()
-    return f"EXP-{((last.id if last else 0) + 1):04d}"
 
 
 def serialize_expense(expense):

@@ -15,16 +15,12 @@ from ..services.jobs import (
 )
 from ..services.machines import IncompatibleMachineError
 from ..services.invoices import apply_line_items, serialize_invoice, sync_invoice_amount
+from ..services.ref_generator import next_job_ref, next_invoice_ref
 from ..services.sales import serialize_sale
 from ..utils import parse_date
 from .common import apply_search, list_response
 
 bp = Blueprint("jobs", __name__)
-
-
-def next_job_ref():
-    last = Job.query.order_by(Job.id.desc()).first()
-    return f"JOB-{((last.id if last else 0) + 1):04d}"
 
 
 @bp.get("")
@@ -142,13 +138,6 @@ def patch_job_progress(job_id):
     db.session.add(AuditLog(action=f"Updated progress for {job.job_ref}", entity_type="job", entity_id=job.id))
     db.session.commit()
     return jsonify(serialize_job(job))
-
-
-def next_invoice_ref():
-    from ..models import Invoice
-
-    last = Invoice.query.order_by(Invoice.id.desc()).first()
-    return f"INV-{((last.id if last else 0) + 1):04d}"
 
 
 def _payment_summary(invoice):

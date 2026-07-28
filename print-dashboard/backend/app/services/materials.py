@@ -16,14 +16,14 @@ from decimal import Decimal
 
 from ..models import Material, MaterialTransaction
 from .invoices import invoice_totals
+from .ref_generator import next_material_ref  # noqa: F401 -- re-exported so
+    # routes/materials.py's existing `from ..services.materials import
+    # next_material_ref` keeps working unchanged; the real, collision-safe
+    # implementation now lives in ref_generator.py alongside every other
+    # ref type, see that file's module docstring for why.
 from .reports import money
 
 USAGE_LOOKBACK_DAYS = 30
-
-
-def next_material_ref():
-    last = Material.query.order_by(Material.id.desc()).first()
-    return f"MAT-{((last.id if last else 0) + 1):04d}"
 
 
 def _qty(value):

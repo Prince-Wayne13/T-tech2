@@ -14,6 +14,20 @@ class TimestampMixin:
         onupdate=datetime.utcnow,
         nullable=False,
     )
+    # Cross-device backup/restore (Not Yet Built item, this pass): which
+    # physical machine last wrote this row. Set by the app layer (not a
+    # DB default) from app.device_identity's device_id for THIS machine
+    # -- see services/device_context.py for the single place that reads
+    # it and stamps it onto new/edited rows, so this column doesn't need
+    # touching in 20 separate service files by hand.
+    #
+    # Nullable on purpose: existing rows created before this column
+    # existed have no device_id (see schema_migrations.py's
+    # ensure_device_ownership_schema(), which ADDs this column without
+    # backfilling a guess for old data -- a guessed device is worse than
+    # an honest "unknown"). New rows always get a real value going
+    # forward.
+    device_id = db.Column(db.String(40), nullable=True, index=True)
 
 
 class SerializableMixin:
