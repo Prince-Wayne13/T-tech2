@@ -83,6 +83,57 @@ export default function Settings() {
 
   const [loadError, setLoadError] = useState(null);
 
+  // Backup / Reports-to-Drive status
+  const [backupStatus, setBackupStatus] = useState(null);
+  const [reportsStatus, setReportsStatus] = useState(null);
+  const [runningBackup, setRunningBackup] = useState(false);
+  const [sendingReports, setSendingReports] = useState(false);
+  const [backupActionMessage, setBackupActionMessage] = useState(null);
+  const [reportsActionMessage, setReportsActionMessage] = useState(null);
+
+  const loadBackupAndReportsStatus = async () => {
+    try {
+      const status = await api.backupStatus();
+      setBackupStatus(status);
+    } catch (error) {
+      console.error('Failed to load backup status:', error);
+    }
+    try {
+      const status = await api.reportsBackupStatus();
+      setReportsStatus(status);
+    } catch (error) {
+      console.error('Failed to load reports status:', error);
+    }
+  };
+
+  const handleRunBackupNow = async () => {
+    setRunningBackup(true);
+    setBackupActionMessage(null);
+    try {
+      const result = await api.runBackupNow();
+      setBackupActionMessage(result.message || (result.ok ? 'Backup completed.' : 'Backup failed.'));
+    } catch (error) {
+      setBackupActionMessage(error.message || 'Backup failed.');
+    } finally {
+      setRunningBackup(false);
+      loadBackupAndReportsStatus();
+    }
+  };
+
+  const handleSendReportsNow = async () => {
+    setSendingReports(true);
+    setReportsActionMessage(null);
+    try {
+      const result = await api.sendReportsNow();
+      setReportsActionMessage(result.message || (result.ok ? 'Reports sent to Drive.' : 'Reports send failed.'));
+    } catch (error) {
+      setReportsActionMessage(error.message || 'Reports send failed.');
+    } finally {
+      setSendingReports(false);
+      loadBackupAndReportsStatus();
+    }
+  };
+
   const loadPricing = async () => {
     setLoadingPricing(true);
     setLoadError(null);
@@ -100,6 +151,7 @@ export default function Settings() {
 
   useEffect(() => {
     loadPricing();
+    loadBackupAndReportsStatus();
   }, []);
 
   // Handlers
@@ -377,6 +429,73 @@ export default function Settings() {
               Display prices with VAT included
             </label>
           </div>
+        </div>
+      </div>
+
+      {/* Backups & Reports to Drive */}
+      <div className="card" style={{ marginBottom: '14px', borderTop: '2px solid var(--teal)' }}>
+        <div className="card-header" style={{ marginBottom: '10px' }}>
+          <h3 className="card-title">Backups & Reports to Drive</h3>
+          <span className="card-sub">Database backups run automatically; reports send weekly to Drive</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
+
+          {/* Database backup */}
+          <div style={{ border: '1px solid var(--border-faint)', borderRadius: '8px', padding: '14px' }}>
+            <div style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-body)', marginBottom: '6px' }}>
+              Database Backup
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+              {backupStatus ? backupStatus.status : 'Checking status…'}
+            </div>
+            <button
+              onClick={handleRunBackupNow}
+              disabled={runningBackup || (backupStatus && backupStatus.backup_in_progress)}
+              style={{
+                padding: '7px 14px', borderRadius: '6px', border: 'none',
+                background: (runningBackup || (backupStatus && backupStatus.backup_in_progress)) ? 'var(--border-faint)' : 'var(--primary)',
+                color: '#fff', fontSize: '10px', fontWeight: '600',
+                cursor: (runningBackup || (backupStatus && backupStatus.backup_in_progress)) ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {runningBackup ? 'Backing up…' : 'Backup Now'}
+            </button>
+            {backupActionMessage && (
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '8px' }}>{backupActionMessage}</div>
+            )}
+          </div>
+
+          {/* Weekly encrypted reports to Drive */}
+          <div style={{ border: '1px solid var(--border-faint)', borderRadius: '8px', padding: '14px' }}>
+            <div style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-body)', marginBottom: '6px' }}>
+              Weekly Reports to Drive (Encrypted)
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+              {reportsStatus
+                ? (reportsStatus.status === 'due'
+                    ? 'Due — ready to send'
+                    : reportsStatus.status === 'sent'
+                      ? `Sent — next due ${reportsStatus.next_due ? new Date(reportsStatus.next_due).toLocaleDateString() : ''}`
+                      : 'Inactive')
+                : 'Checking status…'}
+            </div>
+            <button
+              onClick={handleSendReportsNow}
+              disabled={sendingReports}
+              style={{
+                padding: '7px 14px', borderRadius: '6px', border: 'none',
+                background: sendingReports ? 'var(--border-faint)' : 'var(--teal)',
+                color: '#fff', fontSize: '10px', fontWeight: '600',
+                cursor: sendingReports ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {sendingReports ? 'Sending…' : 'Send Reports Now'}
+            </button>
+            {reportsActionMessage && (
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '8px' }}>{reportsActionMessage}</div>
+            )}
+          </div>
+
         </div>
       </div>
 

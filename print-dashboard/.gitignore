@@ -21,6 +21,11 @@ backend/**/__pycache__
 backend/.env
 *.pyc
 
+# Desktop app packaging (PyInstaller output from Step 4 of the build plan)
+backend/build
+backend/dist
+backend/*.spec
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

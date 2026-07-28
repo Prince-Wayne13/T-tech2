@@ -198,4 +198,8 @@ export const api = {
   analyticsMachineRevenue: (params = '') => request(`/reports/analytics/machine-category-revenue${params}`),
   analyticsQuantityProduced: () => request('/reports/analytics/quantity-produced'),
   analyticsJobThroughput: () => request('/reports/analytics/job-throughput'),
+  backupStatus: () => request('/backup/status'),
+  runBackupNow: () => request('/backup/run-now', { method: 'POST' }),
+  reportsBackupStatus: () => request('/reports-backup/status'),
+  sendReportsNow: () => request('/reports-backup/send-now', { method: 'POST' }),
 };

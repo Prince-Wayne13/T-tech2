@@ -3,6 +3,7 @@
 from .advances import bp as advances_bp
 from .analytics import bp as analytics_bp
 from .audit import bp as audit_bp
+from .backup_routes import bp as backup_bp
 from .clients import bp as clients_bp
 from .exports import bp as exports_bp
 from .expenses import bp as expenses_bp
@@ -13,8 +14,10 @@ from .materials import bp as materials_bp
 from .petty_cash import bp as petty_cash_bp
 from .proposals import bp as proposals_bp
 from .reports import bp as reports_bp
+from .reports_backup_routes import bp as reports_backup_bp
 from .sales import bp as sales_bp
 from .staff import bp as staff_bp
+from .system import bp as system_bp
 from .vendors import bp as vendors_bp
 
 
@@ -35,3 +38,6 @@ def register_blueprints(app):
     app.register_blueprint(staff_bp, url_prefix="/api/staff")
     app.register_blueprint(sales_bp, url_prefix="/api/sales")
     app.register_blueprint(petty_cash_bp, url_prefix="/api/petty-cash")
+    app.register_blueprint(backup_bp, url_prefix="/api/backup")
+    app.register_blueprint(reports_backup_bp, url_prefix="/api/reports-backup")
+    app.register_blueprint(system_bp, url_prefix="/api/system")
