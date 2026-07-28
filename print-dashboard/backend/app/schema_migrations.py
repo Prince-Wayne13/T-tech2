@@ -404,6 +404,32 @@ def upgrade_job_invoice_flow():
     }
 
 
+def ensure_material_transaction_output_schema():
+    """Adds MaterialTransaction.output_quantity/output_description.
+
+    The frontend (Materials.jsx's handleLogTransaction) has sent these two
+    fields on every 'usage' transaction all along, and create_material_
+    transaction() in routes/materials.py silently ignored them since the
+    columns never existed -- output was never actually recorded, even
+    though the UI collected it. This backfills the columns on an existing
+    database; db.create_all() alone only creates brand-new tables, it
+    doesn't ALTER an existing material_transactions table to add these.
+    """
+    changed = []
+    columns = _columns("material_transactions")
+
+    if "output_quantity" not in columns:
+        _add_column("material_transactions", "output_quantity NUMERIC(14, 3)")
+        changed.append("material_transactions.output_quantity")
+
+    if "output_description" not in columns:
+        _add_column("material_transactions", "output_description VARCHAR(120)")
+        changed.append("material_transactions.output_description")
+
+    db.session.commit()
+    return changed
+
+
 def run_full_upgrade():
     """Single entry point covering every migration added so far, in order.
     Call this once (e.g. from a `flask shell` one-liner or a small script)
@@ -437,6 +463,7 @@ def run_full_upgrade():
     # same ordering requirement documented above for prompt4/staff_assignment.
     machine_capability_schema = ensure_machine_capability_schema()
     default_capabilities = ensure_default_capabilities_seed()
+    material_transaction_output = ensure_material_transaction_output_schema()
     normalized = normalize_legacy_job_statuses()
     backfilled = backfill_invoice_jobs()
     return {
@@ -448,6 +475,7 @@ def run_full_upgrade():
         "payment_invoice_nullable_schema_changes": payment_invoice_nullable,
         "machine_capability_schema_changes": machine_capability_schema,
         "default_capabilities_seed": default_capabilities,
+        "material_transaction_output_schema_changes": material_transaction_output,
         "job_invoice_flow": {
             "schema_changes": job_invoice_schema,
             "statuses_normalized": normalized,

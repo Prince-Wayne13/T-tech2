@@ -118,6 +118,17 @@ def main() -> None:
 
     import webview  # imported here so a failed lifecycle bootstrap above never leaves a stray splash window
 
+    # pywebview blocks all file downloads by default (this setting
+    # defaults to False). Without this, every "Download PDF" button in
+    # the app -- invoices, proposals, exports, reports -- silently does
+    # nothing: the click handler runs, the PDF is generated in memory
+    # correctly, but pywebview's embedded browser refuses to hand the
+    # resulting file off to Windows' normal save-file behavior. This is
+    # why downloads work fine when testing the same built frontend in a
+    # real browser tab (Chrome/Edge don't block this) but appeared
+    # completely broken only in the packaged desktop app.
+    webview.settings["ALLOW_DOWNLOADS"] = True
+
     window = webview.create_window(
         "T-Tech Studio",
         url=f"http://{HOST}:{port}/",

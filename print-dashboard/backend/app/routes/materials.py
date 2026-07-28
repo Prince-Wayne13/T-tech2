@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request
 
 from ..extensions import db
 from ..models import AuditLog, Material, MaterialTransaction
-from ..services.materials import next_material_ref, serialize_material, serialize_transaction
+from ..services.materials import material_reconciliation, next_material_ref, serialize_material, serialize_transaction
 from ..utils import parse_date
 from .common import apply_search, list_response
 
@@ -127,8 +127,8 @@ def create_material_transaction(material_id):
     material = Material.query.get_or_404(material_id)
     data = request.get_json() or {}
     transaction_type = data.get("transaction_type")
-    if transaction_type not in {"purchase", "usage", "adjustment"}:
-        return jsonify({"error": "transaction_type must be 'purchase', 'usage', or 'adjustment'"}), 400
+    if transaction_type not in {"purchase", "usage", "adjustment", "count"}:
+        return jsonify({"error": "transaction_type must be 'purchase', 'usage', 'adjustment', or 'count'"}), 400
     quantity = data.get("quantity")
     if quantity is None:
         return jsonify({"error": "quantity is required"}), 400
@@ -140,6 +140,8 @@ def create_material_transaction(material_id):
         unit_cost=data.get("unit_cost"),
         transaction_date=parse_date(data.get("transaction_date")) or None,
         job_id=data.get("job_id"),
+        output_quantity=data.get("output_quantity"),
+        output_description=data.get("output_description"),
         notes=data.get("notes"),
     )
     db.session.add(txn)
@@ -151,6 +153,52 @@ def create_material_transaction(material_id):
     ))
     db.session.commit()
     return jsonify(serialize_transaction(txn)), 201
+
+
+@bp.put("/transactions/<int:transaction_id>")
+def update_material_transaction(transaction_id):
+    """Was entirely missing -- Materials.jsx's edit-transaction flow
+    (handleLogTransaction, when editTxn is set) has always called this
+    exact address, and got a 405 every time since no route existed here at
+    all. Mirrors create_material_transaction's field handling, but leaves
+    transaction_type and material_id fixed (an edit corrects details of an
+    existing entry, it doesn't move it to a different material or turn a
+    purchase into a usage after the fact)."""
+    txn = MaterialTransaction.query.get_or_404(transaction_id)
+    data = request.get_json() or {}
+
+    if "quantity" in data and data["quantity"] is not None:
+        txn.quantity = data["quantity"]
+    if "unit_cost" in data:
+        txn.unit_cost = data["unit_cost"]
+    if "transaction_date" in data:
+        txn.transaction_date = parse_date(data.get("transaction_date")) or txn.transaction_date
+    if "job_id" in data:
+        txn.job_id = data["job_id"]
+    if "output_quantity" in data:
+        txn.output_quantity = data["output_quantity"]
+    if "output_description" in data:
+        txn.output_description = data["output_description"]
+    if "notes" in data:
+        txn.notes = data["notes"]
+
+    db.session.add(AuditLog(
+        action=f"Updated {txn.transaction_type} transaction for material #{txn.material_id}",
+        entity_type="material_transaction",
+        entity_id=txn.id,
+    ))
+    db.session.commit()
+    return jsonify(serialize_transaction(txn))
+
+
+@bp.get("/<int:material_id>/reconciliation")
+def material_reconciliation_route(material_id):
+    """Was entirely missing -- MaterialDetail's 'Physical Count Check'
+    stat card has always called this exact address (api.materialReconciliation),
+    and it fell through to the catch-all frontend route instead of a real
+    API response every time."""
+    Material.query.get_or_404(material_id)
+    return jsonify(material_reconciliation(material_id))
 
 
 @bp.delete("/transactions/<int:transaction_id>")

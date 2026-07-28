@@ -181,6 +181,13 @@ class MaterialTransaction(TimestampMixin, SerializableMixin, db.Model):
     # Vendor.balance was a stale, separately-written duplicate (see
     # services/vendors.py's comment on that).
     job_id = db.Column(db.Integer, db.ForeignKey("jobs.id"), nullable=True, index=True)
+    # What a "usage" row's material consumption actually became -- e.g.
+    # 40 stickers cut from 2m of vinyl. Populated by usage rows only; left
+    # null for purchase/adjustment/count rows, which don't produce output
+    # of their own. Read back by the Month-End Report's "Output Produced"
+    # column (services/materials.py's build_materials_reconciliation()).
+    output_quantity = db.Column(db.Numeric(14, 3), nullable=True)
+    output_description = db.Column(db.String(120), nullable=True)
     notes = db.Column(db.Text)
 
     material = db.relationship("Material", backref="transactions")
