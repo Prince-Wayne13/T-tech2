@@ -36,7 +36,9 @@ Endpoint:
 
 from __future__ import annotations
 
-from flask import Blueprint, current_app, jsonify
+import os
+
+from flask import Blueprint, current_app, jsonify, request
 
 bp = Blueprint("backup", __name__)
 
@@ -96,3 +98,84 @@ def status():
         "consecutive_failures": scheduler._consecutive_failures,
         "backup_in_progress": scheduler._lock.locked(),
     })
+
+
+@bp.route("/available", methods=["GET"])
+def available():
+    """Lists every backup found across every device's subfolder under
+    the shared synced backup folder. Read-only -- does not touch the
+    live database. First slice of the restore engine: discovery before
+    any merge/swap-into-place logic exists.
+    """
+    from ..restore_inspector import list_available_backups
+
+    scheduler = _get_scheduler()
+    entries = list_available_backups(scheduler.sync_fallback_dir)
+
+    return jsonify({
+        "backups": [entry.to_dict() for entry in entries],
+        "count": len(entries),
+    })
+
+
+@bp.route("/preview", methods=["GET"])
+def preview():
+    """Verifies and inspects a single backup zip (row counts per table,
+    most recent updated_at) without restoring it. Takes the same
+    full_path returned by /available's entries, passed as a query
+    param, e.g. /api/backup/preview?path=<full_path>.
+    """
+    from ..restore_inspector import preview_backup
+
+    zip_path = request.args.get("path")
+    if not zip_path:
+        return jsonify({"ok": False, "message": "Missing required 'path' query parameter."}), 400
+
+    if not zip_path.lower().endswith(".zip") or not os.path.isfile(zip_path):
+        return jsonify({"ok": False, "message": "File not found or not a .zip file."}), 404
+
+    result = preview_backup(zip_path)
+    return jsonify(result.to_dict()), (200 if result.ok else 422)
+
+
+@bp.route("/merge-preview", methods=["GET"])
+def merge_preview():
+    """Read-only dry run comparing two backup zips and reporting what a
+    merge WOULD do -- adds nothing, changes nothing, writes nothing.
+    Takes two full_path values (from /available's entries):
+
+        /api/backup/merge-preview?path_a=<...>&path_b=<...>
+
+    path_a is conventionally "this device's" backup and path_b the
+    other device's, but the comparison itself is symmetric -- either
+    side can legitimately win a given row depending on which is newer.
+
+    See app/merge_preview.py's module docstring for which tables are
+    covered so far and why (ref-keyed vs name-keyed vs the still-open
+    weak-key case for staff) -- not all 20 device_id tables are
+    reasoned through yet, so tables outside that list simply won't
+    appear in the report.
+    """
+    from ..merge_preview import preview_merge
+
+    path_a = request.args.get("path_a")
+    path_b = request.args.get("path_b")
+    if not path_a or not path_b:
+        return jsonify({
+            "ok": False,
+            "message": "Both 'path_a' and 'path_b' query parameters are required.",
+        }), 400
+
+    for label, path in (("path_a", path_a), ("path_b", path_b)):
+        if not path.lower().endswith(".zip") or not os.path.isfile(path):
+            return jsonify({
+                "ok": False,
+                "message": f"{label}: file not found or not a .zip file.",
+            }), 404
+
+    try:
+        result = preview_merge(path_a, path_b)
+    except Exception as e:  # noqa: BLE001 -- surfaced to the caller, not swallowed
+        return jsonify({"ok": False, "message": f"Could not compare backups: {e}"}), 422
+
+    return jsonify({"ok": True, **result})
