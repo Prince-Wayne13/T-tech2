@@ -200,6 +200,15 @@ export const api = {
   analyticsJobThroughput: () => request('/reports/analytics/job-throughput'),
   backupStatus: () => request('/backup/status'),
   runBackupNow: () => request('/backup/run-now', { method: 'POST' }),
+  deviceIdentity: () => request('/system/device-identity'),
+  availableBackups: () => request('/backup/available'),
+  mergePreview: (pathA, pathB) =>
+    request(`/backup/merge-preview?path_a=${encodeURIComponent(pathA)}&path_b=${encodeURIComponent(pathB)}`),
+  mergeApply: (pathB, dryRun = false) =>
+    request('/backup/merge-apply', {
+      method: 'POST',
+      body: JSON.stringify({ path_b: pathB, dry_run: dryRun }),
+    }),
   reportsBackupStatus: () => request('/reports-backup/status'),
   sendReportsNow: () => request('/reports-backup/send-now', { method: 'POST' }),
 };

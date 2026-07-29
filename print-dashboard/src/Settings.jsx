@@ -91,6 +91,65 @@ export default function Settings() {
   const [backupActionMessage, setBackupActionMessage] = useState(null);
   const [reportsActionMessage, setReportsActionMessage] = useState(null);
 
+  // Sync with another device
+  const [thisDeviceId, setThisDeviceId] = useState(null);
+  const [otherDevices, setOtherDevices] = useState([]);
+  const [loadingDevices, setLoadingDevices] = useState(true);
+  const [checkingDeviceId, setCheckingDeviceId] = useState(null);
+  const [syncPreview, setSyncPreview] = useState(null);
+  const [applyingDeviceId, setApplyingDeviceId] = useState(null);
+  const [syncMessage, setSyncMessage] = useState(null);
+
+  const loadSyncDevices = async () => {
+    setLoadingDevices(true);
+    try {
+      const identity = await api.deviceIdentity();
+      setThisDeviceId(identity.device_id);
+      const { backups } = await api.availableBackups();
+      const others = (backups || []).filter((b) => b.device_id !== identity.device_id);
+      setOtherDevices(others);
+    } catch (error) {
+      setSyncMessage(error.message || 'Could not check for other devices.');
+    } finally {
+      setLoadingDevices(false);
+    }
+  };
+
+  const handlePreviewSync = async (otherBackup) => {
+    setSyncPreview(null);
+    setSyncMessage(null);
+    setCheckingDeviceId(otherBackup.device_id);
+    try {
+      const thisDeviceBackup = otherDevices.length >= 0
+        ? (await api.availableBackups()).backups.find((b) => b.device_id === thisDeviceId)
+        : null;
+      if (!thisDeviceBackup) {
+        setSyncMessage('This device has no backup yet — run "Backup Now" above first.');
+        return;
+      }
+      const result = await api.mergePreview(thisDeviceBackup.full_path, otherBackup.full_path);
+      setSyncPreview({ ...result, otherBackup });
+    } catch (error) {
+      setSyncMessage(error.message || 'Could not compare with that device.');
+    } finally {
+      setCheckingDeviceId(null);
+    }
+  };
+
+  const handleApplySync = async (otherBackup) => {
+    setApplyingDeviceId(otherBackup.device_id);
+    setSyncMessage(null);
+    try {
+      const result = await api.mergeApply(otherBackup.full_path, false);
+      setSyncMessage(result.ok ? 'Sync applied successfully.' : (result.message || 'Sync failed.'));
+      setSyncPreview(null);
+    } catch (error) {
+      setSyncMessage(error.message || 'Sync failed.');
+    } finally {
+      setApplyingDeviceId(null);
+    }
+  };
+
   const loadBackupAndReportsStatus = async () => {
     try {
       const status = await api.backupStatus();
@@ -152,6 +211,7 @@ export default function Settings() {
   useEffect(() => {
     loadPricing();
     loadBackupAndReportsStatus();
+    loadSyncDevices();
   }, []);
 
   // Handlers
@@ -430,6 +490,78 @@ export default function Settings() {
             </label>
           </div>
         </div>
+      </div>
+
+      {/* Sync with Another Device */}
+      <div className="card" style={{ marginBottom: '14px', borderTop: '2px solid var(--teal)' }}>
+        <div className="card-header" style={{ marginBottom: '10px' }}>
+          <h3 className="card-title">Sync with Another Device</h3>
+          <span className="card-sub">Bring in machines, materials, vendors, and staff from another device's latest backup</span>
+        </div>
+
+        {loadingDevices ? (
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Checking for other devices…</div>
+        ) : otherDevices.length === 0 ? (
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+            No other device's backup was found yet in the shared backup folder.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '10px' }}>
+            {otherDevices.map((device) => (
+              <div key={device.device_id} style={{ border: '1px solid var(--border-faint)', borderRadius: '8px', padding: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-body)' }}>
+                      {device.device_name || device.device_id}
+                    </div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                      Last backup: {device.updated_at ? new Date(device.updated_at).toLocaleString() : 'unknown'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => handlePreviewSync(device)}
+                      disabled={checkingDeviceId === device.device_id}
+                      style={{
+                        padding: '7px 14px', borderRadius: '6px', border: '1px solid var(--border-faint)',
+                        background: 'transparent', color: 'var(--text-body)', fontSize: '10px', fontWeight: '600',
+                        cursor: checkingDeviceId === device.device_id ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {checkingDeviceId === device.device_id ? 'Checking…' : 'Preview Sync'}
+                    </button>
+                    <button
+                      onClick={() => handleApplySync(device)}
+                      disabled={applyingDeviceId === device.device_id}
+                      style={{
+                        padding: '7px 14px', borderRadius: '6px', border: 'none',
+                        background: applyingDeviceId === device.device_id ? 'var(--border-faint)' : 'var(--primary)',
+                        color: '#fff', fontSize: '10px', fontWeight: '600',
+                        cursor: applyingDeviceId === device.device_id ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {applyingDeviceId === device.device_id ? 'Applying…' : 'Apply Sync'}
+                    </button>
+                  </div>
+                </div>
+
+                {syncPreview && syncPreview.otherBackup && syncPreview.otherBackup.device_id === device.device_id && (
+                  <div style={{ marginTop: '10px', fontSize: '10px', color: 'var(--text-body)', background: 'var(--bg-subtle, #f7f7f7)', borderRadius: '6px', padding: '10px' }}>
+                    {Object.entries(syncPreview).filter(([key]) => key !== 'ok' && key !== 'otherBackup').map(([table, summary]) => (
+                      <div key={table} style={{ marginBottom: '4px' }}>
+                        <strong>{table}:</strong> {JSON.stringify(summary)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {syncMessage && (
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '10px' }}>{syncMessage}</div>
+        )}
       </div>
 
       {/* Backups & Reports to Drive */}
