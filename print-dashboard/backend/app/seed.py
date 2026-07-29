@@ -1,6 +1,7 @@
 # path: backend/app/seed.py
 
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 import random
 
 from .extensions import db
@@ -13,6 +14,8 @@ from .models import (
     ExportJob,
     Invoice,
     Job,
+    Material,
+    MaterialTransaction,
     Payment,
     PettyCash,
     PricingItem,
@@ -114,6 +117,8 @@ def seed_mock_data(reset=False):
         ProductionMachine(machine_ref="MCH-UVDTF-01", name="UV DTF Printer", category="UV DTF", capability="Pens, key holders, labels, hard-surface branding and gift items", image_path="/machines/uv-dtf.svg"),
         ProductionMachine(machine_ref="MCH-EMB-01", name="Embroidery Machine", category="Embroidery", capability="Fabric embroidery and branded apparel", status="active", image_path="/machines/embroidery.svg", notes="Activated: real embroidery pricing now available (logo, caps, front chest, cotton carrier bag, fishing jacket)."),
         ProductionMachine(machine_ref="MCH-SWT-01", name="Automatic Sweater Machine", category="Apparel", capability="Future sweater production automation", status="planned", image_path="/machines/sweater.svg", notes="Planned future machine."),
+        ProductionMachine(machine_ref="MCH-PVC-01", name="Pebble Evolis Card Printer", category="PVC Cards", capability="PVC ID cards and card printing", image_path="/machines/pvc-card.svg"),
+        ProductionMachine(machine_ref="MCH-DIGI-01", name="Digital Printer", category="Digital Print", capability="Books, magazines, calendars and other digital print items", image_path="/machines/digital-printer.svg"),
     ]
     db.session.add_all(machines)
     db.session.flush()
@@ -167,6 +172,10 @@ def seed_mock_data(reset=False):
         PricingItem(code="EMB-CAP", name="Embroidery caps (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="cap", price=5000, cost_estimate=2100),
         PricingItem(code="EMB-FRONT-CHEST", name="Embroidery front chest (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="piece", price=8000, cost_estimate=3400),
         PricingItem(code="EMB-JACKET", name="Embroidery fishing jacket (price list)", category="Embroidery", machine_id=machine_by_ref["MCH-EMB-01"].id, unit="jacket", price=12000, cost_estimate=5200),
+        PricingItem(code="PVC-CARD", name="PVC card printing (price not yet set)", category="PVC Cards", machine_id=machine_by_ref["MCH-PVC-01"].id, unit="card", price=0, cost_estimate=0),
+        PricingItem(code="DIGI-BOOK", name="Book printing (price not yet set)", category="Digital Print", machine_id=machine_by_ref["MCH-DIGI-01"].id, unit="book", price=0, cost_estimate=0),
+        PricingItem(code="DIGI-MAGAZINE", name="Magazine printing (price not yet set)", category="Digital Print", machine_id=machine_by_ref["MCH-DIGI-01"].id, unit="magazine", price=0, cost_estimate=0),
+        PricingItem(code="DIGI-CALENDAR", name="Calendar printing (price not yet set)", category="Digital Print", machine_id=machine_by_ref["MCH-DIGI-01"].id, unit="calendar", price=0, cost_estimate=0),
     ]
     db.session.add_all(pricing_items)
     db.session.flush()
@@ -839,6 +848,138 @@ def seed_mock_data(reset=False):
     jobs.append(loyal_job)
     sales.append(loyal_sale)
 
+    # ── MATERIALS ────────────────────────────────────────────────────────
+    materials = [
+        Material(material_ref="MAT-0001", name="PVC Banner", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=4200, reorder_point=40, notes="Standard outdoor banner stock."),
+        Material(material_ref="MAT-0002", name="Vinyl Sticker", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=5800, reorder_point=30, notes="Self-adhesive vinyl for stickers and general cut vinyl."),
+        Material(material_ref="MAT-0003", name="Large Format Ink", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=32000, reorder_point=8, notes="CMYK ink set for the large format printer, shared across banner/sticker jobs."),
+        Material(material_ref="MAT-0004", name="Grayback Banner", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=3800, reorder_point=30, notes="Grayback banner stock."),
+        Material(material_ref="MAT-0005", name="Contra Vision", category="Large format ink", machine_id=machine_by_ref["MCH-LF-01"].id, vendor_id=vendor_by_name["FlexMaster Media"].id, unit="sqm", unit_cost=6500, reorder_point=20, notes="Perforated window vision film."),
+        Material(material_ref="MAT-0006", name="DTF Film", category="Large format ink", machine_id=machine_by_ref["MCH-DTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="m", unit_cost=8500, reorder_point=20, notes="DTF transfer film roll."),
+        Material(material_ref="MAT-0007", name="DTF Powder", category="Large format ink", machine_id=machine_by_ref["MCH-DTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="kg", unit_cost=15500, reorder_point=5, notes="Hot-melt adhesive powder for DTF transfers."),
+        Material(material_ref="MAT-0008", name="Digital Printer Ink", category="Large format ink", machine_id=machine_by_ref["MCH-DIGI-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=28000, reorder_point=8, notes="Ink for the digital printer (books, magazines, calendars)."),
+        Material(material_ref="MAT-0009", name="Digital Printer Paper", category="Paper & card stock", machine_id=machine_by_ref["MCH-DIGI-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="ream", unit_cost=17500, reorder_point=15, notes="Paper stock for the digital printer."),
+        Material(material_ref="MAT-0010", name="Staples", category="Paper & card stock", machine_id=machine_by_ref["MCH-BIND-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="box", unit_cost=3200, reorder_point=10, notes="Staples for binding/finishing."),
+        Material(material_ref="MAT-0011", name="UV DTF Film", category="Large format ink", machine_id=machine_by_ref["MCH-UVDTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="m", unit_cost=9500, reorder_point=15, notes="UV DTF transfer film roll."),
+        Material(material_ref="MAT-0012", name="UV DTF Ink", category="Large format ink", machine_id=machine_by_ref["MCH-UVDTF-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=34000, reorder_point=6, notes="Ink set for the UV DTF printer."),
+        Material(material_ref="MAT-0013", name="Pebble Ribbon", category="Large format ink", machine_id=machine_by_ref["MCH-PVC-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="roll", unit_cost=22000, reorder_point=5, notes="Ribbon for the Pebble/Evolis card printer."),
+        Material(material_ref="MAT-0014", name="PVC Cards", category="Paper & card stock", machine_id=machine_by_ref["MCH-PVC-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="card", unit_cost=450, reorder_point=100, notes="Blank PVC cards for the Pebble/Evolis card printer."),
+        Material(material_ref="MAT-0015", name="Konica Minolta Paper", category="Paper & card stock", machine_id=machine_by_ref["MCH-KM-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="ream", unit_cost=18500, reorder_point=15, notes="Paper stock for the Konica Minolta press (calendars, books, normal printing)."),
+        Material(material_ref="MAT-0016", name="Konica Minolta Ink", category="Large format ink", machine_id=machine_by_ref["MCH-KM-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=30000, reorder_point=8, notes="Ink/toner for the Konica Minolta press."),
+        Material(material_ref="MAT-0017", name="Sublimation Paper", category="Paper & card stock", machine_id=machine_by_ref["MCH-SUB-01"].id, vendor_id=vendor_by_name["Paperline Supplies"].id, unit="ream", unit_cost=12500, reorder_point=15, notes="Transfer paper for the sublimation printer."),
+        Material(material_ref="MAT-0018", name="Sublimation Ink", category="Large format ink", machine_id=machine_by_ref["MCH-SUB-01"].id, vendor_id=vendor_by_name["InkPro Malawi"].id, unit="L", unit_cost=27000, reorder_point=6, notes="Ink set for the sublimation printer (mug cups)."),
+    ]
+    db.session.add_all(materials)
+    db.session.flush()
+
+    # Jobs whose machine/category naturally consumes each material, so usage
+    # rows link to a real Job (and therefore a real Invoice) rather than
+    # floating unattributed - this is what lets "Revenue Generated" on the
+    # Materials directory card resolve to a non-zero figure.
+    jobs_by_machine_ref = {}
+    for job in jobs:
+        jobs_by_machine_ref.setdefault(job.machine_id, []).append(job)
+    machine_ref_by_id = {machine.id: ref for ref, machine in machine_by_ref.items()}
+
+    material_transactions = []
+
+    def month_starts(from_date, to_date):
+        cursor = date(from_date.year, from_date.month, 1)
+        out = []
+        while cursor <= to_date:
+            out.append(cursor)
+            nxt = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+            cursor = nxt
+        return out
+
+    all_months = month_starts(start_date, today)
+    current_month_start = date(today.year, today.month, 1)
+
+    for material in materials:
+        candidate_jobs = [job for job in jobs_by_machine_ref.get(material.machine_id, []) if job.status != "cancelled"]
+        on_hand_running = Decimal("0")
+        for i, m_start in enumerate(all_months):
+            m_end = min((m_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1), today)
+            is_current_month = m_start == current_month_start
+
+            # Purchase early in the month - restock roughly what the month is
+            # expected to consume plus a buffer, so on_hand stays positive and
+            # "days remaining" projections are meaningful rather than trivially
+            # zero.
+            purchase_qty = Decimal(str(random.randint(40, 90))) if material.unit in ("sqm", "ream") else Decimal(str(random.randint(3, 10)))
+            purchase_date = min(m_start + timedelta(days=random.randint(1, 4)), today)
+            material_transactions.append(MaterialTransaction(
+                material_id=material.id, transaction_type="purchase", quantity=purchase_qty,
+                unit_cost=material.unit_cost, transaction_date=purchase_date,
+                notes=f"Restock from {material.vendor.name}" if material.vendor else "Restock",
+            ))
+            on_hand_running += purchase_qty
+
+            # Usage rows: one per candidate job that actually falls in this
+            # month, each with an output_quantity/description - this is the
+            # literal "from this much vinyl, made this much stickers" figure.
+            month_jobs = [job for job in candidate_jobs if job.created_at and m_start <= job.created_at.date() <= m_end]
+            for job in month_jobs[:4]:  # cap per month so on_hand doesn't run negative on a busy month
+                usage_qty = Decimal(str(round(random.uniform(1.5, 6.0), 2))) if material.unit in ("sqm",) else Decimal(str(random.randint(1, 3))) if material.unit in ("ream", "kg", "L") else Decimal(str(random.randint(5, 20)))
+                if usage_qty > on_hand_running:
+                    continue
+                output_qty = job.total_count or job.copies or 0
+                job_machine_ref = machine_ref_by_id.get(job.machine_id)
+                output_label = {
+                    "MCH-LF-01": "sqm of banners/stickers produced",
+                    "MCH-KM-01": "cards/books/calendars produced",
+                    "MCH-DIGI-01": "books/magazines/calendars produced",
+                    "MCH-SUB-01": "mug cups produced",
+                    "MCH-DTF-01": "garments produced",
+                    "MCH-UVDTF-01": "units produced",
+                    "MCH-PVC-01": "PVC cards produced",
+                    "MCH-BIND-01": "books bound",
+                }.get(job_machine_ref, "units produced")
+                material_transactions.append(MaterialTransaction(
+                    material_id=material.id, transaction_type="usage", quantity=usage_qty,
+                    transaction_date=min(job.created_at.date() + timedelta(days=1), today),
+                    job_id=job.id,
+                    output_quantity=output_qty if output_qty else None,
+                    output_description=output_label if output_qty else None,
+                    notes=f"Used on {job.job_ref}",
+                ))
+                on_hand_running -= usage_qty
+
+            # Occasional waste/spoilage adjustment (negative) - misprints,
+            # cutting mistakes, damaged stock - roughly one every couple of
+            # months, small relative to purchase volume so it reads as
+            # realistic spoilage rather than dominating the ledger.
+            if i % 3 == 1 and on_hand_running > 5:
+                waste_qty = Decimal(str(round(random.uniform(0.5, 2.5), 2))) if material.unit == "sqm" else Decimal("1")
+                material_transactions.append(MaterialTransaction(
+                    material_id=material.id, transaction_type="adjustment", quantity=-waste_qty,
+                    transaction_date=min(m_start + timedelta(days=random.randint(10, 20)), today),
+                    notes="Spoilage - misprint/cutting waste",
+                ))
+                on_hand_running -= waste_qty
+
+            # Month-end physical count for every month except the current one
+            # (leaves this month genuinely "not yet counted", so the
+            # Month-End Report's unreconciled-count flag has something real
+            # to show rather than being permanently empty). Small deliberate
+            # variance most months, so the reconciliation table has a
+            # non-trivial count-variance case to display too, not just
+            # perfect matches.
+            if not is_current_month:
+                variance = Decimal(str(random.choice([0, 0, 0, 1, -1, 2]))) if material.unit != "sqm" else Decimal(str(random.choice([0, 0, 0.5, -0.75, 1.2])))
+                counted_qty = max(on_hand_running + variance, Decimal("0"))
+                material_transactions.append(MaterialTransaction(
+                    material_id=material.id, transaction_type="count", quantity=counted_qty,
+                    transaction_date=m_end,
+                    notes="Month-end physical count",
+                ))
+
+    for txn in material_transactions:
+        txn.created_at = as_datetime(txn.transaction_date)
+        txn.updated_at = as_datetime(txn.transaction_date)
+    db.session.add_all(material_transactions)
+    db.session.flush()
+
     # ── AUDIT LOGS ─────────────────────────────────────────────────────────
     audit_entries = [
         AuditLog(actor="system", action="Seeded professional print dashboard mock data", entity_type="system", created_at=as_datetime(start_date)),
@@ -867,4 +1008,6 @@ def seed_mock_data(reset=False):
         "sales": len(sales),
         "petty_cash_entries": len(petty_cash_entries),
         "expense_categories": len(expense_categories),
+        "materials": len(materials),
+        "material_transactions": len(material_transactions),
     }

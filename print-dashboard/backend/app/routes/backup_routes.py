@@ -179,3 +179,37 @@ def merge_preview():
         return jsonify({"ok": False, "message": f"Could not compare backups: {e}"}), 422
 
     return jsonify({"ok": True, **result})
+
+
+@bp.route("/merge-apply", methods=["POST"])
+def merge_apply_route():
+    """Actually applies a merge against another device's backup, for the
+    FK-clean table subset only (see app/merge_apply.py's module docstring
+    for exactly which tables and why). Always compares against a fresh
+    snapshot of the LIVE database, not any backup zip, so repeated calls
+    are safe/idempotent.
+
+    Body: {"path_b": "<full_path from /available>", "dry_run": true}
+
+    dry_run defaults to true -- callers must explicitly send
+    {"dry_run": false} to actually persist changes. This mirrors
+    merge_apply()'s own default for the same reason: a write this
+    consequential should never happen by omission.
+    """
+    from ..merge_apply import apply_merge
+
+    body = request.get_json(silent=True) or {}
+    path_b = body.get("path_b")
+    dry_run = body.get("dry_run", True)
+
+    if not path_b:
+        return jsonify({"ok": False, "message": "Missing required 'path_b' in request body."}), 400
+    if not path_b.lower().endswith(".zip") or not os.path.isfile(path_b):
+        return jsonify({"ok": False, "message": "path_b: file not found or not a .zip file."}), 404
+
+    try:
+        result = apply_merge(None, path_b, dry_run_only=dry_run)
+    except Exception as e:  # noqa: BLE001 -- surfaced to the caller, not swallowed
+        return jsonify({"ok": False, "message": f"Merge apply failed: {e}"}), 500
+
+    return jsonify(result), (200 if result["ok"] else 422)

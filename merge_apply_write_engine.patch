@@ -1,0 +1,363 @@
+diff --git a/print-dashboard/backend/app/merge_apply.py b/print-dashboard/backend/app/merge_apply.py
+new file mode 100644
+index 0000000..f19c4a6
+--- /dev/null
++++ b/print-dashboard/backend/app/merge_apply.py
+@@ -0,0 +1,315 @@
++"""
++merge_apply.py
++
++Third slice of the restore engine: the first piece that actually WRITES
++to the live database. Deliberately scoped to only the tables proven safe
++in merge_preview.py's docstring and this session's FK dependency mapping
++-- see SAFE_TO_WRITE_TABLES below. Every other device_id table is
++reported as "not merged" rather than silently skipped or guessed at.
++
++Why the scope is this narrow: most tables' foreign keys point at raw
++local `id` values on clients/vendors/staff/pricing_items, none of which
++have a proven cross-device matching key yet (see merge_preview.py and
++schema_migrations.py's device_id backfill notes). Inserting a row from
++another device using its raw client_id/vendor_id/staff_id/pricing_item_id
++verbatim would silently attach it to whichever row happens to share that
++same local id on THIS device -- real data corruption, not a cosmetic gap.
++`sales` was initially miscategorized as safe (only FKs to jobs) before
++catching that Sale.job_id is NOT NULL, so it transitively depends on
++`jobs`, which IS blocked -- corrected before this module was written, not
++after.
++
++Design:
++  - Uses merge_preview.preview_merge()'s OWN dry-run output as the single
++    source of truth for what to do -- this module does not recompute
++    row-matching logic itself, so the "what would happen" report you see
++    beforehand is exactly what gets applied, not a second implementation
++    that could silently disagree with it.
++  - Runs entirely inside one SQLAlchemy transaction (single commit at the
++    end, rollback on any error) -- a failure partway through must not
++    leave a half-merged database.
++  - add_from_b: copies the row's scalar columns from B's backup into a
++    brand-new row on this device (own id, own device_id preserved as
++    whatever B originally recorded -- NOT reassigned to this device,
++    since the record legitimately originated elsewhere).
++  - b_wins_update: overwrites this device's matching row's scalar columns
++    with B's values (again preserving B's own device_id/timestamps as the
++    authoritative record of who last touched it and when).
++  - a_wins_keep / identical: no write, by definition.
++  - Many-to-many relationships (ProductionMachine.capabilities) are NOT
++    touched by this pass -- both sides of that join reference raw local
++    ids on two safe-but-independently-numbered tables, and reconciling
++    that correctly needs its own pass, not a guess bundled into this one.
++"""
++
++from __future__ import annotations
++
++import sqlite3
++import tempfile
++import zipfile
++from dataclasses import dataclass, field
++from datetime import datetime
++
++from .extensions import db
++from .models import Advance, Capability, ExpenseCategory, ExportJob, ProductionMachine
++from .merge_preview import preview_merge
++
++# Table name -> (ORM model, natural key column, columns to copy verbatim).
++# Only scalar, non-FK-to-an-unmapped-table columns are copied. device_id,
++# created_at, updated_at are always carried over from the source row (see
++# module docstring) rather than reset to "now"/"this device", since the
++# whole point is preserving true origin and edit history across the merge.
++SAFE_TO_WRITE_TABLES = {
++    "production_machines": {
++        "model": ProductionMachine,
++        "key_column": "machine_ref",
++        "columns": [
++            "machine_ref", "name", "category", "capability", "status",
++            "available", "unavailable_reason", "image_path", "notes",
++            "device_id", "created_at", "updated_at",
++        ],
++    },
++    "capabilities": {
++        "model": Capability,
++        "key_column": "name",
++        "columns": ["name", "category", "notes", "device_id", "created_at", "updated_at"],
++    },
++    "expense_categories": {
++        "model": ExpenseCategory,
++        "key_column": "name",
++        "columns": ["name", "vendor_related", "notes", "device_id", "created_at", "updated_at"],
++    },
++    "advances": {
++        "model": Advance,
++        "key_column": "advance_ref",
++        "columns": [
++            "advance_ref", "recipient", "amount", "status", "issued_on",
++            "settled_on", "notes", "device_id", "created_at", "updated_at",
++        ],
++    },
++    "export_jobs": {
++        "model": ExportJob,
++        "key_column": "export_ref",
++        "columns": [
++            "export_ref", "name", "format", "records", "file_path",
++            "status", "generated_by", "notes", "device_id", "created_at", "updated_at",
++        ],
++    },
++}
++
++NOT_YET_SAFE_TABLES = [
++    "jobs", "invoices", "proposals", "expenses", "materials",
++    "invoice_line_items", "proposal_line_items", "material_transactions",
++    "petty_cash_entries", "sales", "clients", "vendors", "pricing_items", "staff",
++]
++
++
++@dataclass
++class TableApplyResult:
++    table: str
++    applied: bool
++    added: int = 0
++    updated: int = 0
++    skipped_reason: str | None = None
++    errors: list = field(default_factory=list)
++
++    def to_dict(self) -> dict:
++        return {
++            "table": self.table,
++            "applied": self.applied,
++            "added": self.added,
++            "updated": self.updated,
++            "skipped_reason": self.skipped_reason,
++            "errors": self.errors,
++        }
++
++
++def _extract_db(zip_path: str, tmpdir: str, expected_db_name: str = "app.db") -> str:
++    with zipfile.ZipFile(zip_path, "r") as zf:
++        zf.extractall(tmpdir)
++    return f"{tmpdir}/{expected_db_name}"
++
++
++# SQLite has no native DATETIME/BOOLEAN type -- raw sqlite3 reads them back
++# as plain strings/ints, but the ORM's DateTime/Boolean columns require
++# real Python datetime/bool objects on assignment or SQLAlchemy raises
++# (this was caught for real during this session's own test run, not
++# hypothetical -- every add_from_b/b_wins_update on a DateTime column
++# failed until this coercion was added). DATE_COLUMNS covers every
++# DateTime/Date column across SAFE_TO_WRITE_TABLES specifically; BOOL_COLUMNS
++# likewise for every Boolean column in that same table set.
++DATE_COLUMNS = {"created_at", "updated_at", "issued_on", "settled_on"}
++BOOL_COLUMNS = {"available", "vendor_related"}
++
++_DATETIME_FORMATS = ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
++
++
++def _coerce_value(column: str, value):
++    if value is None:
++        return None
++    if column in DATE_COLUMNS and isinstance(value, str):
++        for fmt in _DATETIME_FORMATS:
++            try:
++                parsed = datetime.strptime(value, fmt)
++                return parsed.date() if fmt == "%Y-%m-%d" else parsed
++            except ValueError:
++                continue
++        raise ValueError(f"Could not parse datetime value {value!r} for column {column!r}")
++    if column in BOOL_COLUMNS and isinstance(value, int):
++        return bool(value)
++    return value
++
++
++def _coerce_row(columns: list, row) -> dict:
++    return {col: _coerce_value(col, row[col]) for col in columns if col in row.keys()}
++
++
++def _snapshot_live_db_as_zip(tmpdir: str, expected_db_name: str = "app.db") -> str:
++    """Builds a zip of the LIVE database's current state, in the same
++    shape preview_merge() expects (a zip containing app.db). Used as the
++    "A" side of a merge instead of trusting a caller-supplied backup zip,
++    which can be stale -- e.g. from before an earlier merge already wrote
++    rows to the live DB. Using a stale A meant a second merge run would
++    re-report already-merged rows as add_from_b and crash on the resulting
++    UNIQUE constraint violation (caught for real during this session's own
++    idempotency check, not hypothetical).
++
++    Reuses backup_scheduler.safe_sqlite_snapshot for the actual file-level
++    copy (same tested locking/consistency handling backups already use),
++    rather than re-implementing sqlite snapshotting here.
++    """
++    from flask import current_app
++    from .backup_scheduler import safe_sqlite_snapshot
++
++    live_db_path = current_app.config["SQLALCHEMY_DATABASE_URI"].replace("sqlite:///", "")
++    snapshot_db_path = f"{tmpdir}/{expected_db_name}"
++    safe_sqlite_snapshot(live_db_path, snapshot_db_path)
++
++    zip_path = f"{tmpdir}/live_snapshot.zip"
++    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
++        zf.write(snapshot_db_path, arcname=expected_db_name)
++    return zip_path
++
++
++def apply_merge(zip_path_a: str | None, zip_path_b: str, dry_run_only: bool = True) -> dict:
++    """Runs preview_merge() first (always), then, for tables in
++    SAFE_TO_WRITE_TABLES only, actually applies add_from_b / b_wins_update
++    against the LIVE app database -- inside one transaction, committed
++    only if every safe-table write succeeds.
++
++    zip_path_a is accepted for compatibility with preview_merge()'s
++    signature but is NOT used to determine "this device's current state"
++    -- a fresh snapshot of the live database is taken instead, so the
++    comparison is always against what's actually in the database right
++    now, not whatever was last backed up. Pass None explicitly to make
++    that clear at call sites; a provided value is ignored with a note in
++    the returned dict rather than silently doing something different from
++    what the caller likely expected.
++
++    dry_run_only=True (the default) computes and returns exactly what
++    WOULD be written without calling db.session.commit() -- everything
++    is rolled back at the end regardless of success. Callers must pass
++    dry_run_only=False explicitly to actually persist changes; this is
++    deliberately not the default so a route/script can't apply real
++    writes by omission.
++
++    Tables outside SAFE_TO_WRITE_TABLES are always reported with
++    applied=False and a skipped_reason, never silently ignored.
++    """
++    with tempfile.TemporaryDirectory() as tmp_live:
++        live_zip_path = _snapshot_live_db_as_zip(tmp_live)
++        ignored_zip_path_a_note = (
++            f"zip_path_a ({zip_path_a!r}) was ignored -- apply_merge always "
++            "compares against a fresh snapshot of the live database, not a "
++            "caller-supplied backup, to avoid re-applying already-merged rows."
++        ) if zip_path_a else None
++
++        preview = preview_merge(live_zip_path, zip_path_b)
++        preview_by_table = {t["table"]: t for t in preview["tables"]}
++
++        results: list[TableApplyResult] = []
++
++        with tempfile.TemporaryDirectory() as tmp_b:
++            db_b_path = _extract_db(zip_path_b, tmp_b)
++            conn_b = sqlite3.connect(db_b_path)
++            conn_b.row_factory = sqlite3.Row
++
++            try:
++                for table in NOT_YET_SAFE_TABLES:
++                    if table in preview_by_table:
++                        results.append(TableApplyResult(
++                            table=table,
++                            applied=False,
++                            skipped_reason=(
++                                "Foreign key dependency on clients/vendors/staff/"
++                                "pricing_items not yet safe to write -- see "
++                                "merge_apply.py's module docstring."
++                            ),
++                        ))
++
++                for table, spec in SAFE_TO_WRITE_TABLES.items():
++                    if table not in preview_by_table:
++                        continue
++
++                    model = spec["model"]
++                    key_column = spec["key_column"]
++                    columns = spec["columns"]
++                    table_changes = preview_by_table[table]["changes"]
++
++                    result = TableApplyResult(table=table, applied=True)
++
++                    for change in table_changes:
++                        action = change["action"]
++                        if action in ("identical", "a_wins_keep"):
++                            continue
++
++                        key_value = change["key"]
++                        b_row = conn_b.execute(
++                            f"SELECT * FROM {table} WHERE {key_column} = ?", (key_value,)
++                        ).fetchone()
++                        if b_row is None:
++                            result.errors.append(
++                                f"{key_column}={key_value}: expected in B's backup but not found "
++                                "(backup may have changed between preview and apply)."
++                            )
++                            continue
++
++                        row_data = _coerce_row(columns, b_row)
++
++                        if action == "add_from_b":
++                            new_row = model(**row_data)
++                            db.session.add(new_row)
++                            result.added += 1
++
++                        elif action == "b_wins_update":
++                            existing = model.query.filter_by(**{key_column: key_value}).first()
++                            if existing is None:
++                                result.errors.append(
++                                    f"{key_column}={key_value}: expected an existing row on this "
++                                    "device for b_wins_update but none was found."
++                                )
++                                continue
++                            for col, value in row_data.items():
++                                if col == key_column:
++                                    continue
++                                setattr(existing, col, value)
++                            result.updated += 1
++
++                    results.append(result)
++
++                has_errors = any(r.errors for r in results)
++
++                if dry_run_only or has_errors:
++                    db.session.rollback()
++                else:
++                    db.session.commit()
++
++                return {
++                    "ok": not has_errors,
++                    "applied": (not dry_run_only) and (not has_errors),
++                    "dry_run_only": dry_run_only,
++                    "ignored_zip_path_a_note": ignored_zip_path_a_note,
++                    "tables": [r.to_dict() for r in results],
++                }
++            finally:
++                conn_b.close()
+diff --git a/print-dashboard/backend/app/routes/backup_routes.py b/print-dashboard/backend/app/routes/backup_routes.py
+index 3870e73..c244744 100644
+--- a/print-dashboard/backend/app/routes/backup_routes.py
++++ b/print-dashboard/backend/app/routes/backup_routes.py
+@@ -179,3 +179,37 @@ def merge_preview():
+         return jsonify({"ok": False, "message": f"Could not compare backups: {e}"}), 422
+ 
+     return jsonify({"ok": True, **result})
++
++
++@bp.route("/merge-apply", methods=["POST"])
++def merge_apply_route():
++    """Actually applies a merge against another device's backup, for the
++    FK-clean table subset only (see app/merge_apply.py's module docstring
++    for exactly which tables and why). Always compares against a fresh
++    snapshot of the LIVE database, not any backup zip, so repeated calls
++    are safe/idempotent.
++
++    Body: {"path_b": "<full_path from /available>", "dry_run": true}
++
++    dry_run defaults to true -- callers must explicitly send
++    {"dry_run": false} to actually persist changes. This mirrors
++    merge_apply()'s own default for the same reason: a write this
++    consequential should never happen by omission.
++    """
++    from ..merge_apply import apply_merge
++
++    body = request.get_json(silent=True) or {}
++    path_b = body.get("path_b")
++    dry_run = body.get("dry_run", True)
++
++    if not path_b:
++        return jsonify({"ok": False, "message": "Missing required 'path_b' in request body."}), 400
++    if not path_b.lower().endswith(".zip") or not os.path.isfile(path_b):
++        return jsonify({"ok": False, "message": "path_b: file not found or not a .zip file."}), 404
++
++    try:
++        result = apply_merge(None, path_b, dry_run_only=dry_run)
++    except Exception as e:  # noqa: BLE001 -- surfaced to the caller, not swallowed
++        return jsonify({"ok": False, "message": f"Merge apply failed: {e}"}), 500
++
++    return jsonify(result), (200 if result["ok"] else 422)

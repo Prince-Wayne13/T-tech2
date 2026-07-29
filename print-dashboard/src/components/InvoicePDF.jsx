@@ -1,5 +1,5 @@
 import React from 'react';
-import { Document, Page, StyleSheet, Text, View, Image, pdf } from '@react-pdf/renderer';
+import { Document, Page, StyleSheet, Text, View, Image, pdf, Svg, Defs, LinearGradient, Stop, Rect } from '@react-pdf/renderer';
 import { calculateTotal } from '../utils/calculateTotal';
 import ttechLogo from '../assets/ttech-logo.png';
 
@@ -66,8 +66,8 @@ const styles = StyleSheet.create({
   totalsBox: { width: 240 },
   subtotalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
   subtotalLabel: { fontSize: 9, fontWeight: 700, color: C.blue, textTransform: 'uppercase' },
-  subtotalValue: { fontSize: 9, fontWeight: 700, color: C.black, textAlign: 'right' },
-  totalBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: C.black, paddingVertical: 10, paddingHorizontal: 14, marginTop: 6 },
+  subtotalValue: { fontSize: 9, fontWeight: 700, color: C.black, textAlign: 'right', minWidth: 90, flexShrink: 0 },
+  totalBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 14, marginTop: 6, height: 40 },
   totalLabel: { fontSize: 13, fontWeight: 800, color: C.white, textTransform: 'uppercase' },
   totalValue: { fontSize: 13, fontWeight: 800, color: C.white },
 
@@ -158,6 +158,15 @@ function TotalsBlock({ subtotal, total }) {
           <Text style={styles.subtotalValue}>{fmtMK(subtotal)}</Text>
         </View>
         <View style={styles.totalBar}>
+          <Svg width={240} height={40} style={{ position: 'absolute' }}>
+            <Defs>
+              <LinearGradient id="totalBarGradient" x1="0" y1="0" x2="1" y2="0">
+                <Stop offset="0" stopColor="#1a1a1a" />
+                <Stop offset="1" stopColor="#6b6b6b" />
+              </LinearGradient>
+            </Defs>
+            <Rect x={0} y={0} width={240} height={40} fill="url(#totalBarGradient)" />
+          </Svg>
           <Text style={styles.totalLabel}>Total</Text>
           <Text style={styles.totalValue}>{fmtMK(total)}</Text>
         </View>

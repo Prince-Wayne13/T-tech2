@@ -1,0 +1,26 @@
+diff --git a/print-dashboard/backend/app/schema_migrations.py b/print-dashboard/backend/app/schema_migrations.py
+index e1006c2..3b548d1 100644
+--- a/print-dashboard/backend/app/schema_migrations.py
++++ b/print-dashboard/backend/app/schema_migrations.py
+@@ -500,7 +500,6 @@ def run_full_upgrade():
+     staff_assignment = ensure_staff_assignment_schema()
+     proposal_job_planning = ensure_proposal_job_planning_schema()
+     proposal_line_item_quantity = ensure_proposal_line_item_quantity_schema()
+-    core_staff = ensure_core_staff_seed()
+     job_invoice_schema = ensure_job_invoice_schema()
+     payment_invoice_nullable = ensure_payment_invoice_nullable_schema()
+     # Priority 2 (Machine Management): must run after db.create_all() (so the
+@@ -510,7 +509,13 @@ def run_full_upgrade():
+     machine_capability_schema = ensure_machine_capability_schema()
+     default_capabilities = ensure_default_capabilities_seed()
+     material_transaction_output = ensure_material_transaction_output_schema()
++    # Must run before ensure_core_staff_seed(): that function ORM-queries
++    # Staff, which SELECTs every column the model declares -- including
++    # device_id from TimestampMixin -- so device_id must already exist on
++    # the staff table before that query runs, or it raises
++    # 'sqlite3.OperationalError: no such column: staff.device_id'.
+     device_ownership = ensure_device_ownership_schema()
++    core_staff = ensure_core_staff_seed()
+     normalized = normalize_legacy_job_statuses()
+     backfilled = backfill_invoice_jobs()
+     return {
