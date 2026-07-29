@@ -50,7 +50,16 @@ FRONTEND_DIST_DIR = _resolve_frontend_dist_dir()
 def create_app(config_name=None):
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_object(config_by_name(config_name))
-    os.makedirs(app.instance_path, exist_ok=True)
+    # Flask's own instance_path (app.instance_path) resolves relative to
+    # the app's root folder -- for the packaged .exe that's wherever it's
+    # installed (e.g. C:\Program Files (x86)\T-Tech Studio), which a
+    # normal user install can't write to. Same bug as config.py's
+    # INSTANCE_DIR (see the comment there); same fix: only needed in
+    # dev, since production never reads/writes anything under Flask's
+    # instance folder -- the DB and logs go through
+    # _production_data_dir()/lifecycle.get_data_dir() instead.
+    if not getattr(sys, "frozen", False):
+        os.makedirs(app.instance_path, exist_ok=True)
 
     CORS(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}})
 

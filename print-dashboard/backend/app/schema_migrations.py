@@ -362,6 +362,29 @@ def normalize_legacy_job_statuses():
     return updated
 
 
+def backfill_missing_sales():
+    """One-time catch-up for jobs that already had payments recorded
+    before add_job_payment() started auto-creating the linked Sale (see
+    services/jobs.py). Without this, any job paid before that fix would
+    stay permanently absent from the Sales page even after upgrading,
+    since nothing else ever revisits old payments.
+    """
+    from .services.sales import create_sale_for_job
+
+    created = 0
+    jobs_with_payments = (
+        Job.query.filter(Job.payments.any()).order_by(Job.id.asc()).all()
+    )
+    for job in jobs_with_payments:
+        if job.sales:
+            continue
+        sale = create_sale_for_job(job, description=job.title)
+        job.sales.append(sale)
+        created += 1
+    db.session.commit()
+    return created
+
+
 def backfill_invoice_jobs():
     created = 0
     for invoice in Invoice.query.filter(Invoice.job_id.is_(None)).order_by(Invoice.id.asc()).all():
@@ -527,6 +550,10 @@ def run_full_upgrade():
     core_staff = ensure_core_staff_seed()
     normalized = normalize_legacy_job_statuses()
     backfilled = backfill_invoice_jobs()
+    # Must run after backfill_invoice_jobs() -- some jobs it backfills are
+    # themselves paid (invoice.payments carried over), so those need to be
+    # in place before checking for jobs with payments but no Sale yet.
+    sales_backfilled = backfill_missing_sales()
     return {
         "prompt4_schema_changes": prompt4,
         "staff_assignment_schema_changes": staff_assignment,
@@ -542,5 +569,6 @@ def run_full_upgrade():
             "schema_changes": job_invoice_schema,
             "statuses_normalized": normalized,
             "invoice_jobs_backfilled": backfilled,
+            "missing_sales_backfilled": sales_backfilled,
         },
     }

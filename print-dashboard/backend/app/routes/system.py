@@ -52,3 +52,16 @@ def update_status():
         "status": "Automatic update checking is not set up yet.",
         "current_version": "development build",
     })
+
+
+@bp.route("/device-identity", methods=["GET"])
+def device_identity_status():
+    """Exposes this machine's own device_id/device_name (set once at
+    first-run, see device_identity.py) so the frontend's sync screen can
+    tell "this device's own backup" apart from every other device's
+    entry in /api/backup/available, instead of guessing.
+    """
+    identity = current_app.config.get("DEVICE_IDENTITY")
+    if identity is None:
+        return jsonify({"device_id": None, "device_name": None})
+    return jsonify({"device_id": identity.device_id, "device_name": identity.device_name})

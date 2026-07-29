@@ -129,6 +129,17 @@ def add_job_payment(job, payload):
     job.payments.append(payment)
     if job.invoice:
         sync_invoice_amount(job.invoice)
+    # A Job's first recorded payment is also what should bring its Sale
+    # into existence -- create_sale_for_job() previously only ran behind
+    # POST /api/sales, a route nothing in the UI ever called, so
+    # job.sales stayed permanently empty and _sync_linked_sale() below
+    # (which only updates an EXISTING sale) was a silent no-op. Creating
+    # it here, at the point a payment first exists, is what makes the
+    # Sales page actually populate instead of staying empty forever.
+    if not job.sales:
+        from ..services.sales import create_sale_for_job
+        sale = create_sale_for_job(job, description=job.title)
+        job.sales.append(sale)
     _sync_linked_sale(job)
     return payment
 

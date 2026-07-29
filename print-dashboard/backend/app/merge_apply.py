@@ -2,18 +2,41 @@
 merge_apply.py
 
 Third slice of the restore engine: the first piece that actually WRITES
-to the live database. Deliberately scoped to only the tables proven safe
-in merge_preview.py's docstring and this session's FK dependency mapping
+to the live database. Scoped to the tables proven safe in
+merge_preview.py's docstring and this module's own FK dependency mapping
 -- see SAFE_TO_WRITE_TABLES below. Every other device_id table is
 reported as "not merged" rather than silently skipped or guessed at.
 
-Why the scope is this narrow: most tables' foreign keys point at raw
-local `id` values on clients/vendors/staff/pricing_items, none of which
-have a proven cross-device matching key yet (see merge_preview.py and
-schema_migrations.py's device_id backfill notes). Inserting a row from
-another device using its raw client_id/vendor_id/staff_id/pricing_item_id
-verbatim would silently attach it to whichever row happens to share that
-same local id on THIS device -- real data corruption, not a cosmetic gap.
+vendors, materials, and staff are now included:
+  - vendors: matched by name (NAME_KEYED_TABLES in merge_preview.py).
+    Vendor is deliberately loose/editable -- not a rigid identity -- so
+    name-matching is the right fit, no FK translation needed on this side.
+  - staff: matched by (device_id, id) via merge_preview.py's
+    WEAK_KEY_TABLES -- no stable business key exists, so this is applied
+    with the same caveat already documented there.
+  - materials: matched by material_ref (a real, per-device-stamped unique
+    key -- same tier as machine_ref). This is the first table here with
+    actual cross-device foreign keys that need translation rather than
+    verbatim copy: Material.machine_id and Material.vendor_id are raw
+    local integers on B, meaningless on this device. FK_TRANSLATIONS
+    below resolves each one through the referenced table's natural key
+    (machine_ref for machines, name for vendors) to find/skip correctly
+    instead of silently pointing at whatever row happens to share that
+    raw id locally -- that would be real data corruption, not a cosmetic
+    gap. If a referenced row can't be found locally at all (shouldn't
+    normally happen since machines/vendors sync too, but not assumed),
+    it's reported as a per-row error rather than guessed at or dropped.
+
+    This is also why table application order matters now: machines and
+    vendors must be written before materials in the same run, so a
+    material's FK lookup can see rows added earlier in this same merge.
+    APPLY_ORDER (not SAFE_TO_WRITE_TABLES's dict order, which SQLAlchemy
+    doesn't guarantee) makes that explicit, and each write is flushed
+    immediately so later lookups in the same run can see it.
+
+  material_transactions is deliberately still excluded -- it depends on
+  the still-blocked `jobs` table via its own job_id FK.
+
 `sales` was initially miscategorized as safe (only FKs to jobs) before
 catching that Sale.job_id is NOT NULL, so it transitively depends on
 `jobs`, which IS blocked -- corrected before this module was written, not
@@ -31,10 +54,13 @@ Design:
   - add_from_b: copies the row's scalar columns from B's backup into a
     brand-new row on this device (own id, own device_id preserved as
     whatever B originally recorded -- NOT reassigned to this device,
-    since the record legitimately originated elsewhere).
+    since the record legitimately originated elsewhere). Any column in
+    that table's fk_translations is resolved to this device's local id
+    first (see FK_TRANSLATIONS below) instead of being copied verbatim.
   - b_wins_update: overwrites this device's matching row's scalar columns
     with B's values (again preserving B's own device_id/timestamps as the
-    authoritative record of who last touched it and when).
+    authoritative record of who last touched it and when). FK columns are
+    translated the same way as add_from_b.
   - a_wins_keep / identical: no write, by definition.
   - Many-to-many relationships (ProductionMachine.capabilities) are NOT
     touched by this pass -- both sides of that join reference raw local
@@ -51,7 +77,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .extensions import db
-from .models import Advance, Capability, ExpenseCategory, ExportJob, ProductionMachine
+from .models import (
+    Advance, Capability, ExpenseCategory, ExportJob, Material,
+    ProductionMachine, Staff, Vendor,
+)
 from .merge_preview import preview_merge
 
 # Table name -> (ORM model, natural key column, columns to copy verbatim).
@@ -59,6 +88,11 @@ from .merge_preview import preview_merge
 # created_at, updated_at are always carried over from the source row (see
 # module docstring) rather than reset to "now"/"this device", since the
 # whole point is preserving true origin and edit history across the merge.
+#
+# "fk_translations" (optional): {column_name: (referenced_table, referenced
+# natural-key column)}. Present only for tables whose FK columns need
+# resolving through another table's natural key rather than copied as a
+# raw local id -- see _translate_fk() and the module docstring.
 SAFE_TO_WRITE_TABLES = {
     "production_machines": {
         "model": ProductionMachine,
@@ -73,6 +107,23 @@ SAFE_TO_WRITE_TABLES = {
         "model": Capability,
         "key_column": "name",
         "columns": ["name", "category", "notes", "device_id", "created_at", "updated_at"],
+    },
+    "vendors": {
+        "model": Vendor,
+        "key_column": "name",
+        "columns": [
+            "name", "category", "phone", "email", "balance", "status",
+            "device_id", "created_at", "updated_at",
+        ],
+    },
+    "staff": {
+        "model": Staff,
+        # Weak key -- see merge_preview.py's WEAK_KEY_TABLES docstring.
+        # preview_merge already reports staff changes keyed as
+        # "device_id::id" strings; apply just needs to look B's row up by
+        # its own (device_id, id), which _fetch_b_row handles specially.
+        "key_column": "__device_and_id__",
+        "columns": ["name", "role", "active", "notes", "device_id", "created_at", "updated_at"],
     },
     "expense_categories": {
         "model": ExpenseCategory,
@@ -95,12 +146,35 @@ SAFE_TO_WRITE_TABLES = {
             "status", "generated_by", "notes", "device_id", "created_at", "updated_at",
         ],
     },
+    "materials": {
+        "model": Material,
+        "key_column": "material_ref",
+        "columns": [
+            "material_ref", "name", "machine_id", "category", "vendor_id",
+            "unit", "unit_cost", "reorder_point", "active", "notes",
+            "device_id", "created_at", "updated_at",
+        ],
+        "fk_translations": {
+            "machine_id": ("production_machines", "machine_ref"),
+            "vendor_id": ("vendors", "name"),
+        },
+    },
 }
 
+# Tables that reference each other must be applied in this order, so that
+# a row added earlier in the same run (e.g. a new machine or vendor from
+# B) is already committed-and-flushed by the time a later table (e.g.
+# materials) needs to resolve an FK against it. Any SAFE_TO_WRITE_TABLES
+# key not listed here has no incoming FK dependency and can run after.
+APPLY_ORDER = [
+    "production_machines", "capabilities", "vendors", "staff",
+    "expense_categories", "advances", "export_jobs", "materials",
+]
+
 NOT_YET_SAFE_TABLES = [
-    "jobs", "invoices", "proposals", "expenses", "materials",
+    "jobs", "invoices", "proposals", "expenses",
     "invoice_line_items", "proposal_line_items", "material_transactions",
-    "petty_cash_entries", "sales", "clients", "vendors", "pricing_items", "staff",
+    "petty_cash_entries", "sales", "clients", "pricing_items",
 ]
 
 
@@ -139,7 +213,7 @@ def _extract_db(zip_path: str, tmpdir: str, expected_db_name: str = "app.db") ->
 # DateTime/Date column across SAFE_TO_WRITE_TABLES specifically; BOOL_COLUMNS
 # likewise for every Boolean column in that same table set.
 DATE_COLUMNS = {"created_at", "updated_at", "issued_on", "settled_on"}
-BOOL_COLUMNS = {"available", "vendor_related"}
+BOOL_COLUMNS = {"available", "vendor_related", "active"}
 
 _DATETIME_FORMATS = ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
 
@@ -162,6 +236,60 @@ def _coerce_value(column: str, value):
 
 def _coerce_row(columns: list, row) -> dict:
     return {col: _coerce_value(col, row[col]) for col in columns if col in row.keys()}
+
+
+def _fetch_b_row(conn_b, table: str, key_column: str, key_value):
+    """Looks up B's row for a change entry. Ref/name-keyed tables use a
+    normal WHERE match. Weak-key tables (staff) are keyed in the preview
+    report as "device_id::id" strings -- split that back apart to find
+    the actual row, since there's no single real column to match on."""
+    if key_column == "__device_and_id__":
+        device_part, _, id_part = str(key_value).partition("::")
+        row = conn_b.execute(
+            "SELECT * FROM " + table + " WHERE id = ?", (id_part,)
+        ).fetchone()
+        if row is not None and device_part != "unknown":
+            # Extra sanity check -- id alone should already be unique per
+            # sqlite file, this just confirms the key wasn't misparsed.
+            if (row["device_id"] or "unknown") != device_part:
+                return None
+        return row
+    return conn_b.execute(
+        f"SELECT * FROM {table} WHERE {key_column} = ?", (key_value,)
+    ).fetchone()
+
+
+def _translate_fk(column: str, raw_value, referenced_table: str, referenced_key: str, errors: list):
+    """Resolves a raw local id from B's backup (meaningless on this
+    device) into the matching local id on THIS device, via the
+    referenced table's natural key (e.g. machine_ref, vendor name).
+
+    Looked up straight against the live ORM/session (not conn_b), since
+    by the time materials are processed (APPLY_ORDER runs machines/
+    vendors first and flushes after each write) any row referenced by a
+    same-run add_from_b is already visible here.
+
+    Returns (resolved_local_id, ok). On failure, ok=False and a message
+    is appended to errors -- callers must skip the row rather than guess.
+    """
+    if raw_value is None:
+        return None, True
+
+    # Find B's natural-key value for this raw id by asking B's own table
+    # -- but we don't have conn_b here, so this expects the caller to
+    # have already resolved raw_value into the natural-key VALUE (a ref
+    # string or a name), not a raw id. See call sites below.
+    natural_key_value = raw_value
+    model = {"production_machines": ProductionMachine, "vendors": Vendor}[referenced_table]
+    match = model.query.filter_by(**{referenced_key: natural_key_value}).first()
+    if match is None:
+        errors.append(
+            f"{column}: referenced {referenced_table}.{referenced_key}="
+            f"{natural_key_value!r} not found on this device -- row skipped "
+            "rather than guessed at."
+        )
+        return None, False
+    return match.id, True
 
 
 def _snapshot_live_db_as_zip(tmpdir: str, expected_db_name: str = "app.db") -> str:
@@ -241,19 +369,21 @@ def apply_merge(zip_path_a: str | None, zip_path_b: str, dry_run_only: bool = Tr
                             table=table,
                             applied=False,
                             skipped_reason=(
-                                "Foreign key dependency on clients/vendors/staff/"
+                                "Foreign key dependency on clients/jobs/"
                                 "pricing_items not yet safe to write -- see "
                                 "merge_apply.py's module docstring."
                             ),
                         ))
 
-                for table, spec in SAFE_TO_WRITE_TABLES.items():
+                for table in APPLY_ORDER:
+                    spec = SAFE_TO_WRITE_TABLES[table]
                     if table not in preview_by_table:
                         continue
 
                     model = spec["model"]
                     key_column = spec["key_column"]
                     columns = spec["columns"]
+                    fk_translations = spec.get("fk_translations", {})
                     table_changes = preview_by_table[table]["changes"]
 
                     result = TableApplyResult(table=table, applied=True)
@@ -264,9 +394,7 @@ def apply_merge(zip_path_a: str | None, zip_path_b: str, dry_run_only: bool = Tr
                             continue
 
                         key_value = change["key"]
-                        b_row = conn_b.execute(
-                            f"SELECT * FROM {table} WHERE {key_column} = ?", (key_value,)
-                        ).fetchone()
+                        b_row = _fetch_b_row(conn_b, table, key_column, key_value)
                         if b_row is None:
                             result.errors.append(
                                 f"{key_column}={key_value}: expected in B's backup but not found "
@@ -276,13 +404,50 @@ def apply_merge(zip_path_a: str | None, zip_path_b: str, dry_run_only: bool = Tr
 
                         row_data = _coerce_row(columns, b_row)
 
+                        # Resolve any FK columns through their referenced
+                        # table's natural key before this row is written.
+                        # B's raw id (row_data[col]) is first turned into
+                        # B's own natural-key VALUE via conn_b, then that
+                        # value is looked up on THIS device's live tables.
+                        row_errors = []
+                        for col, (ref_table, ref_key) in fk_translations.items():
+                            raw_b_id = row_data.get(col)
+                            if raw_b_id is None:
+                                continue
+                            b_ref_row = conn_b.execute(
+                                f"SELECT {ref_key} FROM {ref_table} WHERE id = ?", (raw_b_id,)
+                            ).fetchone()
+                            if b_ref_row is None:
+                                row_errors.append(
+                                    f"{col}: B's own {ref_table} row (id={raw_b_id}) not found in "
+                                    "B's backup -- can't translate, row skipped."
+                                )
+                                continue
+                            resolved_id, ok = _translate_fk(
+                                col, b_ref_row[ref_key], ref_table, ref_key, row_errors
+                            )
+                            row_data[col] = resolved_id if ok else raw_b_id
+                            if not ok:
+                                row_errors[-1] = (
+                                    f"{key_column}={key_value}: " + row_errors[-1]
+                                )
+
+                        if row_errors:
+                            result.errors.extend(row_errors)
+                            continue
+
                         if action == "add_from_b":
                             new_row = model(**row_data)
                             db.session.add(new_row)
+                            db.session.flush()
                             result.added += 1
 
                         elif action == "b_wins_update":
-                            existing = model.query.filter_by(**{key_column: key_value}).first()
+                            if key_column == "__device_and_id__":
+                                device_part, _, id_part = str(key_value).partition("::")
+                                existing = model.query.get(int(id_part))
+                            else:
+                                existing = model.query.filter_by(**{key_column: key_value}).first()
                             if existing is None:
                                 result.errors.append(
                                     f"{key_column}={key_value}: expected an existing row on this "
@@ -293,6 +458,7 @@ def apply_merge(zip_path_a: str | None, zip_path_b: str, dry_run_only: bool = Tr
                                 if col == key_column:
                                     continue
                                 setattr(existing, col, value)
+                            db.session.flush()
                             result.updated += 1
 
                     results.append(result)

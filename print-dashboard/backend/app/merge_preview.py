@@ -62,6 +62,10 @@ REF_KEYED_TABLES = {
 
 NAME_KEYED_TABLES = {
     "capabilities": "name",
+    # Vendor is deliberately loose/editable (we might buy the same material
+    # from a different vendor later) -- not a rigid identity, so matched by
+    # name like Capability rather than requiring a ref.
+    "vendors": "name",
 }
 
 # No stable business key exists yet -- matched by (device_id, id) only,

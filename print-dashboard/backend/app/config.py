@@ -42,7 +42,18 @@ BASE_DIR = _resolve_base_dir()
 # regardless of where the .exe itself is installed or moved, and
 # survives a re-install of the app. See ProductionConfig below.
 INSTANCE_DIR = BASE_DIR / "instance"
-INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
+# Only needed for plain `python main.py` / web dev (DevelopmentConfig
+# below reads from it). The packaged .exe runs frozen and uses
+# ProductionConfig, which never touches INSTANCE_DIR at all -- it uses
+# _production_data_dir() (C:\ProgramData\TTechStudio) instead, which IS
+# writable by a normal user. Creating INSTANCE_DIR unconditionally used
+# to run this mkdir even under ProductionConfig, and since BASE_DIR for
+# a frozen exe is wherever it's installed (e.g. C:\Program Files (x86)\
+# T-Tech Studio), that raised PermissionError: [WinError 5] Access is
+# denied -- a normal (non-admin) install has no write access under
+# Program Files. Skipped entirely when frozen, since nothing needs it.
+if not getattr(sys, "frozen", False):
+    INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _production_data_dir() -> Path:
