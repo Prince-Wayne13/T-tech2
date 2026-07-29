@@ -205,9 +205,12 @@ def list_pricing_items():
 
 @bp.post("/pricing")
 def create_pricing_item():
+    from ..services.ref_generator import next_pricing_item_ref
+
     data = request.get_json() or {}
     item = PricingItem(
         code=data["code"],
+        pricing_item_ref=next_pricing_item_ref(),
         name=data["name"],
         category=data["category"],
         machine_id=data.get("machine_id"),

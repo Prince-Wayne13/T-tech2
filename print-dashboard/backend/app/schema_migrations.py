@@ -337,6 +337,8 @@ def ensure_default_capabilities_seed():
 
 def ensure_core_staff_seed():
     """Ensure the core staff names exist on databases that predate staff seed data."""
+    from .services.ref_generator import next_staff_ref
+
     names = ["Vivienne", "Victor", "Adam", "Chisomo", "Galfken"]
     existing = {
         staff.name.lower()
@@ -345,7 +347,11 @@ def ensure_core_staff_seed():
     created = []
     for name in names:
         if name.lower() not in existing:
-            db.session.add(Staff(name=name, role="Production", active=True))
+            # staff_ref assigned here too, not just left for the backfill
+            # migration below -- these ARE newly created rows, so they
+            # need a real ref immediately, same as next_job_ref() is used
+            # in backfill_invoice_jobs() elsewhere in this file.
+            db.session.add(Staff(name=name, role="Production", active=True, staff_ref=next_staff_ref()))
             created.append(name)
     db.session.commit()
     return created
@@ -453,6 +459,88 @@ def ensure_material_transaction_output_schema():
     return changed
 
 
+def ensure_staff_client_pricing_refs():
+    """Adds staff_ref/client_ref/pricing_item_ref -- see each column's
+    comment in models.py for why these exist (cross-device merge matching
+    for three tables that previously had no unique column at all besides
+    the local, per-device `id`). vendors is deliberately NOT included
+    here -- merge_preview.py already matches it by `name` (a real,
+    working design decision made separately), so no vendor_ref exists or
+    is needed.
+
+    Unlike ensure_device_ownership_schema()'s device_id (deliberately left
+    NULL for old rows -- an honest "unknown" beats a fabricated device),
+    these ref columns MUST be backfilled with a real value for every
+    existing row, not left NULL: a NULL merge key can't be matched on,
+    which would make every existing pre-migration row on every device
+    permanently unmergeable.
+
+    IMPORTANT -- found by actually running this migration against
+    simulated existing data, not caught by reading the code: backfilling
+    by calling next_staff_ref() etc. (the same function new rows use
+    going forward) is WRONG here, not just a timing issue.
+    _next_sequential_ref() counts "how many rows this device already
+    has", which stays exactly the same before and after a backfill --
+    backfill doesn't add rows, it fills in a column on rows that already
+    existed from the start of the loop. Every row in a batch got the
+    identical count and therefore the identical ref (e.g. 3 real staff
+    rows all became 'STAFF-LOCAL-0004' in testing), which is exactly the
+    collision this column exists to prevent. Fixed by using a plain
+    enumerate() counter local to this backfill pass instead -- a
+    dedicated "Nth row backfilled in this run" number, continuing after
+    however many rows already have a real ref, completely separate from
+    next_*_ref()'s "rows this device has ever created" logic.
+
+    Must run AFTER ensure_device_ownership_schema() in run_full_upgrade():
+    this filters by device_id, which must already exist as a column
+    before that query can run (same "no such column" failure mode this
+    whole migration-order investigation started from). Must also run
+    BEFORE ensure_core_staff_seed(), since that function's Staff.query
+    will now SELECT staff_ref too, same failure mode again if it ran
+    first.
+    """
+    changed = []
+
+    from .models import Client, PricingItem
+    from .services.ref_generator import _device_fragment
+
+    ref_specs = [
+        ("staff", "staff_ref", Staff, "STAFF"),
+        ("clients", "client_ref", Client, "CLI"),
+        ("pricing_items", "pricing_item_ref", PricingItem, "PRC"),
+    ]
+
+    existing_tables = _tables()
+    device_fragment = _device_fragment()
+
+    for table_name, column_name, model, prefix in ref_specs:
+        if table_name not in existing_tables:
+            continue
+
+        columns = _columns(table_name)
+        if column_name not in columns:
+            _add_column(table_name, f"{column_name} VARCHAR(40)")
+            db.session.commit()
+            changed.append(f"{table_name}.{column_name}")
+
+        rows_needing_ref = model.query.filter(
+            getattr(model, column_name).is_(None)
+        ).order_by(model.id).all()
+
+        if rows_needing_ref:
+            already_have_ref = model.query.filter(
+                getattr(model, column_name).isnot(None)
+            ).count()
+
+            for offset, row in enumerate(rows_needing_ref, start=1):
+                setattr(row, column_name, f"{prefix}-{device_fragment}-{(already_have_ref + offset):04d}")
+
+            db.session.commit()
+            changed.append(f"{table_name}.{column_name}_backfilled:{len(rows_needing_ref)}")
+
+    return changed
+
+
 def ensure_device_ownership_schema():
     """Adds device_id to every table whose model inherits TimestampMixin
     (see models.py -- device_id lives on the mixin itself, not repeated
@@ -534,6 +622,11 @@ def run_full_upgrade():
     # because it only creates brand-new tables -- it never ALTERs an existing
     # table to add a column.
     device_ownership = ensure_device_ownership_schema()
+    # Must run after device_ownership (filters by device_id, which must
+    # already exist) and before ensure_core_staff_seed() below: that
+    # function's Staff.query will now SELECT staff_ref too, same
+    # "no such column" failure mode as device_id if this ran after.
+    staff_client_pricing_refs = ensure_staff_client_pricing_refs()
     prompt4 = ensure_prompt4_schema()
     staff_assignment = ensure_staff_assignment_schema()
     proposal_job_planning = ensure_proposal_job_planning_schema()
@@ -565,6 +658,7 @@ def run_full_upgrade():
         "default_capabilities_seed": default_capabilities,
         "material_transaction_output_schema_changes": material_transaction_output,
         "device_ownership_schema_changes": device_ownership,
+        "staff_client_pricing_refs_changes": staff_client_pricing_refs,
         "job_invoice_flow": {
             "schema_changes": job_invoice_schema,
             "statuses_normalized": normalized,

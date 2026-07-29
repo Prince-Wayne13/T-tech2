@@ -73,8 +73,8 @@ CONSECUTIVE_FAILURE_ALERT_THRESHOLD = 3
 # uses whichever one is actually found on THIS computer -- nothing
 # here assumes a specific laptop.
 REAL_CANDIDATE_PATHS = [
-    r"G:\My Drive",  # common when Google Drive is set up with its own drive letter
-    r"G:\\",
+    r"H:\My Drive",  # common when Google Drive is set up with its own drive letter
+    r"H:\\",
     os.path.expanduser("~/My Drive"),          # common when Google Drive is set up under the user's own folder instead
     os.path.expanduser("~/Google Drive"),
     os.path.expanduser("~/GoogleDrive"),

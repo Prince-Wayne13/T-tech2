@@ -47,6 +47,17 @@ class Client(TimestampMixin, SerializableMixin, db.Model):
     __tablename__ = "clients"
 
     id = db.Column(db.Integer, primary_key=True)
+    # Added for cross-device merge matching (see merge_preview.py /
+    # merge_apply.py): clients has no other unique column, so two
+    # devices' rows could only be told apart by (device_id, id) -- which
+    # breaks for any client entered before device_id existed, or two
+    # devices seeded the same way. client_ref follows the exact same
+    # device-prefixed, collision-safe pattern as job_ref/invoice_ref/etc.
+    # (see services/ref_generator.py). Nullable here only so
+    # db.create_all()/older rows don't break before the backfill
+    # migration runs; ensure_staff_client_pricing_refs() in
+    # schema_migrations.py fills every existing NULL exactly once.
+    client_ref = db.Column(db.String(40), unique=True, nullable=True, index=True)
     name = db.Column(db.String(160), nullable=False, index=True)
     phone = db.Column(db.String(40))
     email = db.Column(db.String(160))
@@ -122,6 +133,15 @@ class PricingItem(TimestampMixin, SerializableMixin, db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     code = db.Column(db.String(60), unique=True, nullable=False, index=True)
+    # A SEPARATE column from `code` on purpose: `code` is user-facing and
+    # user-editable from the frontend (routes/machines.py takes it
+    # directly from request data) and isn't device-prefixed -- two
+    # devices could independently create the same `code`.
+    # pricing_item_ref is an internal-only, never-user-edited,
+    # device-prefixed merge key (see Client.client_ref's comment for the
+    # general reasoning). Keeping them separate means a user renaming
+    # their code later can never accidentally break merge matching.
+    pricing_item_ref = db.Column(db.String(40), unique=True, nullable=True, index=True)
     name = db.Column(db.String(180), nullable=False, index=True)
     category = db.Column(db.String(80), nullable=False, index=True)
     machine_id = db.Column(db.Integer, db.ForeignKey("production_machines.id"))
@@ -511,6 +531,19 @@ class Staff(TimestampMixin, SerializableMixin, db.Model):
     __tablename__ = "staff"
 
     id = db.Column(db.Integer, primary_key=True)
+    # Added for cross-device merge matching (see merge_preview.py /
+    # merge_apply.py): staff previously had no unique column at all, so
+    # two devices' rows could only be told apart by (device_id, id) --
+    # which breaks for rows seeded before device_id existed (all show as
+    # device_id=NULL) or any two devices that both ran the same seed
+    # migration. This replaces the WEAK_KEY_TABLES/__device_and_id__
+    # path in merge_preview.py/merge_apply.py with a real, collision-safe
+    # key -- same pattern as job_ref/invoice_ref/etc (see
+    # services/ref_generator.py). Nullable here only so
+    # db.create_all()/older rows don't break before the backfill
+    # migration runs; ensure_staff_client_pricing_refs() in
+    # schema_migrations.py fills every existing NULL exactly once.
+    staff_ref = db.Column(db.String(40), unique=True, nullable=True, index=True)
     name = db.Column(db.String(160), nullable=False, index=True)
     role = db.Column(db.String(80), index=True)
     active = db.Column(db.Boolean, default=True, nullable=False, index=True)

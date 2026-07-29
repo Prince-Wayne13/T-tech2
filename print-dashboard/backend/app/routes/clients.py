@@ -25,8 +25,11 @@ def list_clients():
 
 @bp.post("")
 def create_client():
+    from ..services.ref_generator import next_client_ref
+
     data = request.get_json() or {}
     client = Client(
+        client_ref=next_client_ref(),
         name=data["name"],
         phone=data.get("phone"),
         email=data.get("email"),

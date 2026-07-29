@@ -21,8 +21,11 @@ def list_staff():
 
 @bp.post("")
 def create_staff():
+    from ..services.ref_generator import next_staff_ref
+
     data = request.get_json() or {}
     staff = Staff(
+        staff_ref=next_staff_ref(),
         name=data["name"],
         role=data.get("role"),
         active=data.get("active", True),

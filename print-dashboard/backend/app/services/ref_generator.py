@@ -121,3 +121,18 @@ def next_material_ref() -> str:
 def next_advance_ref() -> str:
     from ..models import Advance
     return _next_sequential_ref(Advance, "ADV")
+
+
+def next_staff_ref() -> str:
+    from ..models import Staff
+    return _next_sequential_ref(Staff, "STAFF")
+
+
+def next_client_ref() -> str:
+    from ..models import Client
+    return _next_sequential_ref(Client, "CLI")
+
+
+def next_pricing_item_ref() -> str:
+    from ..models import PricingItem
+    return _next_sequential_ref(PricingItem, "PRC")
