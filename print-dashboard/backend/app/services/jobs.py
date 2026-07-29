@@ -170,6 +170,15 @@ def update_job_payment(job, payment_id, data):
 
     if job.invoice:
         sync_invoice_amount(job.invoice)
+    # Same gap as add_job_payment() had: _sync_linked_sale() only updates a
+    # Sale that already exists. If this job's Sale was never created (e.g.
+    # its payments were recorded before that fix existed), editing a
+    # payment here would silently do nothing for Sales. Create it first if
+    # missing, exactly like add_job_payment() does.
+    if not job.sales:
+        from ..services.sales import create_sale_for_job
+        sale = create_sale_for_job(job, description=job.title)
+        job.sales.append(sale)
     _sync_linked_sale(job)
     return payment
 
