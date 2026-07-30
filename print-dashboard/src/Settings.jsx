@@ -142,6 +142,13 @@ function computeFieldDiffs(aValues, bValues) {
 // Turns one table's raw sync data into plain lines, split into two groups:
 // things that will be added automatically, and things that need a person
 // to look at because both devices changed the same record.
+//
+// IMPORTANT: the backend (merge_preview.py -> preview_merge()) returns
+// { tables: [ { table, match_strategy, weak_key_warning, changes, summary }, ... ] },
+// an ARRAY of per-table objects, not a flat { table_name: {...} } map. Each
+// entry already carries its own `table` key, so callers should iterate
+// syncPreview.tables and pass each entry straight in here (not
+// Object.entries(syncPreview)).
 function describeSyncTable(table, tableData) {
   const name = tableDisplayName(table);
   const changes = (tableData && Array.isArray(tableData.changes)) ? tableData.changes : [];
@@ -182,6 +189,61 @@ const DEFAULT_MACHINES = [
   { machine_ref: 'MCH-KM-01', name: 'Konica Minolta', category: 'Digital Print', capability: 'Calendars, books and normal printing', image_path: '/machines/digital-press.svg' },
 ];
 
+// ── Field-diff popup ────────────────────────────────────────────────
+// Shows the full "before -> after" comparison for one record that was
+// edited on both devices. Purely a display layer over the diffs that
+// describeSyncTable/computeFieldDiffs already computed — no fetching,
+// no state beyond what's passed in.
+function FieldDiffModal({ item, onClose }) {
+  if (!item) return null;
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+      onClick={onClose}
+    >
+      <div style={{ ...modalCardStyle, maxWidth: '460px' }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+          <h3 className="card-title">What changed</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+            <Icon d={D.x} size={16} />
+          </button>
+        </div>
+        <p style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '14px' }}>
+          {item.tableName.charAt(0).toUpperCase() + item.tableName.slice(1)} — {item.key}
+        </p>
+
+        {item.diffs.length === 0 ? (
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+            No field-level differences were found between the two versions.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '10px', maxHeight: '50vh', overflowY: 'auto' }}>
+            {item.diffs.map((d) => (
+              <div key={d.field} style={{ border: '1px solid var(--border-faint)', borderRadius: '6px', padding: '8px 10px' }}>
+                <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-body)', marginBottom: '4px' }}>{d.label}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
+                  <span style={{ color: 'var(--red, #c0392b)', textDecoration: 'line-through', opacity: 0.8 }}>{d.before}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>→</span>
+                  <span style={{ color: 'var(--teal)', fontWeight: 600 }}>{d.after}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px' }}>
+          <button
+            onClick={onClose}
+            style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--text-muted)', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -214,6 +276,7 @@ export default function Settings() {
   const [syncPreview, setSyncPreview] = useState(null);
   const [applyingDeviceId, setApplyingDeviceId] = useState(null);
   const [syncMessage, setSyncMessage] = useState(null);
+  const [activeDiffItem, setActiveDiffItem] = useState(null); // review item currently shown in the popup
 
   const loadSyncDevices = async () => {
     setLoadingDevices(true);
@@ -661,33 +724,46 @@ export default function Settings() {
                 </div>
 
                 {syncPreview && syncPreview.otherBackup && syncPreview.otherBackup.device_id === device.device_id && (() => {
-                  const tableEntries = Object.entries(syncPreview).filter(([key]) => key !== 'ok' && key !== 'otherBackup');
+                  // syncPreview shape (from preview_merge in merge_preview.py):
+                  //   { generated_at, zip_path_a, zip_path_b, tables: [ { table, changes, ... }, ... ], otherBackup }
+                  // `tables` is an ARRAY, and each entry already carries its own
+                  // `table` name — iterate the array directly rather than
+                  // Object.entries(syncPreview), which would walk top-level keys
+                  // like "generated_at" instead of per-table data.
+                  const tables = Array.isArray(syncPreview.tables) ? syncPreview.tables : [];
                   const newLines = [];
-                  const reviewLines = [];
-                  tableEntries.forEach(([table, tableData]) => {
-                    const { newLine, reviewLines: tableReviewLines } = describeSyncTable(table, tableData);
+                  const reviewItems = [];
+                  tables.forEach((tableData) => {
+                    const { newLine, reviewItems: tableReviewItems } = describeSyncTable(tableData.table, tableData);
                     if (newLine) newLines.push(newLine);
-                    reviewLines.push(...tableReviewLines);
+                    reviewItems.push(...tableReviewItems);
                   });
 
                   return (
                     <div style={{ marginTop: '10px', fontSize: '10px', color: 'var(--text-body)', background: 'var(--bg-subtle, #f7f7f7)', borderRadius: '6px', padding: '10px' }}>
-                      {newLines.length === 0 && reviewLines.length === 0 && (
+                      {newLines.length === 0 && reviewItems.length === 0 && (
                         <div>Nothing new from this device. Everything already matches.</div>
                       )}
                       {newLines.length > 0 && (
-                        <div style={{ marginBottom: reviewLines.length > 0 ? '10px' : 0 }}>
+                        <div style={{ marginBottom: reviewItems.length > 0 ? '10px' : 0 }}>
                           <div style={{ fontWeight: 700, marginBottom: '4px' }}>From this device:</div>
                           {newLines.map((line, i) => (
                             <div key={i} style={{ marginBottom: '4px', lineHeight: 1.5 }}>{line}</div>
                           ))}
                         </div>
                       )}
-                      {reviewLines.length > 0 && (
+                      {reviewItems.length > 0 && (
                         <div>
                           <div style={{ fontWeight: 700, marginBottom: '4px', color: 'var(--primary)' }}>Needs your review (edited on both devices):</div>
-                          {reviewLines.map((line, i) => (
-                            <div key={i} style={{ marginBottom: '4px', lineHeight: 1.5 }}>{line}</div>
+                          {reviewItems.map((item, i) => (
+                            <div
+                              key={`${item.table}-${item.key}-${i}`}
+                              onClick={() => setActiveDiffItem(item)}
+                              style={{ marginBottom: '4px', lineHeight: 1.5, cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: '2px' }}
+                              title="Click to see exactly what changed"
+                            >
+                              {item.label}
+                            </div>
                           ))}
                         </div>
                       )}
@@ -907,6 +983,11 @@ export default function Settings() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 3. FIELD-BY-FIELD SYNC DIFF MODAL */}
+      {activeDiffItem && (
+        <FieldDiffModal item={activeDiffItem} onClose={() => setActiveDiffItem(null)} />
       )}
 
     </main>

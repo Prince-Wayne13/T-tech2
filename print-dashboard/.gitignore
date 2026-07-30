@@ -25,6 +25,8 @@ backend/.env
 backend/build
 backend/dist
 backend/*.spec
+backend/venv
+backend/installer_output
 
 # Editor directories and files
 .vscode/*
