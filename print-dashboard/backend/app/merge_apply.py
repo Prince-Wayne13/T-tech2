@@ -79,8 +79,9 @@ from datetime import date, datetime
 
 from .extensions import db
 from .models import (
-    Advance, Capability, Client, ExpenseCategory, ExportJob, Invoice, Job,
-    Material, PricingItem, ProductionMachine, Staff, SyncConflict, Vendor,
+    Advance, Capability, Client, Expense, ExpenseCategory, ExportJob,
+    Invoice, Job, Material, PettyCash, PricingItem, ProductionMachine,
+    Sale, Staff, SyncConflict, Vendor,
 )
 from .merge_preview import preview_merge
 
@@ -207,6 +208,46 @@ SAFE_TO_WRITE_TABLES = {
             "client_id": ("clients", "client_ref"),
         },
     },
+    "expenses": {
+        "model": Expense,
+        "key_column": "expense_ref",
+        "columns": [
+            "expense_ref", "vendor_id", "category", "category_id", "title",
+            "amount", "expense_date", "paid_on", "status", "submitted_by",
+            "notes", "device_id", "created_at", "updated_at",
+        ],
+        "fk_translations": {
+            "vendor_id": ("vendors", "name"),
+            "category_id": ("expense_categories", "name"),
+        },
+    },
+    "sales": {
+        "model": Sale,
+        "key_column": "sale_ref",
+        "columns": [
+            "sale_ref", "job_id", "description", "notes", "amount",
+            "device_id", "created_at", "updated_at",
+        ],
+        "fk_translations": {
+            "job_id": ("jobs", "job_ref"),
+        },
+    },
+    # Must run after expenses above: linked_expense_id resolves through
+    # the expenses table, which needs to already have this run's new
+    # rows committed-and-flushed first (same ordering requirement as
+    # materials needing production_machines/vendors before it).
+    "petty_cash_entries": {
+        "model": PettyCash,
+        "key_column": "entry_ref",
+        "columns": [
+            "entry_ref", "entry_type", "amount", "staff_id",
+            "linked_expense_id", "notes", "device_id", "created_at", "updated_at",
+        ],
+        "fk_translations": {
+            "staff_id": ("staff", "staff_ref"),
+            "linked_expense_id": ("expenses", "expense_ref"),
+        },
+    },
 }
 
 # Tables that reference each other must be applied in this order, so that
@@ -220,6 +261,7 @@ APPLY_ORDER = [
     "production_machines", "capabilities", "vendors", "staff",
     "expense_categories", "advances", "export_jobs", "materials",
     "clients", "pricing_items", "jobs", "invoices",
+    "expenses", "sales", "petty_cash_entries",
 ]
 
 _missing_from_apply_order = set(SAFE_TO_WRITE_TABLES) - set(APPLY_ORDER)
@@ -230,9 +272,8 @@ if _missing_from_apply_order:
     )
 
 NOT_YET_SAFE_TABLES = [
-    "proposals", "expenses",
+    "proposals",
     "invoice_line_items", "proposal_line_items", "material_transactions",
-    "petty_cash_entries", "sales",
 ]
 
 
@@ -272,7 +313,20 @@ def _extract_db(zip_path: str, tmpdir: str, expected_db_name: str = "app.db") ->
 # failed until this coercion was added). DATE_COLUMNS covers every
 # DateTime/Date column across SAFE_TO_WRITE_TABLES specifically; BOOL_COLUMNS
 # likewise for every Boolean column in that same table set.
-DATE_COLUMNS = {"created_at", "updated_at", "issued_on", "settled_on", "due_date", "due_on"}
+DATE_COLUMNS = {
+    "created_at", "updated_at", "issued_on", "settled_on", "due_date",
+    "due_on", "paid_on",
+    # Added preemptively after paid_on's gap caused a real crash on a
+    # real second-device sync (INSERT INTO invoices failing because
+    # due_on was coerced to a real date but paid_on, missing from this
+    # set, was left as a raw string -- SQLite/SQLAlchemy rejects a
+    # Date column being given a string). These four aren't on any
+    # table in SAFE_TO_WRITE_TABLES yet, but adding them now means the
+    # same gap can't resurface silently the next time proposals/
+    # expenses/material_transactions get unblocked -- one complete
+    # list checked once, not one column added reactively per crash.
+    "transaction_date", "valid_until", "expense_date",
+}
 BOOL_COLUMNS = {"available", "vendor_related", "active"}
 
 _DATETIME_FORMATS = (
@@ -354,6 +408,8 @@ def _translate_fk(column: str, raw_value, referenced_table: str, referenced_key:
         "staff": Staff,
         "capabilities": Capability,
         "jobs": Job,
+        "expenses": Expense,
+        "expense_categories": ExpenseCategory,
     }[referenced_table]
     match = model.query.filter_by(**{referenced_key: natural_key_value}).first()
     if match is None:
