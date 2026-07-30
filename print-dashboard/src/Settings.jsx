@@ -55,6 +55,121 @@ const modalCardStyle = {
   animation: 'fadeIn 0.2s ease'
 };
 
+// Plain names for table names, so the sync screen reads in normal words
+const TABLE_DISPLAY_NAMES = {
+  production_machines: 'machines',
+  capabilities: 'skills list',
+  vendors: 'vendors',
+  staff: 'staff',
+  expense_categories: 'expense categories',
+  advances: 'cash advances',
+  export_jobs: 'exports',
+  materials: 'materials',
+  clients: 'clients',
+  pricing_items: 'price list items',
+  jobs: 'jobs',
+  invoices: 'invoices',
+  proposals: 'proposals',
+  expenses: 'expenses',
+  petty_cash_entries: 'petty cash entries',
+  sales: 'sales',
+};
+
+function tableDisplayName(table) {
+  return TABLE_DISPLAY_NAMES[table] || table.replace(/_/g, ' ');
+}
+
+// Fields we never show in a plain comparison — internal/technical only,
+// not something a person needs to see to make a decision.
+const HIDDEN_DIFF_FIELDS = new Set(['id', 'device_id', 'created_at', 'updated_at']);
+
+// Plain names for raw column names, so "amount" doesn't need explaining
+// and "client_id" isn't shown as a raw database word.
+const FIELD_DISPLAY_NAMES = {
+  amount: 'Total',
+  discount_amount: 'Discount',
+  tax_rate: 'Tax rate',
+  status: 'Status',
+  notes: 'Notes',
+  quantity: 'Quantity',
+  unit_cost: 'Cost per unit',
+  price: 'Price',
+  due_date: 'Due date',
+  due_on: 'Due date',
+  issued_on: 'Issue date',
+  paid_on: 'Paid on',
+  title: 'Title',
+  client_name: 'Client name',
+  progress: 'Progress',
+  active: 'Active',
+};
+
+function fieldDisplayName(field) {
+  return FIELD_DISPLAY_NAMES[field] || field.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function formatFieldValue(val) {
+  if (val === null || val === undefined || val === '') return '(empty)';
+  if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+  if (val === 0 || val === 1) {
+    // could be a real number or a stored boolean; treat plain 0/1 as-is
+    return String(val);
+  }
+  return String(val);
+}
+
+// Compares the two full versions of one record and returns only the
+// fields that actually differ, in plain "before -> after" form.
+function computeFieldDiffs(aValues, bValues) {
+  if (!aValues || !bValues) return [];
+  const allFields = new Set([...Object.keys(aValues), ...Object.keys(bValues)]);
+  const diffs = [];
+  allFields.forEach(field => {
+    if (HIDDEN_DIFF_FIELDS.has(field)) return;
+    const aVal = aValues[field];
+    const bVal = bValues[field];
+    if (String(aVal ?? '') === String(bVal ?? '')) return;
+    diffs.push({
+      field,
+      label: fieldDisplayName(field),
+      before: formatFieldValue(aVal),
+      after: formatFieldValue(bVal),
+    });
+  });
+  return diffs;
+}
+
+// Turns one table's raw sync data into plain lines, split into two groups:
+// things that will be added automatically, and things that need a person
+// to look at because both devices changed the same record.
+function describeSyncTable(table, tableData) {
+  const name = tableDisplayName(table);
+  const changes = (tableData && Array.isArray(tableData.changes)) ? tableData.changes : [];
+
+  if (changes.length === 0) {
+    return { newLine: null, reviewItems: [] };
+  }
+
+  const newCount = changes.filter(c => c.action === 'add_from_b').length;
+  const autoUpdateCount = changes.filter(c => c.action === 'b_wins_update' && !c.needs_review).length;
+  const needsReview = changes.filter(c => c.needs_review);
+
+  const newParts = [];
+  if (newCount > 0) newParts.push(`${newCount} new ${name}`);
+  if (autoUpdateCount > 0) newParts.push(`${autoUpdateCount} ${name} updated from the other device`);
+  const newLine = newParts.length > 0 ? newParts.join(', ') : null;
+
+  const reviewItems = needsReview.map(c => ({
+    table,
+    tableName: name,
+    key: c.key,
+    label: `${name.charAt(0).toUpperCase()}${name.slice(1)} ${c.key} — edited on both devices, needs your review`,
+    diffs: computeFieldDiffs(c.a_values, c.b_values),
+  }));
+
+  return { newLine, reviewItems };
+}
+
 const DEFAULT_MACHINES = [
   { machine_ref: 'MCH-PVC-01', name: 'Pebble Evolis Card Printer', category: 'PVC Cards', capability: 'PVC ID cards and card printing', image_path: '/machines/pvc-card.svg' },
   { machine_ref: 'MCH-SUB-01', name: 'Sublimation Printer', category: 'Sublimation', capability: 'Mug cups and coated gift items', image_path: '/machines/sublimation.svg' },
@@ -545,15 +660,40 @@ export default function Settings() {
                   </div>
                 </div>
 
-                {syncPreview && syncPreview.otherBackup && syncPreview.otherBackup.device_id === device.device_id && (
-                  <div style={{ marginTop: '10px', fontSize: '10px', color: 'var(--text-body)', background: 'var(--bg-subtle, #f7f7f7)', borderRadius: '6px', padding: '10px' }}>
-                    {Object.entries(syncPreview).filter(([key]) => key !== 'ok' && key !== 'otherBackup').map(([table, summary]) => (
-                      <div key={table} style={{ marginBottom: '4px' }}>
-                        <strong>{table}:</strong> {JSON.stringify(summary)}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {syncPreview && syncPreview.otherBackup && syncPreview.otherBackup.device_id === device.device_id && (() => {
+                  const tableEntries = Object.entries(syncPreview).filter(([key]) => key !== 'ok' && key !== 'otherBackup');
+                  const newLines = [];
+                  const reviewLines = [];
+                  tableEntries.forEach(([table, tableData]) => {
+                    const { newLine, reviewLines: tableReviewLines } = describeSyncTable(table, tableData);
+                    if (newLine) newLines.push(newLine);
+                    reviewLines.push(...tableReviewLines);
+                  });
+
+                  return (
+                    <div style={{ marginTop: '10px', fontSize: '10px', color: 'var(--text-body)', background: 'var(--bg-subtle, #f7f7f7)', borderRadius: '6px', padding: '10px' }}>
+                      {newLines.length === 0 && reviewLines.length === 0 && (
+                        <div>Nothing new from this device. Everything already matches.</div>
+                      )}
+                      {newLines.length > 0 && (
+                        <div style={{ marginBottom: reviewLines.length > 0 ? '10px' : 0 }}>
+                          <div style={{ fontWeight: 700, marginBottom: '4px' }}>From this device:</div>
+                          {newLines.map((line, i) => (
+                            <div key={i} style={{ marginBottom: '4px', lineHeight: 1.5 }}>{line}</div>
+                          ))}
+                        </div>
+                      )}
+                      {reviewLines.length > 0 && (
+                        <div>
+                          <div style={{ fontWeight: 700, marginBottom: '4px', color: 'var(--primary)' }}>Needs your review (edited on both devices):</div>
+                          {reviewLines.map((line, i) => (
+                            <div key={i} style={{ marginBottom: '4px', lineHeight: 1.5 }}>{line}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             ))}
           </div>
