@@ -99,6 +99,12 @@ class RowChange:
     # sides independently edited it" (needs a human to review before
     # either side's version overwrites the other).
     needs_review: bool = False
+    # Full column values for this row on each side, only kept when the
+    # row actually differs (identical/add_from_b rows don't need this --
+    # nothing to compare, or nothing on this side yet). Lets the UI show
+    # a plain field-by-field "what changed" instead of just a timestamp.
+    a_values: dict | None = None
+    b_values: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -107,6 +113,8 @@ class RowChange:
             "a_updated_at": self.a_updated_at,
             "b_updated_at": self.b_updated_at,
             "needs_review": self.needs_review,
+            "a_values": self.a_values,
+            "b_values": self.b_values,
         }
 
 
@@ -227,12 +235,16 @@ def _compare(a_rows: dict, b_rows: dict) -> list:
                 key=str(key), action="b_wins_update",
                 a_updated_at=a_updated, b_updated_at=b_updated,
                 needs_review=needs_review,
+                a_values=(a if needs_review else None),
+                b_values=(b if needs_review else None),
             ))
         else:
             changes.append(RowChange(
                 key=str(key), action="a_wins_keep",
                 a_updated_at=a_updated, b_updated_at=b_updated,
                 needs_review=needs_review,
+                a_values=(a if needs_review else None),
+                b_values=(b if needs_review else None),
             ))
     return changes
 
