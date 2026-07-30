@@ -1153,7 +1153,7 @@ const TRANSACTION_TYPES = [
   { value: 'count', label: 'Physical Count' },
 ];
 
-export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, material, editRecord = null, jobs = [] }) {
+export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, material, editRecord = null, jobs = [], vendors = [] }) {
   const [form, setForm] = useState({
     transaction_type: 'usage',
     quantity: '',
@@ -1161,6 +1161,8 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
     transaction_date: new Date().toISOString().split('T')[0],
     job_id: '',
     job_label: '',
+    vendor_id: '',
+    vendor_label: '',
     output_quantity: '',
     output_description: '',
     notes: '',
@@ -1174,6 +1176,7 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
       // (which previously meant "fix a mistake" only worked as
       // delete-and-recreate, losing the original created_at/audit order).
       const linkedJob = jobs.find(j => j.id === editRecord.job_id);
+      const linkedVendor = vendors.find(v => v.id === editRecord.vendor_id);
       setForm({
         transaction_type: editRecord.transaction_type || 'usage',
         quantity: editRecord.quantity != null ? String(editRecord.quantity) : '',
@@ -1181,6 +1184,8 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
         transaction_date: editRecord.transaction_date || new Date().toISOString().split('T')[0],
         job_id: editRecord.job_id != null ? String(editRecord.job_id) : '',
         job_label: linkedJob ? `${linkedJob.job_ref} - ${linkedJob.client_name || linkedJob.title || ''}`.trim() : (editRecord.job_ref || ''),
+        vendor_id: editRecord.vendor_id != null ? String(editRecord.vendor_id) : '',
+        vendor_label: linkedVendor ? linkedVendor.name : (editRecord.vendor_name || ''),
         output_quantity: editRecord.output_quantity != null ? String(editRecord.output_quantity) : '',
         output_description: editRecord.output_description || '',
         notes: editRecord.notes || '',
@@ -1193,6 +1198,8 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
         transaction_date: new Date().toISOString().split('T')[0],
         job_id: '',
         job_label: '',
+        vendor_id: '',
+        vendor_label: '',
         output_quantity: '',
         output_description: '',
         notes: '',
@@ -1214,6 +1221,11 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
   const handleJobLabelChange = value => {
     const match = jobs.find(j => `${j.job_ref} - ${j.client_name || j.title || ''}`.trim() === value);
     setForm(prev => ({ ...prev, job_label: value, job_id: match ? String(match.id) : '' }));
+  };
+
+  const handleVendorLabelChange = value => {
+    const match = vendors.find(v => v.name === value);
+    setForm(prev => ({ ...prev, vendor_label: value, vendor_id: match ? String(match.id) : '' }));
   };
 
   return (
@@ -1238,6 +1250,15 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
             </div>
             {isPurchase && (
               <div><label style={labelStyle}>Unit Cost (MK, optional)</label><input type="number" style={inputStyle} placeholder="Defaults to material's current unit cost" value={form.unit_cost} onChange={e => setForm({ ...form, unit_cost: e.target.value })} /></div>
+            )}
+            {isPurchase && (
+              <div>
+                <label style={labelStyle}>Vendor (optional)</label>
+                <input style={inputStyle} list="material-txn-vendor-list" placeholder="Search vendor..." value={form.vendor_label} onChange={e => handleVendorLabelChange(e.target.value)} />
+                <datalist id="material-txn-vendor-list">
+                  {vendors.map(v => <option key={v.id} value={v.name} />)}
+                </datalist>
+              </div>
             )}
             <div><label style={labelStyle}>Date</label><input type="date" style={inputStyle} value={form.transaction_date} onChange={e => setForm({ ...form, transaction_date: e.target.value })} /></div>
             {!isCount && (

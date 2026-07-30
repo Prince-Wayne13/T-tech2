@@ -354,4 +354,5 @@ def serialize_transaction(txn):
     data = txn.to_dict()
     data["material_name"] = txn.material.name if txn.material else None
     data["job_ref"] = txn.job.job_ref if txn.job else None
+    data["vendor_name"] = txn.vendor.name if txn.vendor else None
     return data

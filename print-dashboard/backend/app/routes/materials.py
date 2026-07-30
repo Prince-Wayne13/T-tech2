@@ -140,6 +140,7 @@ def create_material_transaction(material_id):
         unit_cost=data.get("unit_cost"),
         transaction_date=parse_date(data.get("transaction_date")) or None,
         job_id=data.get("job_id"),
+        vendor_id=data.get("vendor_id"),
         output_quantity=data.get("output_quantity"),
         output_description=data.get("output_description"),
         notes=data.get("notes"),
@@ -175,6 +176,8 @@ def update_material_transaction(transaction_id):
         txn.transaction_date = parse_date(data.get("transaction_date")) or txn.transaction_date
     if "job_id" in data:
         txn.job_id = data["job_id"]
+    if "vendor_id" in data:
+        txn.vendor_id = data["vendor_id"]
     if "output_quantity" in data:
         txn.output_quantity = data["output_quantity"]
     if "output_description" in data:

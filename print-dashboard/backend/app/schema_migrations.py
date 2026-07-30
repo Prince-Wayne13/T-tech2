@@ -20,6 +20,20 @@ def _add_column(table_name, column_sql):
     db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}"))
 
 
+def ensure_material_transaction_vendor_schema():
+    """Adds material_transactions.vendor_id for existing databases created
+    before per-purchase vendor tracking existed. Lets a purchase record
+    which vendor THAT specific delivery came from, separate from
+    Material.vendor_id (the material's usual/default supplier)."""
+    changed = []
+    txn_columns = _columns("material_transactions")
+    if "vendor_id" not in txn_columns:
+        _add_column("material_transactions", "vendor_id INTEGER REFERENCES vendors(id)")
+        changed.append("material_transactions.vendor_id")
+    db.session.commit()
+    return changed
+
+
 def ensure_job_invoice_schema():
     """Apply the lightweight SQLite schema changes needed by the Job->Invoice flow.
 
@@ -640,6 +654,7 @@ def run_full_upgrade():
     machine_capability_schema = ensure_machine_capability_schema()
     default_capabilities = ensure_default_capabilities_seed()
     material_transaction_output = ensure_material_transaction_output_schema()
+    material_transaction_vendor = ensure_material_transaction_vendor_schema()
     core_staff = ensure_core_staff_seed()
     normalized = normalize_legacy_job_statuses()
     backfilled = backfill_invoice_jobs()
@@ -657,6 +672,7 @@ def run_full_upgrade():
         "machine_capability_schema_changes": machine_capability_schema,
         "default_capabilities_seed": default_capabilities,
         "material_transaction_output_schema_changes": material_transaction_output,
+        "material_transaction_vendor_schema_changes": material_transaction_vendor,
         "device_ownership_schema_changes": device_ownership,
         "staff_client_pricing_refs_changes": staff_client_pricing_refs,
         "job_invoice_flow": {

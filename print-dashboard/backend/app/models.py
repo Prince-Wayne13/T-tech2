@@ -215,6 +215,15 @@ class MaterialTransaction(TimestampMixin, SerializableMixin, db.Model):
     # Vendor.balance was a stale, separately-written duplicate (see
     # services/vendors.py's comment on that).
     job_id = db.Column(db.Integer, db.ForeignKey("jobs.id"), nullable=True, index=True)
+    # Which vendor THIS specific purchase came from. Separate from
+    # Material.vendor_id (that's just the material's usual/default
+    # supplier for reference) -- the same material can legitimately be
+    # bought from different vendors on different occasions (different
+    # price, stock availability, etc.), so the actual vendor for a given
+    # purchase belongs on the transaction, not fixed on the material.
+    # Only meaningful for "purchase" rows; left null for usage/adjustment/
+    # count, which don't involve buying anything.
+    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=True, index=True)
     # What a "usage" row's material consumption actually became -- e.g.
     # 40 stickers cut from 2m of vinyl. Populated by usage rows only; left
     # null for purchase/adjustment/count rows, which don't produce output
@@ -226,6 +235,7 @@ class MaterialTransaction(TimestampMixin, SerializableMixin, db.Model):
 
     material = db.relationship("Material", backref="transactions")
     job = db.relationship("Job", backref="material_usages")
+    vendor = db.relationship("Vendor", backref="material_transactions")
 
 
 class Job(TimestampMixin, SerializableMixin, db.Model):

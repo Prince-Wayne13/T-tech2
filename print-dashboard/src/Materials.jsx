@@ -29,6 +29,36 @@ const D = {
 
 const VIEWS = ['Directory', 'Month-End Report'];
 
+// Sync T-Tech Materials: same pattern as Settings.jsx's "Sync T-Tech
+// Machines" / DEFAULT_MACHINES button -- a fixed, hardcoded list of
+// Wayne's real materials (not test/seed data), used only to fill in any
+// that are missing on THIS device. Not a device-to-device sync. Runs
+// instantly, no other computer involved. machine_ref values match
+// DEFAULT_MACHINES in Settings.jsx so materials link to the right machine.
+// Only the material definitions themselves are created here -- no
+// purchase/usage transactions -- so a fresh install gets clean, empty
+// stock/transaction history for each of these.
+const DEFAULT_MATERIALS = [
+  { name: 'PVC Banner', unit: 'sqm', category: 'Large format ink', machine_ref: 'MCH-LF-01', vendor_name: 'FlexMaster Media', unit_cost: 4200, reorder_point: 40, notes: 'Standard outdoor banner stock.' },
+  { name: 'Vinyl Sticker', unit: 'sqm', category: 'Large format ink', machine_ref: 'MCH-LF-01', vendor_name: 'FlexMaster Media', unit_cost: 5800, reorder_point: 30, notes: 'Self-adhesive vinyl for stickers and general cut vinyl.' },
+  { name: 'Large Format Ink', unit: 'L', category: 'Large format ink', machine_ref: 'MCH-LF-01', vendor_name: 'InkPro Malawi', unit_cost: 32000, reorder_point: 8, notes: 'CMYK ink set for the large format printer, shared across banner/sticker jobs.' },
+  { name: 'Grayback Banner', unit: 'sqm', category: 'Large format ink', machine_ref: 'MCH-LF-01', vendor_name: 'FlexMaster Media', unit_cost: 3800, reorder_point: 30, notes: 'Grayback banner stock.' },
+  { name: 'Contra Vision', unit: 'sqm', category: 'Large format ink', machine_ref: 'MCH-LF-01', vendor_name: 'FlexMaster Media', unit_cost: 6500, reorder_point: 20, notes: 'Perforated window vision film.' },
+  { name: 'DTF Film', unit: 'm', category: 'Large format ink', machine_ref: 'MCH-DTF-01', vendor_name: 'InkPro Malawi', unit_cost: 8500, reorder_point: 20, notes: 'DTF transfer film roll.' },
+  { name: 'DTF Powder', unit: 'kg', category: 'Large format ink', machine_ref: 'MCH-DTF-01', vendor_name: 'InkPro Malawi', unit_cost: 15500, reorder_point: 5, notes: 'Hot-melt adhesive powder for DTF transfers.' },
+  { name: 'Digital Printer Ink', unit: 'L', category: 'Large format ink', machine_ref: 'MCH-DIGI-01', vendor_name: 'InkPro Malawi', unit_cost: 28000, reorder_point: 8, notes: 'Ink for the digital printer (books, magazines, calendars).' },
+  { name: 'Digital Printer Paper', unit: 'ream', category: 'Paper & card stock', machine_ref: 'MCH-DIGI-01', vendor_name: 'Paperline Supplies', unit_cost: 17500, reorder_point: 15, notes: 'Paper stock for the digital printer.' },
+  { name: 'Staples', unit: 'box', category: 'Paper & card stock', machine_ref: 'MCH-BIND-01', vendor_name: 'Paperline Supplies', unit_cost: 3200, reorder_point: 10, notes: 'Staples for binding/finishing.' },
+  { name: 'UV DTF Film', unit: 'm', category: 'Large format ink', machine_ref: 'MCH-UVDTF-01', vendor_name: 'InkPro Malawi', unit_cost: 9500, reorder_point: 15, notes: 'UV DTF transfer film roll.' },
+  { name: 'UV DTF Ink', unit: 'L', category: 'Large format ink', machine_ref: 'MCH-UVDTF-01', vendor_name: 'InkPro Malawi', unit_cost: 34000, reorder_point: 6, notes: 'Ink set for the UV DTF printer.' },
+  { name: 'Pebble Ribbon', unit: 'roll', category: 'Large format ink', machine_ref: 'MCH-PVC-01', vendor_name: 'InkPro Malawi', unit_cost: 22000, reorder_point: 5, notes: 'Ribbon for the Pebble/Evolis card printer.' },
+  { name: 'PVC Cards', unit: 'card', category: 'Paper & card stock', machine_ref: 'MCH-PVC-01', vendor_name: 'Paperline Supplies', unit_cost: 450, reorder_point: 100, notes: 'Blank PVC cards for the Pebble/Evolis card printer.' },
+  { name: 'Konica Minolta Paper', unit: 'ream', category: 'Paper & card stock', machine_ref: 'MCH-KM-01', vendor_name: 'Paperline Supplies', unit_cost: 18500, reorder_point: 15, notes: 'Paper stock for the Konica Minolta press (calendars, books, normal printing).' },
+  { name: 'Konica Minolta Ink', unit: 'L', category: 'Large format ink', machine_ref: 'MCH-KM-01', vendor_name: 'InkPro Malawi', unit_cost: 30000, reorder_point: 8, notes: 'Ink/toner for the Konica Minolta press.' },
+  { name: 'Sublimation Paper', unit: 'ream', category: 'Paper & card stock', machine_ref: 'MCH-SUB-01', vendor_name: 'Paperline Supplies', unit_cost: 12500, reorder_point: 15, notes: 'Transfer paper for the sublimation printer.' },
+  { name: 'Sublimation Ink', unit: 'L', category: 'Large format ink', machine_ref: 'MCH-SUB-01', vendor_name: 'InkPro Malawi', unit_cost: 27000, reorder_point: 6, notes: 'Ink set for the sublimation printer (mug cups).' },
+];
+
 /* ═══════════════════════════════════════ Directory ═══════════════════════════════════════ */
 
 function MaterialCard({ material, onOpen, onEdit }) {
@@ -67,9 +97,10 @@ function TransactionRow({ txn, onEdit, onDelete }) {
       <span className="status-badge" style={{ background: `${typeColor}22`, color: typeColor, textTransform: 'capitalize', flexShrink: 0 }}>{txn.transaction_type}</span>
       <span style={{ fontWeight: 600, minWidth: '70px' }}>{number(txn.quantity)}</span>
       <span style={{ color: 'var(--text-muted)', flex: 1 }}>
-        {txn.job_ref ? `Job ${txn.job_ref}` : ''}
-        {txn.output_quantity ? `${txn.job_ref ? ' - ' : ''}${number(txn.output_quantity)} ${txn.output_description || 'output'}` : ''}
-        {txn.notes ? `${txn.job_ref || txn.output_quantity ? ' - ' : ''}${txn.notes}` : ''}
+        {txn.vendor_name ? `from ${txn.vendor_name}` : ''}
+        {txn.job_ref ? `${txn.vendor_name ? ' - ' : ''}Job ${txn.job_ref}` : ''}
+        {txn.output_quantity ? `${txn.vendor_name || txn.job_ref ? ' - ' : ''}${number(txn.output_quantity)} ${txn.output_description || 'output'}` : ''}
+        {txn.notes ? `${txn.vendor_name || txn.job_ref || txn.output_quantity ? ' - ' : ''}${txn.notes}` : ''}
       </span>
       <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{compactDate(txn.transaction_date)}</span>
       <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
@@ -278,6 +309,7 @@ export default function Materials() {
   // single Materials page session and jobs() can return a lot of rows.
   const [editTxn, setEditTxn] = useState(null);
   const [jobs, setJobs] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [txnRefreshKey, setTxnRefreshKey] = useState(0);
   const { toast, notify } = useModuleToast();
 
@@ -294,6 +326,9 @@ export default function Materials() {
   useEffect(() => {
     api.jobs('?per_page=200').then(data => setJobs(data.items || [])).catch(() => {});
   }, []);
+  useEffect(() => {
+    api.vendors('?per_page=200').then(data => setVendors(data.items || [])).catch(() => {});
+  }, []);
 
   const filtered = materials.filter(m => `${m.name} ${m.category} ${m.material_ref}`.toLowerCase().includes(search.toLowerCase()));
   const lowStockCount = materials.filter(m => m.low_stock).length;
@@ -306,6 +341,41 @@ export default function Materials() {
     { label: 'Revenue Generated', value: money(totalRevenue), sub: 'Attributed via job usage', icon: D.check, color: 'secondary' },
     { label: 'Low Stock', value: String(lowStockCount), sub: 'At or below reorder point', icon: D.alert, color: lowStockCount > 0 ? 'warning' : 'teal' },
   ];
+
+  const [syncingMaterials, setSyncingMaterials] = useState(false);
+
+  const seedDefaultMaterials = async () => {
+    setSyncingMaterials(true);
+    try {
+      const existingRefs = new Set((materials || []).map(m => m.name.trim().toLowerCase()));
+      const [machinesRes, vendorsRes] = await Promise.all([
+        api.machines('?per_page=200'),
+        api.vendors('?per_page=200'),
+      ]);
+      const machineByRef = new Map((machinesRes.items || []).map(m => [m.machine_ref, m.id]));
+      const vendorByName = new Map((vendorsRes.items || []).map(v => [v.name, v.id]));
+
+      for (const item of DEFAULT_MATERIALS) {
+        if (existingRefs.has(item.name.trim().toLowerCase())) continue;
+        await api.createMaterial({
+          name: item.name,
+          unit: item.unit,
+          category: item.category,
+          unit_cost: item.unit_cost,
+          reorder_point: item.reorder_point,
+          notes: item.notes,
+          machine_id: machineByRef.get(item.machine_ref) || null,
+          vendor_id: vendorByName.get(item.vendor_name) || null,
+        });
+      }
+      loadMaterials();
+      notify('Materials synced');
+    } catch (syncError) {
+      notify(syncError.message || 'Could not sync materials', 'error');
+    } finally {
+      setSyncingMaterials(false);
+    }
+  };
 
   const handleSaveMaterial = async form => {
     try {
@@ -341,6 +411,7 @@ export default function Materials() {
         notes: form.notes || null,
       };
       if (form.transaction_type === 'purchase' && form.unit_cost !== '') payload.unit_cost = Number(form.unit_cost);
+      if (form.transaction_type === 'purchase') payload.vendor_id = form.vendor_id ? Number(form.vendor_id) : null;
       if (form.transaction_type !== 'count') {
         payload.job_id = form.job_id ? Number(form.job_id) : null;
         if (form.transaction_type === 'usage' && form.output_quantity !== '') {
@@ -387,12 +458,33 @@ export default function Materials() {
 
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
-      <ModuleHeader
-        title="Materials"
-        subtitle="Stock, consumption & month-end reconciliation"
-        actionLabel={view === 'Directory' && !selected ? 'New Material' : undefined}
-        onAction={() => setShowEntry(true)}
-      />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <ModuleHeader
+          title="Materials"
+          subtitle="Stock, consumption & month-end reconciliation"
+        />
+        {view === 'Directory' && !selected && (
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '18px' }}>
+            <button
+              onClick={seedDefaultMaterials}
+              disabled={syncingMaterials}
+              style={{ background: 'var(--bg-canvas)', border: '1px solid var(--border-faint)', borderRadius: '6px', padding: '4px 8px', fontSize: '10px', fontWeight: '600', color: 'var(--primary)', cursor: syncingMaterials ? 'not-allowed' : 'pointer' }}
+            >
+              {syncingMaterials ? 'Syncing…' : 'Sync T-Tech Materials'}
+            </button>
+            <button
+              onClick={() => setShowEntry(true)}
+              style={{
+                background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '50px',
+                padding: '7px 15px', fontSize: '10px', fontWeight: '600', cursor: 'pointer',
+                boxShadow: '0 3px 10px rgba(58,80,107,0.35)',
+              }}
+            >
+              New Material
+            </button>
+          </div>
+        )}
+      </div>
 
       <div className="chart-filters on-canvas" style={{ display: 'flex', gap: '6px', marginBottom: '14px', width: 'fit-content' }}>
         {VIEWS.map(v => (
@@ -464,6 +556,7 @@ export default function Materials() {
         material={txnMaterial || selected}
         editRecord={editTxn}
         jobs={jobs}
+        vendors={vendors}
         onClose={() => { setTxnMaterial(null); setEditTxn(null); }}
         onSave={handleLogTransaction}
       />
