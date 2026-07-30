@@ -5,6 +5,7 @@ from .analytics import bp as analytics_bp
 from .audit import bp as audit_bp
 from .backup_routes import bp as backup_bp
 from .clients import bp as clients_bp
+from .conflict_routes import bp as conflict_bp
 from .exports import bp as exports_bp
 from .expenses import bp as expenses_bp
 from .invoices import bp as invoices_bp
@@ -39,5 +40,6 @@ def register_blueprints(app):
     app.register_blueprint(sales_bp, url_prefix="/api/sales")
     app.register_blueprint(petty_cash_bp, url_prefix="/api/petty-cash")
     app.register_blueprint(backup_bp, url_prefix="/api/backup")
+    app.register_blueprint(conflict_bp, url_prefix="/api/sync-conflicts")
     app.register_blueprint(reports_backup_bp, url_prefix="/api/reports-backup")
     app.register_blueprint(system_bp, url_prefix="/api/system")

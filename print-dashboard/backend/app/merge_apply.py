@@ -70,16 +70,17 @@ Design:
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 
 from .extensions import db
 from .models import (
-    Advance, Capability, ExpenseCategory, ExportJob, Material,
-    ProductionMachine, Staff, Vendor,
+    Advance, Capability, Client, ExpenseCategory, ExportJob, Invoice, Job,
+    Material, PricingItem, ProductionMachine, Staff, SyncConflict, Vendor,
 )
 from .merge_preview import preview_merge
 
@@ -118,12 +119,8 @@ SAFE_TO_WRITE_TABLES = {
     },
     "staff": {
         "model": Staff,
-        # Weak key -- see merge_preview.py's WEAK_KEY_TABLES docstring.
-        # preview_merge already reports staff changes keyed as
-        # "device_id::id" strings; apply just needs to look B's row up by
-        # its own (device_id, id), which _fetch_b_row handles specially.
-        "key_column": "__device_and_id__",
-        "columns": ["name", "role", "active", "notes", "device_id", "created_at", "updated_at"],
+        "key_column": "staff_ref",
+        "columns": ["staff_ref", "name", "role", "active", "notes", "device_id", "created_at", "updated_at"],
     },
     "expense_categories": {
         "model": ExpenseCategory,
@@ -159,22 +156,83 @@ SAFE_TO_WRITE_TABLES = {
             "vendor_id": ("vendors", "name"),
         },
     },
+    "clients": {
+        "model": Client,
+        "key_column": "client_ref",
+        "columns": [
+            "client_ref", "name", "phone", "email", "address", "notes",
+            "device_id", "created_at", "updated_at",
+        ],
+    },
+    "pricing_items": {
+        "model": PricingItem,
+        "key_column": "pricing_item_ref",
+        "columns": [
+            "code", "pricing_item_ref", "name", "category", "machine_id",
+            "unit", "price", "cost_estimate", "currency", "active", "notes",
+            "device_id", "created_at", "updated_at",
+        ],
+        "fk_translations": {
+            "machine_id": ("production_machines", "machine_ref"),
+        },
+    },
+    "jobs": {
+        "model": Job,
+        "key_column": "job_ref",
+        "columns": [
+            "job_ref", "client_id", "client_name", "title", "machine_id",
+            "service_category", "status", "priority", "pages", "copies",
+            "progress", "completed_count", "total_count", "due_date",
+            "assigned_staff_id", "required_capability_id", "notes",
+            "device_id", "created_at", "updated_at",
+        ],
+        "fk_translations": {
+            "client_id": ("clients", "client_ref"),
+            "machine_id": ("production_machines", "machine_ref"),
+            "assigned_staff_id": ("staff", "staff_ref"),
+            "required_capability_id": ("capabilities", "name"),
+        },
+    },
+    "invoices": {
+        "model": Invoice,
+        "key_column": "invoice_ref",
+        "columns": [
+            "invoice_ref", "job_id", "client_id", "client_name", "title",
+            "status", "amount", "discount_amount", "tax_rate", "currency",
+            "issued_on", "due_on", "paid_on", "purchase_order",
+            "payment_terms", "notes", "device_id", "created_at", "updated_at",
+        ],
+        "fk_translations": {
+            "job_id": ("jobs", "job_ref"),
+            "client_id": ("clients", "client_ref"),
+        },
+    },
 }
 
 # Tables that reference each other must be applied in this order, so that
-# a row added earlier in the same run (e.g. a new machine or vendor from
-# B) is already committed-and-flushed by the time a later table (e.g.
-# materials) needs to resolve an FK against it. Any SAFE_TO_WRITE_TABLES
-# key not listed here has no incoming FK dependency and can run after.
+# a row added earlier in the same run (e.g. a new machine, vendor, client,
+# or job from B) is already committed-and-flushed by the time a later
+# table (e.g. materials, jobs, invoices) needs to resolve an FK against
+# it. Every key in SAFE_TO_WRITE_TABLES must appear here -- the apply loop
+# iterates this list, not the dict directly, so a table missing from here
+# is silently never applied even if present in SAFE_TO_WRITE_TABLES.
 APPLY_ORDER = [
     "production_machines", "capabilities", "vendors", "staff",
     "expense_categories", "advances", "export_jobs", "materials",
+    "clients", "pricing_items", "jobs", "invoices",
 ]
 
+_missing_from_apply_order = set(SAFE_TO_WRITE_TABLES) - set(APPLY_ORDER)
+if _missing_from_apply_order:
+    raise RuntimeError(
+        f"merge_apply.py: {_missing_from_apply_order} in SAFE_TO_WRITE_TABLES "
+        "but missing from APPLY_ORDER -- would be silently never applied."
+    )
+
 NOT_YET_SAFE_TABLES = [
-    "jobs", "invoices", "proposals", "expenses",
+    "proposals", "expenses",
     "invoice_line_items", "proposal_line_items", "material_transactions",
-    "petty_cash_entries", "sales", "clients", "pricing_items",
+    "petty_cash_entries", "sales",
 ]
 
 
@@ -184,6 +242,7 @@ class TableApplyResult:
     applied: bool
     added: int = 0
     updated: int = 0
+    conflicts_created: int = 0
     skipped_reason: str | None = None
     errors: list = field(default_factory=list)
 
@@ -193,6 +252,7 @@ class TableApplyResult:
             "applied": self.applied,
             "added": self.added,
             "updated": self.updated,
+            "conflicts_created": self.conflicts_created,
             "skipped_reason": self.skipped_reason,
             "errors": self.errors,
         }
@@ -212,10 +272,17 @@ def _extract_db(zip_path: str, tmpdir: str, expected_db_name: str = "app.db") ->
 # failed until this coercion was added). DATE_COLUMNS covers every
 # DateTime/Date column across SAFE_TO_WRITE_TABLES specifically; BOOL_COLUMNS
 # likewise for every Boolean column in that same table set.
-DATE_COLUMNS = {"created_at", "updated_at", "issued_on", "settled_on"}
+DATE_COLUMNS = {"created_at", "updated_at", "issued_on", "settled_on", "due_date", "due_on"}
 BOOL_COLUMNS = {"available", "vendor_related", "active"}
 
-_DATETIME_FORMATS = ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
+_DATETIME_FORMATS = (
+    "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d",
+    # ISO format (T separator) -- SyncConflict.new_values stores
+    # datetimes via .isoformat() for JSON serialization, so resolving
+    # a conflict later needs to parse that format too, not just
+    # SQLite's space-separated one.
+    "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S",
+)
 
 
 def _coerce_value(column: str, value):
@@ -280,7 +347,14 @@ def _translate_fk(column: str, raw_value, referenced_table: str, referenced_key:
     # have already resolved raw_value into the natural-key VALUE (a ref
     # string or a name), not a raw id. See call sites below.
     natural_key_value = raw_value
-    model = {"production_machines": ProductionMachine, "vendors": Vendor}[referenced_table]
+    model = {
+        "production_machines": ProductionMachine,
+        "vendors": Vendor,
+        "clients": Client,
+        "staff": Staff,
+        "capabilities": Capability,
+        "jobs": Job,
+    }[referenced_table]
     match = model.query.filter_by(**{referenced_key: natural_key_value}).first()
     if match is None:
         errors.append(
@@ -390,10 +464,78 @@ def apply_merge(zip_path_a: str | None, zip_path_b: str, dry_run_only: bool = Tr
 
                     for change in table_changes:
                         action = change["action"]
-                        if action in ("identical", "a_wins_keep"):
+                        if action == "identical":
                             continue
 
                         key_value = change["key"]
+
+                        if change.get("needs_review") and action in ("b_wins_update", "a_wins_keep"):
+                            b_row = _fetch_b_row(conn_b, table, key_column, key_value)
+                            if b_row is None:
+                                result.errors.append(
+                                    f"{key_column}={key_value}: expected in B's backup but not found "
+                                    "(backup may have changed between preview and apply)."
+                                )
+                                continue
+
+                            already_pending = SyncConflict.query.filter_by(
+                                table_name=table, record_key=str(key_value), status="pending"
+                            ).first()
+                            if already_pending:
+                                continue
+
+                            # Dismissed = permanent, never resurface. Skipped
+                            # = must resurface on every future check until
+                            # approved or dismissed -- reopen it as pending
+                            # instead of creating a second row for the same
+                            # record.
+                            dismissed = SyncConflict.query.filter_by(
+                                table_name=table, record_key=str(key_value), status="dismissed"
+                            ).first()
+                            if dismissed:
+                                continue
+
+                            existing = (
+                                model.query.filter_by(**{key_column: key_value}).first()
+                                if key_column != "__device_and_id__"
+                                else None
+                            )
+                            old_values = existing.to_dict() if existing and hasattr(existing, "to_dict") else {}
+                            new_values = _coerce_row(columns, b_row)
+                            for col in list(new_values):
+                                val = new_values[col]
+                                if isinstance(val, (datetime, date)):
+                                    new_values[col] = val.isoformat()
+
+                            skipped = SyncConflict.query.filter_by(
+                                table_name=table, record_key=str(key_value), status="skipped"
+                            ).first()
+                            if skipped:
+                                skipped.old_values = json.dumps(old_values, default=str)
+                                skipped.new_values = json.dumps(new_values, default=str)
+                                skipped.source_device_id = b_row["device_id"] if "device_id" in b_row.keys() else None
+                                skipped.status = "pending"
+                                skipped.resolved_at = None
+                                db.session.flush()
+                                result.conflicts_created += 1
+                                continue
+
+                            conflict = SyncConflict(
+                                table_name=table,
+                                record_key=str(key_value),
+                                source_device_id=b_row["device_id"] if "device_id" in b_row.keys() else None,
+                                old_values=json.dumps(old_values, default=str),
+                                new_values=json.dumps(new_values, default=str),
+                                status="pending",
+                            )
+                            db.session.add(conflict)
+                            db.session.flush()
+                            result.conflicts_created += 1
+                            continue
+
+                        if action == "a_wins_keep":
+                            continue
+
                         b_row = _fetch_b_row(conn_b, table, key_column, key_value)
                         if b_row is None:
                             result.errors.append(
@@ -479,3 +621,66 @@ def apply_merge(zip_path_a: str | None, zip_path_b: str, dry_run_only: bool = Tr
                 }
             finally:
                 conn_b.close()
+
+
+def resolve_conflict(conflict_id: int, action: str) -> dict:
+    """Approve (write the pending new_values over the current row) or
+    skip (leave the current row untouched, mark resolved) a single
+    SyncConflict. action must be "approve" or "skip".
+
+    Approve reuses the same column list and FK-translation targets as
+    SAFE_TO_WRITE_TABLES so a resolved conflict is written exactly the
+    same way an ordinary auto-applied update would be, keeping one code
+    path for "how a row's values get written" rather than a second one
+    for conflicts specifically.
+    """
+    if action not in ("approve", "skip"):
+        return {"ok": False, "message": f"Invalid action {action!r}, must be 'approve' or 'skip'."}
+
+    conflict = SyncConflict.query.get(conflict_id)
+    if conflict is None:
+        return {"ok": False, "message": f"No conflict found with id={conflict_id}."}
+    if conflict.status != "pending":
+        return {"ok": False, "message": f"Conflict {conflict_id} is already '{conflict.status}', not pending."}
+
+    if action == "skip":
+        conflict.status = "skipped"
+        conflict.resolved_at = datetime.utcnow()
+        db.session.commit()
+        return {"ok": True, "action": "skip", "conflict_id": conflict_id}
+
+    table = conflict.table_name
+    spec = SAFE_TO_WRITE_TABLES.get(table)
+    if spec is None:
+        return {"ok": False, "message": f"Table {table!r} is no longer in SAFE_TO_WRITE_TABLES."}
+
+    model = spec["model"]
+    key_column = spec["key_column"]
+    new_values = json.loads(conflict.new_values)
+
+    existing = model.query.filter_by(**{key_column: conflict.record_key}).first()
+    if existing is None:
+        return {"ok": False, "message": f"Record {conflict.record_key!r} no longer exists on this device."}
+
+    for col, value in new_values.items():
+        if col == key_column:
+            continue
+        setattr(existing, col, _coerce_value(col, value))
+
+    conflict.status = "approved"
+    conflict.resolved_at = datetime.utcnow()
+    db.session.commit()
+    return {"ok": True, "action": "approve", "conflict_id": conflict_id}
+
+
+def permanently_dismiss_conflict(conflict_id: int) -> dict:
+    """Marks a conflict as dismissed -- distinct from skip. Skip keeps
+    reappearing on future notification checks; dismissed conflicts are
+    excluded from the pending list going forward and never resurface."""
+    conflict = SyncConflict.query.get(conflict_id)
+    if conflict is None:
+        return {"ok": False, "message": f"No conflict found with id={conflict_id}."}
+    conflict.status = "dismissed"
+    conflict.resolved_at = datetime.utcnow()
+    db.session.commit()
+    return {"ok": True, "action": "dismiss", "conflict_id": conflict_id}

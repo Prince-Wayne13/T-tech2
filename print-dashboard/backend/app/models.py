@@ -1,5 +1,6 @@
 # path: backend/app/models.py
 
+import json
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -516,6 +517,33 @@ class AuditLog(db.Model):
             "entity_type": self.entity_type,
             "entity_id": self.entity_id,
             "created_at": self.created_at.isoformat(),
+        }
+
+
+class SyncConflict(db.Model):
+    __tablename__ = "sync_conflicts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    table_name = db.Column(db.String(80), nullable=False, index=True)
+    record_key = db.Column(db.String(80), nullable=False, index=True)
+    source_device_id = db.Column(db.String(40), nullable=True)
+    old_values = db.Column(db.Text, nullable=False)
+    new_values = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="pending", index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "table_name": self.table_name,
+            "record_key": self.record_key,
+            "source_device_id": self.source_device_id,
+            "old_values": json.loads(self.old_values),
+            "new_values": json.loads(self.new_values),
+            "status": self.status,
+            "created_at": self.created_at.isoformat(),
+            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
         }
 
 

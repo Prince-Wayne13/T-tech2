@@ -93,6 +93,12 @@ class RowChange:
     action: str  # "add_from_b", "b_wins_update", "a_wins_keep", "identical"
     a_updated_at: str | None = None
     b_updated_at: str | None = None
+    # True only when BOTH sides show a real edit since the record was
+    # created (updated_at != created_at on both sides) -- distinguishes
+    # "only B ever touched this row" (safe to auto-apply) from "both
+    # sides independently edited it" (needs a human to review before
+    # either side's version overwrites the other).
+    needs_review: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -100,6 +106,7 @@ class RowChange:
             "action": self.action,
             "a_updated_at": self.a_updated_at,
             "b_updated_at": self.b_updated_at,
+            "needs_review": self.needs_review,
         }
 
 
@@ -155,6 +162,26 @@ def _rows_by_device_and_id(conn: sqlite3.Connection, table: str) -> dict:
     return rows
 
 
+def _seconds_apart(ts_a: str | None, ts_b: str | None) -> float:
+    """Absolute difference in seconds between two SQLite datetime
+    strings. Returns 0 if either is missing or unparseable, treating
+    that as "not a real edit" rather than raising."""
+    if not ts_a or not ts_b:
+        return 0.0
+    formats = ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S")
+    parsed = {}
+    for label, ts in (("a", ts_a), ("b", ts_b)):
+        for fmt in formats:
+            try:
+                parsed[label] = datetime.strptime(ts, fmt)
+                break
+            except ValueError:
+                continue
+    if "a" not in parsed or "b" not in parsed:
+        return 0.0
+    return abs((parsed["a"] - parsed["b"]).total_seconds())
+
+
 def _compare(a_rows: dict, b_rows: dict) -> list:
     changes = []
     all_keys = set(a_rows) | set(b_rows)
@@ -173,10 +200,40 @@ def _compare(a_rows: dict, b_rows: dict) -> list:
         b_updated = b.get("updated_at")
         if a_updated == b_updated:
             changes.append(RowChange(key=str(key), action="identical", a_updated_at=a_updated, b_updated_at=b_updated))
-        elif (b_updated or "") > (a_updated or ""):
-            changes.append(RowChange(key=str(key), action="b_wins_update", a_updated_at=a_updated, b_updated_at=b_updated))
+            continue
+
+        # Both sides diverge -- check whether each side has actually
+        # been edited since creation, or is still at its original
+        # created_at (never touched on that device). Only when BOTH
+        # sides show a real independent edit does this need a human
+        # to review before either version overwrites the other.
+        #
+        # created_at and updated_at are set via two separate
+        # datetime.utcnow() calls at insert time (see TimestampMixin),
+        # so a never-edited row's updated_at is a few microseconds
+        # AFTER its created_at, not exactly equal -- exact equality
+        # produced false positives on every freshly-created row in
+        # testing. A 2-second tolerance treats "insert-time drift" as
+        # unedited while still catching any real edit, which happens
+        # much later in practice.
+        a_created = a.get("created_at")
+        b_created = b.get("created_at")
+        a_edited = a_updated is not None and _seconds_apart(a_updated, a_created) > 2
+        b_edited = b_updated is not None and _seconds_apart(b_updated, b_created) > 2
+        needs_review = a_edited and b_edited
+
+        if (b_updated or "") > (a_updated or ""):
+            changes.append(RowChange(
+                key=str(key), action="b_wins_update",
+                a_updated_at=a_updated, b_updated_at=b_updated,
+                needs_review=needs_review,
+            ))
         else:
-            changes.append(RowChange(key=str(key), action="a_wins_keep", a_updated_at=a_updated, b_updated_at=b_updated))
+            changes.append(RowChange(
+                key=str(key), action="a_wins_keep",
+                a_updated_at=a_updated, b_updated_at=b_updated,
+                needs_review=needs_review,
+            ))
     return changes
 
 

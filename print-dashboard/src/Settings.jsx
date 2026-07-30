@@ -277,11 +277,11 @@ export default function Settings() {
     }
   };
 
-  const [business, setBusiness] = useState({
-    name: 'T-Tech Printing Solutions',
-    phone: '+265 1 234 567',
-    email: 'info@ttechmw.com',
-    address: 'Area 47, Lilongwe, Malawi',
+   const [business, setBusiness] = useState({
+    name: 'T-Tech Suppliers & General Dealers Ltd',
+    phone: '+265 988 231 291',
+    email: 'ttechsuppliers@gmail.com',
+    address: 'Lilongwe, City Mall, Standard Bank Corridor',
     tin: '1002345678'
   });
   
@@ -515,7 +515,7 @@ export default function Settings() {
                       {device.device_name || device.device_id}
                     </div>
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                      Last backup: {device.updated_at ? new Date(device.updated_at).toLocaleString() : 'unknown'}
+                      Last backup: {device.most_recent_updated_at ? new Date(device.most_recent_updated_at).toLocaleString() : 'unknown'}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
