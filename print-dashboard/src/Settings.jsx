@@ -693,7 +693,7 @@ export default function Settings() {
                       {device.device_name || device.device_id}
                     </div>
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                      Last backup: {device.most_recent_updated_at ? new Date(device.most_recent_updated_at).toLocaleString() : 'unknown'}
+                      Last backup: {device.modified_at ? new Date(device.modified_at).toLocaleString() : 'unknown'}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>

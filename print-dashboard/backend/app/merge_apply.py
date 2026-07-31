@@ -80,8 +80,8 @@ from datetime import date, datetime
 from .extensions import db
 from .models import (
     Advance, Capability, Client, Expense, ExpenseCategory, ExportJob,
-    Invoice, Job, Material, PettyCash, PricingItem, ProductionMachine,
-    Sale, Staff, SyncConflict, Vendor,
+    Invoice, Job, Material, MaterialTransaction, PettyCash, PricingItem,
+    ProductionMachine, Sale, Staff, SyncConflict, Vendor,
 )
 from .merge_preview import preview_merge
 
@@ -118,11 +118,12 @@ SAFE_TO_WRITE_TABLES = {
             "device_id", "created_at", "updated_at",
         ],
     },
-    "staff": {
-        "model": Staff,
-        "key_column": "staff_ref",
-        "columns": ["staff_ref", "name", "role", "active", "notes", "device_id", "created_at", "updated_at"],
-    },
+    # staff intentionally NOT synced (decision #1, 2026-07-31): stays
+    # local to each device permanently. Previously synced via staff_ref;
+    # removed here, and assigned_staff_id/staff_id below are excluded
+    # from the columns list on jobs/petty_cash_entries rather than
+    # translated, since a raw un-translated local id would silently
+    # point at the wrong person on the receiving device.
     "expense_categories": {
         "model": ExpenseCategory,
         "key_column": "name",
@@ -157,6 +158,24 @@ SAFE_TO_WRITE_TABLES = {
             "vendor_id": ("vendors", "name"),
         },
     },
+    # Must run after materials, jobs, and vendors above -- all three FK
+    # targets need to already have this run's new rows committed and
+    # flushed before a transaction pointing at any of them can resolve.
+    "material_transactions": {
+        "model": MaterialTransaction,
+        "key_column": "material_transaction_ref",
+        "columns": [
+            "material_transaction_ref", "material_id", "transaction_type",
+            "quantity", "unit_cost", "transaction_date", "job_id", "vendor_id",
+            "output_quantity", "output_description", "notes",
+            "device_id", "created_at", "updated_at",
+        ],
+        "fk_translations": {
+            "material_id": ("materials", "material_ref"),
+            "job_id": ("jobs", "job_ref"),
+            "vendor_id": ("vendors", "name"),
+        },
+    },
     "clients": {
         "model": Client,
         "key_column": "client_ref",
@@ -184,13 +203,12 @@ SAFE_TO_WRITE_TABLES = {
             "job_ref", "client_id", "client_name", "title", "machine_id",
             "service_category", "status", "priority", "pages", "copies",
             "progress", "completed_count", "total_count", "due_date",
-            "assigned_staff_id", "required_capability_id", "notes",
+            "required_capability_id", "notes",
             "device_id", "created_at", "updated_at",
         ],
         "fk_translations": {
             "client_id": ("clients", "client_ref"),
             "machine_id": ("production_machines", "machine_ref"),
-            "assigned_staff_id": ("staff", "staff_ref"),
             "required_capability_id": ("capabilities", "name"),
         },
     },
@@ -240,11 +258,10 @@ SAFE_TO_WRITE_TABLES = {
         "model": PettyCash,
         "key_column": "entry_ref",
         "columns": [
-            "entry_ref", "entry_type", "amount", "staff_id",
+            "entry_ref", "entry_type", "amount",
             "linked_expense_id", "notes", "device_id", "created_at", "updated_at",
         ],
         "fk_translations": {
-            "staff_id": ("staff", "staff_ref"),
             "linked_expense_id": ("expenses", "expense_ref"),
         },
     },
@@ -258,10 +275,10 @@ SAFE_TO_WRITE_TABLES = {
 # iterates this list, not the dict directly, so a table missing from here
 # is silently never applied even if present in SAFE_TO_WRITE_TABLES.
 APPLY_ORDER = [
-    "production_machines", "capabilities", "vendors", "staff",
+    "production_machines", "capabilities", "vendors",
     "expense_categories", "advances", "export_jobs", "materials",
     "clients", "pricing_items", "jobs", "invoices",
-    "expenses", "sales", "petty_cash_entries",
+    "expenses", "sales", "petty_cash_entries", "material_transactions",
 ]
 
 _missing_from_apply_order = set(SAFE_TO_WRITE_TABLES) - set(APPLY_ORDER)
@@ -273,7 +290,7 @@ if _missing_from_apply_order:
 
 NOT_YET_SAFE_TABLES = [
     "proposals",
-    "invoice_line_items", "proposal_line_items", "material_transactions",
+    "invoice_line_items", "proposal_line_items",
 ]
 
 
@@ -410,6 +427,7 @@ def _translate_fk(column: str, raw_value, referenced_table: str, referenced_key:
         "jobs": Job,
         "expenses": Expense,
         "expense_categories": ExpenseCategory,
+        "materials": Material,
     }[referenced_table]
     match = model.query.filter_by(**{referenced_key: natural_key_value}).first()
     if match is None:

@@ -124,6 +124,8 @@ def list_material_transactions(material_id):
 
 @bp.post("/<int:material_id>/transactions")
 def create_material_transaction(material_id):
+    from ..services.ref_generator import next_material_transaction_ref
+
     material = Material.query.get_or_404(material_id)
     data = request.get_json() or {}
     transaction_type = data.get("transaction_type")
@@ -134,6 +136,7 @@ def create_material_transaction(material_id):
         return jsonify({"error": "quantity is required"}), 400
 
     txn = MaterialTransaction(
+        material_transaction_ref=next_material_transaction_ref(),
         material_id=material.id,
         transaction_type=transaction_type,
         quantity=quantity,

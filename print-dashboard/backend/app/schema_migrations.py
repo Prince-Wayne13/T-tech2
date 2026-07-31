@@ -515,13 +515,14 @@ def ensure_staff_client_pricing_refs():
     """
     changed = []
 
-    from .models import Client, PricingItem
+    from .models import Client, MaterialTransaction, PricingItem
     from .services.ref_generator import _device_fragment
 
     ref_specs = [
         ("staff", "staff_ref", Staff, "STAFF"),
         ("clients", "client_ref", Client, "CLI"),
         ("pricing_items", "pricing_item_ref", PricingItem, "PRC"),
+        ("material_transactions", "material_transaction_ref", MaterialTransaction, "MTX"),
     ]
 
     existing_tables = _tables()

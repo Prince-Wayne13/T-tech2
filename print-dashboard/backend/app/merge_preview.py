@@ -66,9 +66,11 @@ REF_KEYED_TABLES = {
     # entirely unmergeable. vendors is deliberately NOT added here --
     # it already has a real, working name-based match in
     # NAME_KEYED_TABLES, so no vendor_ref exists or is needed.
-    "staff": "staff_ref",
+    # staff intentionally excluded (decision #1, 2026-07-31): stays
+    # local to each device permanently, never appears in sync previews.
     "clients": "client_ref",
     "pricing_items": "pricing_item_ref",
+    "material_transactions": "material_transaction_ref",
 }
 
 NAME_KEYED_TABLES = {

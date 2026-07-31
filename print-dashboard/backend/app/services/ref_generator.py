@@ -136,3 +136,8 @@ def next_client_ref() -> str:
 def next_pricing_item_ref() -> str:
     from ..models import PricingItem
     return _next_sequential_ref(PricingItem, "PRC")
+
+
+def next_material_transaction_ref() -> str:
+    from ..models import MaterialTransaction
+    return _next_sequential_ref(MaterialTransaction, "MTX")

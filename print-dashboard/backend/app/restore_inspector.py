@@ -88,10 +88,17 @@ class BackupPreview:
         }
 
 
-def list_available_backups(sync_fallback_dir: str) -> list[BackupEntry]:
+def list_available_backups(sync_fallback_dir: str, latest_only: bool = True) -> list[BackupEntry]:
     """Scans every device subfolder under TTechStudio-Backups/ for zip
     files. Returns an empty list (not an error) if the backup folder
     doesn't exist yet -- e.g. brand-new install, no backup has run yet.
+
+    latest_only (decision #3, 2026-07-31): when True (the default), only
+    the single newest backup per device is returned -- previously every
+    backup ever made showed up, so a device that had been backing up for
+    weeks cluttered the list with dozens of old entries for the same
+    machine. Pass False to get the full history (e.g. for a future
+    "restore from an older point" feature).
     """
     sync_root, _is_real = detect_sync_folder(sync_fallback_dir)
     backups_root = os.path.join(sync_root, BACKUP_SUBFOLDER)
@@ -122,6 +129,17 @@ def list_available_backups(sync_fallback_dir: str) -> list[BackupEntry]:
     # Newest first across all devices, so the frontend's default view
     # is "what changed most recently, from any machine".
     entries.sort(key=lambda e: e.modified_at, reverse=True)
+
+    if latest_only:
+        seen_devices = set()
+        deduped = []
+        for entry in entries:
+            if entry.device_id in seen_devices:
+                continue
+            seen_devices.add(entry.device_id)
+            deduped.append(entry)
+        entries = deduped
+
     return entries
 
 

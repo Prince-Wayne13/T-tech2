@@ -196,6 +196,13 @@ class MaterialTransaction(TimestampMixin, SerializableMixin, db.Model):
     __tablename__ = "material_transactions"
 
     id = db.Column(db.Integer, primary_key=True)
+    # Added for cross-device merge matching (decision #2, 2026-07-31) --
+    # same collision-safe pattern as job_ref/staff_ref/etc (see
+    # services/ref_generator.py). Nullable here only so db.create_all()/
+    # older rows don't break before the backfill migration runs;
+    # ensure_material_transaction_ref() in schema_migrations.py fills
+    # every existing NULL exactly once.
+    material_transaction_ref = db.Column(db.String(40), unique=True, nullable=True, index=True)
     material_id = db.Column(db.Integer, db.ForeignKey("materials.id"), nullable=False, index=True)
     # "purchase" adds to stock (new delivery); "usage" subtracts from stock
     # (consumed on a job). "adjustment" covers manual corrections (stock

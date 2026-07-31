@@ -102,15 +102,21 @@ def status():
 
 @bp.route("/available", methods=["GET"])
 def available():
-    """Lists every backup found across every device's subfolder under
-    the shared synced backup folder. Read-only -- does not touch the
-    live database. First slice of the restore engine: discovery before
-    any merge/swap-into-place logic exists.
+    """Lists the latest backup per device found across every device's
+    subfolder under the shared synced backup folder. Read-only -- does
+    not touch the live database.
+
+    Defaults to latest-only per device (decision #3, 2026-07-31) --
+    previously every backup ever made showed up here, so a device
+    that had been running for weeks cluttered the list with dozens of
+    old entries for the same machine. Pass ?all=true for the full
+    history.
     """
     from ..restore_inspector import list_available_backups
 
     scheduler = _get_scheduler()
-    entries = list_available_backups(scheduler.sync_fallback_dir)
+    latest_only = request.args.get("all", "").lower() not in ("1", "true", "yes")
+    entries = list_available_backups(scheduler.sync_fallback_dir, latest_only=latest_only)
 
     return jsonify({
         "backups": [entry.to_dict() for entry in entries],
