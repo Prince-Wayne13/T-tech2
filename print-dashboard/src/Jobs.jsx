@@ -81,19 +81,13 @@ function jobPayload(form, fallback = {}) {
     quantity: Number(item.qty ?? item.quantity ?? 1) || 1,
     unit_price: Number(item.rate ?? item.unit_price ?? 0) || 0,
     unit: item.unit || 'item',
-    // Build decision #5: each service line carries its own pricing
-    // item + machine (a job can need several machines across its
-    // services) -- both already fully supported on the backend
-    // (InvoiceLineItem.machine_id / pricing_item_id).
-    pricing_item_id: item.pricingItemId || item.pricing_item_id || null,
+    // Build decision #5: each service line carries its own machine (a
+    // job can need several machines across its services) -- set by
+    // Modals.jsx's handleServiceSelect based on the picked service's
+    // category, matched against ProductionMachine.category.
     machine_id: item.machineId || item.machine_id || null,
   }));
   const totalCount = lineItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  // The job's single top-level machine_id/required_capability_id are a
-  // summary of its PRIMARY assignment -- each line item still carries
-  // its own machine_id above for jobs that genuinely need several.
-  const primaryCapabilityId = (form.items || []).find(item => item.requiredCapabilityId)?.requiredCapabilityId
-    || fallback.required_capability_id || null;
 
   return {
     client_name: form.client || fallback.client || 'Walk-in Client',
@@ -101,7 +95,6 @@ function jobPayload(form, fallback = {}) {
     priority: form.priority || fallback.priority || 'medium',
     due_date: form.due || fallback.due_date || null,
     machine_id: form.machineId || fallback.machine_id || null,
-    required_capability_id: primaryCapabilityId,
     service_category: fallback.service_category || form.specs?.[0],
     assigned_staff_id: form.assignedStaffId || fallback.assignedStaffId || null,
     notes: [form.notes, form.specs?.join(', ')].filter(Boolean).join('\n'),

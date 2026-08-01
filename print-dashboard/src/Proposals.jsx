@@ -119,11 +119,11 @@ export default function Proposals() {
         quantity: Number(item.qty ?? item.quantity ?? 1) || 1,
         unit_price: Number(item.rate ?? item.unit_price ?? item.amount ?? 0) || 0,
         unit: item.unit || 'item',
-        // Build decision #5: mirrors jobPayload's own comment in
-        // Jobs.jsx -- both fully supported end-to-end on the backend
-        // now (ProposalLineItem.machine_id / pricing_item_id, carried
-        // onto the converted Job's invoice by accept_proposal()).
-        pricing_item_id: item.pricingItemId || item.pricing_item_id || null,
+        // Build decision #5: each line carries its own machine, set
+        // by Modals.jsx's handleServiceSelect from the picked
+        // service's category (matched against ProductionMachine.
+        // category) -- carried onto the converted Job's invoice by
+        // accept_proposal() in routes/proposals.py.
         machine_id: item.machineId || item.machine_id || null,
       })),
       valid_until: form.validUntil || null,
@@ -131,10 +131,8 @@ export default function Proposals() {
       notes: form.notes,
       status: editRecord?.status || 'draft',
       discount_amount: Number(form.discount || 0),
-      // Internal-only fields (Job/Proposal parity) -- Proposal now has
-      // real columns for all four (priority, assigned_staff_id,
-      // machine_id, required_capability_id) and accept_proposal()
-      // carries them onto the Job it creates.
+      // Internal-only fields (Job/Proposal parity) -- accept_proposal()
+      // carries all of these onto the Job it creates.
       priority: form.priority,
       assigned_staff_id: form.assignedStaffId || null,
       // Build decision #5: "Proposals currently have no machine field
@@ -142,7 +140,6 @@ export default function Proposals() {
       // first time." Job-level summary field, derived from whichever
       // service line most recently set form.machineId.
       machine_id: form.machineId || null,
-      required_capability_id: (form.items || []).find(item => item.requiredCapabilityId)?.requiredCapabilityId || null,
     };
     const request = editRecord?.id
       ? api.updateProposal(editRecord.id, payload)

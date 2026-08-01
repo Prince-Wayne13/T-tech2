@@ -22,12 +22,47 @@ const D = {
 };
 
 /* ═══════════════════════════════════════
-   SERVICE DATA -- build decision #5: "Service picker should be tied
-   to your real price list, not the fake hardcoded list it uses
-   today." The hardcoded SERVICES array that used to live here is
-   gone; ServiceDropdown below now fetches real PricingItem rows via
-   api.pricingItems() instead.
+   SERVICE DATA -- build decision #5, corrected: this hardcoded list
+   IS the real, audited service list -- it stays exactly as it is,
+   never sourced from Settings/PricingItem. First pass wrongly
+   replaced this with a database-driven dropdown; reverted. The
+   category on each entry (e.g. "Large Format") matches a real
+   ProductionMachine.category value directly (see seed.py) -- that's
+   what ServiceDropdown below uses to auto-select the right machine
+   when a service is picked, no separate tagging system needed.
 ═══════════════════════════════════════ */
+const SERVICES = [
+  { category: 'PVC Cards', items: [
+    { name: 'PVC Card Printing', unit: 'card' },
+  ]},
+  { category: 'Sublimation', items: [
+    { name: 'Mug Cup Print', unit: 'mug' },
+  ]},
+  { category: 'UV DTF', items: [
+    { name: 'UV DTF (Other/Assorted)', unit: 'unit' },
+  ]},
+  { category: 'Large Format', items: [
+    { name: 'Banner Printing', unit: 'sqm' },
+    { name: 'Sticker Printing', unit: 'sqm' },
+  ]},
+  { category: 'DTF Apparel', items: [
+    { name: 'DTF T-Shirt', unit: 'print' },
+    { name: 'DTF Diary', unit: 'diary' },
+    { name: 'DTF Other', unit: 'unit' },
+  ]},
+  { category: 'Cutting', items: [
+    { name: 'Cutting Stencil', unit: 'unit' },
+  ]},
+  { category: 'Digital Print', items: [
+    { name: 'Book Printing', unit: 'book' },
+    { name: 'Magazine Printing', unit: 'magazine' },
+    { name: 'Calendar Printing', unit: 'calendar' },
+    { name: 'Normal Printing', unit: 'page' },
+  ]},
+  { category: 'Finishing', items: [
+    { name: 'Book Binding', unit: 'book' },
+  ]},
+];
 
 /* ═══════════════════════════════════════
    SHARED STYLES
@@ -174,51 +209,23 @@ function SplitPane({ formChildren, previewContent, showGrid = false, showPreview
    SERVICE DROPDOWN SELECTOR
 ═══════════════════════════════════════ */
 function ServiceDropdown({ selectedService, onSelect }) {
-  // Build decision #5: real price list, not the old hardcoded SERVICES
-  // array. Fetched once per mount -- non-fatal if it fails, the
-  // dropdown just renders empty (matches the fetch pattern used
-  // elsewhere in this file for clients/staff/machines).
-  const [pricingItems, setPricingItems] = useState([]);
-  useEffect(() => {
-    api.pricingItems('?per_page=500&active=true')
-      .then(data => setPricingItems(data.items || []))
-      .catch(() => setPricingItems([]));
-  }, []);
-
-  // Grouped by the pricing item's own `category` column -- the same
-  // grouping already shown/edited on the Settings price-list screen.
-  const grouped = pricingItems.reduce((acc, item) => {
-    (acc[item.category] = acc[item.category] || []).push(item);
-    return acc;
-  }, {});
-
+  const allServices = SERVICES.flatMap(cat => cat.items.map(item => ({ ...item, category: cat.category })));
   return (
     <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-faint)', background: 'var(--bg-card)', flexShrink: 0 }}>
       <label style={labelStyle}>Select Service</label>
       <select
         style={{ ...inputStyle, cursor: 'pointer' }}
-        value={selectedService?.id || ''}
+        value={selectedService?.name || ''}
         onChange={e => {
-          const item = pricingItems.find(p => String(p.id) === e.target.value);
-          if (item) {
-            onSelect({
-              id: item.id,
-              name: item.name,
-              unit: item.unit,
-              price: item.price,
-              requiredCapabilityId: item.required_capability_id,
-            });
-          }
+          const service = allServices.find(s => s.name === e.target.value);
+          if (service) onSelect(service);
         }}
       >
         <option value="">— Choose a service —</option>
-        {pricingItems.length === 0 && (
-          <option value="" disabled>No active price list items found — add some in Settings first</option>
-        )}
-        {Object.entries(grouped).map(([category, items]) => (
-          <optgroup key={category} label={category}>
-            {items.map(item => (
-              <option key={item.id} value={item.id}>
+        {SERVICES.map(cat => (
+          <optgroup key={cat.category} label={cat.category}>
+            {cat.items.map(item => (
+              <option key={item.name} value={item.name}>
                 {item.name} (per {item.unit})
               </option>
             ))}
@@ -475,7 +482,7 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
 
   const addItem = () => {
     if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate), pricingItemId: selectedService.id }] }));
+      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate) }] }));
       setQty('1'); setRate(''); setSelectedService(null);
     }
   };
@@ -652,22 +659,24 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
     if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
       setForm(p => ({ ...p, items: [...p.items, {
         desc: selectedService.name, qty: Number(qty), rate: Number(rate), unit: selectedService.unit,
-        pricingItemId: selectedService.id,
-        requiredCapabilityId: selectedService.requiredCapabilityId,
         machineId: form.machineId || null,
       }] }));
       setQty('1'); setRate(''); setSelectedService(null);
     }
   };
-  // Build decision #5, extended to Proposals -- identical auto-assign
-  // behavior to NewJobModal's handleServiceSelect.
+  // Build decision #5, corrected -- identical to NewJobModal's
+  // handleServiceSelect: matches by SERVICES' own category against
+  // ProductionMachine.category, not a capability lookup.
   const handleServiceSelect = async (service) => {
     setSelectedService(service); setQty('1');
-    if (!service.requiredCapabilityId) return;
+    if (!service.category) return;
     try {
-      const { auto_assigned_machine } = await api.compatibleMachines(service.requiredCapabilityId);
-      if (auto_assigned_machine) {
-        setForm(prev => ({ ...prev, machineId: auto_assigned_machine.id }));
+      const { items } = await api.machines(`?category=${encodeURIComponent(service.category)}&available=true`);
+      if (items && items.length > 0) {
+        const leastBusy = items.reduce((best, m) =>
+          (m.active_job_count ?? 0) < (best.active_job_count ?? 0) ? m : best
+        );
+        setForm(prev => ({ ...prev, machineId: leastBusy.id }));
       }
     } catch {
       // Non-fatal -- see NewJobModal's handleServiceSelect for why.
@@ -862,9 +871,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
   const addItem = () => {
     if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
       setForm(p => ({ ...p, items: [...p.items, {
-        desc: selectedService.name, qty: Number(qty), rate: Number(rate),
-        pricingItemId: selectedService.id,
-        requiredCapabilityId: selectedService.requiredCapabilityId,
+        desc: selectedService.name, qty: Number(qty), rate: Number(rate), unit: selectedService.unit,
         // Build decision #5: each line item carries its OWN machine
         // (one job can need several machines across its services) --
         // captured from whatever form.machineId was auto-assigned/
@@ -874,21 +881,26 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
       setQty('1'); setRate(''); setSelectedService(null);
     }
   };
-  // Build decision #5: "once a service is picked, the app should
-  // automatically assign a machine that can actually do it... if more
-  // than one machine could do the job, the app auto-picks one for you
-  // (no manual override needed)." The existing "Assigned Machine"
-  // dropdown above is left as a manual override for edge cases (e.g.
-  // a specific machine is down) -- this removes the manual STEP, not
-  // the manual OPTION.
+  // Build decision #5, corrected: SERVICES own `category` (e.g.
+  // "Large Format") matches ProductionMachine.category directly (see
+  // seed.py) -- no separate capability lookup needed. Picking "Banner
+  // Printing" (category "Large Format") auto-selects a machine whose
+  // category is "Large Format". If more than one machine shares that
+  // category, picks whichever has the fewest active jobs right now,
+  // so it is not always the same machine by default. The "Assigned
+  // Machine" dropdown stays as a manual override for edge cases (e.g.
+  // the auto-picked one is down for a reason the system doesn't know
+  // about) -- this removes the manual STEP, not the manual OPTION.
   const handleServiceSelect = async (service) => {
     setSelectedService(service); setQty('1');
-    if (!service.requiredCapabilityId) return; // legacy pricing item
-      // with no capability set yet -- nothing to auto-assign from.
+    if (!service.category) return;
     try {
-      const { auto_assigned_machine } = await api.compatibleMachines(service.requiredCapabilityId);
-      if (auto_assigned_machine) {
-        setForm(prev => ({ ...prev, machineId: auto_assigned_machine.id }));
+      const { items } = await api.machines(`?category=${encodeURIComponent(service.category)}&available=true`);
+      if (items && items.length > 0) {
+        const leastBusy = items.reduce((best, m) =>
+          (m.active_job_count ?? 0) < (best.active_job_count ?? 0) ? m : best
+        );
+        setForm(prev => ({ ...prev, machineId: leastBusy.id }));
       }
     } catch {
       // Non-fatal: auto-assign is a convenience, not a requirement --
@@ -949,7 +961,13 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px', marginBottom: '6px', background: 'var(--bg-canvas)', borderRadius: '6px', fontSize: '10px' }}>
                   <div>
                     <div style={{ fontWeight: 600 }}>{it.desc}</div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '9px' }}>{it.qty} × MK {Number(it.rate).toLocaleString()}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '9px' }}>
+                      {it.qty} {it.unit || 'unit'}{Number(it.qty) === 1 ? '' : 's'} × MK {Number(it.rate).toLocaleString()}
+                      {it.machineId && (() => {
+                        const m = machineList.find(mac => String(mac.id) === String(it.machineId));
+                        return m ? ` · ${m.name}` : '';
+                      })()}
+                    </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontWeight: 600 }}>MK {(it.qty * it.rate).toLocaleString()}</span>
