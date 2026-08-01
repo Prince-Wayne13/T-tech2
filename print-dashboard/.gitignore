@@ -25,6 +25,7 @@ backend/.env
 backend/build
 backend/dist
 backend/*.spec
+backend/installer.iss
 backend/venv
 backend/installer_output
 
