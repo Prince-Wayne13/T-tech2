@@ -327,7 +327,7 @@ export function MaterialsReconciliationPrintLayout({ data }) {
   );
 }
 
-export function PrintPreviewModal({ type, title, data, onClose, actions }) {
+export function PrintPreviewModal({ type, title, data, onClose, actions, children }) {
   if (!data) return null;
   const Layout = type === 'proposal' ? ProposalPrintLayout : type === 'job' ? JobTicketPrintLayout : type === 'materials_reconciliation' ? MaterialsReconciliationPrintLayout : type === 'report' ? ReportPrintLayout : InvoicePrintLayout;
   const reportRows = Array.isArray(data.rows) ? data.rows : [];
@@ -349,6 +349,7 @@ export function PrintPreviewModal({ type, title, data, onClose, actions }) {
         <div style={{ background: '#fff', padding: '14px', borderRadius: '8px', overflow: 'auto' }}>
           {type === 'report' ? <Layout title={data.title || title} rows={reportRows} footer={data.footer} /> : <Layout data={data} />}
         </div>
+        {children}
       </section>
     </div>
   );

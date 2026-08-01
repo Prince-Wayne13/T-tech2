@@ -1370,26 +1370,53 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
   );
 }
 
-/* ═══════════════════════════════════════ MODAL: Record Payment ═══════════════════════════════════════ */
-export function RecordPaymentModal({ isOpen, onClose, onSave, initialData = null }) {
+/* ═══════════════════════════════════════ MODAL: Confirm ═══════════════════════════════════════
+   Generic in-app confirmation dialog. Added to replace window.confirm()
+   calls, which render as a raw browser dialog (shows the page URL, native
+   OS chrome) - fine for a dev tool, not appropriate for an app end users
+   are meant to use. Only wired into Jobs.jsx's Cancel Job action for now;
+   pettycash.jsx and Materials.jsx still use window.confirm() and are
+   flagged as a follow-up, not touched in this pass.
+═══════════════════════════════════════ */
+export function ConfirmModal({ isOpen, onClose, onConfirm, title = 'Are you sure?', message, confirmLabel = 'Confirm', danger = false }) {
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title={title} footer={<>
+      <button onClick={onClose} style={cancelButton}>Cancel</button>
+      <button onClick={onConfirm} style={danger ? { ...createButton, background: 'var(--red, #c0392b)' } : createButton}>{confirmLabel}</button>
+    </>}>
+      <div style={{ padding: '20px', fontSize: '12px', color: 'var(--text-body)', lineHeight: 1.5 }}>{message}</div>
+    </ModalWrapper>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: Record Payment ═══════════════════════════════════════
+   Item 10 (build decisions): also handles editing an existing payment.
+   When editingPayment is passed, the form is pre-filled from that
+   payment's real fields (amount/date/method/ref/notes) instead of the
+   blank "new payment" defaults, and the footer button reads "Save
+   Changes" instead of "Create". Everything else (job field, preview
+   pane) behaves the same either way - this is the same form, just
+   loaded with different starting data and a different save action.
+═══════════════════════════════════════ */
+export function RecordPaymentModal({ isOpen, onClose, onSave, initialData = null, editingPayment = null }) {
   const [form, setForm] = useState({ job: '', amount: '', date: new Date().toISOString().split('T')[0], method: 'bank', ref: '', notes: '' });
   const [showPreview, setShowPreview] = useState(false);
   useEffect(() => {
     if (!isOpen) return;
     setForm({
       job: initialData?.id || initialData?.job_ref || '',
-      amount: '',
-      date: new Date().toISOString().split('T')[0],
-      method: 'bank',
-      ref: '',
-      notes: '',
+      amount: editingPayment ? String(editingPayment.amount ?? '') : '',
+      date: editingPayment?.paid_on || new Date().toISOString().split('T')[0],
+      method: editingPayment?.method || 'bank',
+      ref: editingPayment?.payment_ref || '',
+      notes: editingPayment?.notes || '',
     });
     setShowPreview(false);
-  }, [isOpen, initialData]);
+  }, [isOpen, initialData, editingPayment]);
   return (
-    <ModalWrapper isOpen={isOpen} onClose={onClose} title="Record Payment" wide footer={<>
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title={editingPayment ? 'Edit Payment' : 'Record Payment'} wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>Create</button>
+      <button onClick={() => onSave(form)} style={createButton}>{editingPayment ? 'Save Changes' : 'Create'}</button>
     </>}>
       <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={

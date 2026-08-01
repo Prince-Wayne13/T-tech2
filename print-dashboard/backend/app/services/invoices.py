@@ -60,7 +60,12 @@ def serialize_invoice(invoice, include_document=False):
     data["payments"] = [payment.to_dict() for payment in payment_rows]
     data["totals"] = invoice_totals(invoice)
     if invoice.job_id:
-        data["status"] = invoice_status_from_totals(data["totals"])
+        # A cancelled invoice (set when its linked job is cancelled - see
+        # routes/jobs.py::update_job()) keeps that status as-is. Every other
+        # job-linked invoice still gets its status derived live from
+        # paid/total, same as before.
+        if invoice.status != "cancelled":
+            data["status"] = invoice_status_from_totals(data["totals"])
         data["job_ref"] = invoice.job.job_ref if invoice.job else None
     data["is_overdue"] = bool(
         invoice.due_on

@@ -59,6 +59,13 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
+  // Item 10: Payments - Edit button. Hits the existing PUT
+  // /jobs/<id>/payments/<payment_id> route (already supported on the
+  // backend); this was just the missing frontend call.
+  updateJobPayment: (jobId, paymentId, payload) => request(`/jobs/${jobId}/payments/${paymentId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
   invoices: (params = '') => request(`/invoices${params}`),
   createInvoice: (payload) => request('/invoices', {
     method: 'POST',

@@ -5,6 +5,7 @@ from ..extensions import db
 from ..models import AuditLog, Job
 from ..services.jobs import (
     ACTIVE_STATUS,
+    CANCELLED_STATUS,
     add_job_payment,
     create_invoice_for_job,
     normalise_job_status,
@@ -116,7 +117,19 @@ def update_job(job_id):
         job.invoice.title = job.title
         job.invoice.due_on = job.due_date
         job.invoice.notes = job.notes
-        sync_invoice_amount(job.invoice)
+        # Bug: cancelling a job (item 11) left its linked invoice showing
+        # as before - status is derived from paid/total for any job-linked
+        # invoice (see invoice_status_from_totals()), which never accounts
+        # for cancelled, so an unpaid cancelled job's invoice kept surfacing
+        # under "Outstanding" as if the job were still active. A cancelled
+        # job has nothing left to collect on, so its invoice is cancelled
+        # too - explicit status set here, and serialize_invoice() (below,
+        # in services/invoices.py) now respects this instead of always
+        # overriding it with the derived not_paid/partial/paid value.
+        if job.status == CANCELLED_STATUS:
+            job.invoice.status = CANCELLED_STATUS
+        else:
+            sync_invoice_amount(job.invoice)
     db.session.add(AuditLog(action=f"Updated job {job.job_ref}", entity_type="job", entity_id=job.id))
     db.session.commit()
     return jsonify(serialize_job(job))

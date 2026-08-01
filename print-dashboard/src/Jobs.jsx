@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { PrintPreviewModal } from './components/PrintLayouts';
-import { NewJobModal, RecordPaymentModal, JobProgressModal } from './components/Modals';
+import { NewJobModal, RecordPaymentModal, JobProgressModal, ConfirmModal } from './components/Modals';
 import { downloadTablePDF } from './components/TablePDF';
 import { api } from './api/client';
 import { shortDate } from './utils/format';
@@ -64,6 +64,10 @@ const mapJob = job => ({
   clientPhone: job.client_phone || null,
   notes: job.notes,
   totals: job.totals || { total: 0, paid: 0, balance: 0 },
+  // Item 10: payment history, so the job preview can list past payments
+  // with an Edit action next to each one. Backend already includes this
+  // on serialize_job() (services/jobs.py) - just wasn't being read here.
+  payments: job.payments || [],
   invoice: job.invoice,
   line_items: job.invoice?.line_items || job.line_items || [],
   discount_amount: job.invoice?.discount_amount ?? job.discount_amount ?? 0,
@@ -150,7 +154,7 @@ function PaymentStatusBadge({ status }) {
 // left to right: what we're making, what's happening, who it's for, and
 // (Can we release it?) payment status + balance. "What can I do next?"
 // stays as the action buttons at the end, unchanged in spirit from before.
-function JobRow({ job, onPreview, onEdit, onPayment, onOpenProgress, onMarkFinished }) {
+function JobRow({ job, onPreview, onEdit, onPayment, onOpenProgress, onMarkFinished, onCancel }) {
   const statusConfig = {
     in_session: { label: 'In Session', cls: 'active', accent: 'var(--primary)' },
     finished: { label: 'Finished', cls: 'paid', accent: 'var(--teal)' },
@@ -212,6 +216,11 @@ function JobRow({ job, onPreview, onEdit, onPayment, onOpenProgress, onMarkFinis
           Mark Finished
         </button>
       )}
+      {job.status !== 'cancelled' && job.status !== 'finished' && (
+        <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px', color: 'var(--red, #c0392b)' }} title="Cancel this job" onClick={() => onCancel(job)}>
+          Cancel Job
+        </button>
+      )}
     </div>
   );
 }
@@ -224,7 +233,14 @@ export default function Jobs() {
   const [showEntry, setShowEntry] = useState(false);
   const [editRecord, setEditRecord] = useState(null);
   const [paymentRecord, setPaymentRecord] = useState(null);
+  // Item 10: which payment (if any) is currently being edited, on top of
+  // paymentRecord (which job it belongs to). Null means "recording a new
+  // payment" - the existing behavior - not "editing #0".
+  const [editingPayment, setEditingPayment] = useState(null);
   const [progressJob, setProgressJob] = useState(null);
+  // Cancel Job now goes through an in-app ConfirmModal instead of the
+  // browser's native window.confirm() (see build-decisions follow-up).
+  const [cancelTarget, setCancelTarget] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -284,19 +300,29 @@ export default function Jobs() {
 
   const handlePayment = async form => {
     if (!paymentRecord?.backendId) return;
+    const payload = {
+      amount: Number(form.amount || 0),
+      paid_on: form.date,
+      method: form.method,
+      payment_ref: form.ref,
+      notes: form.notes,
+    };
     try {
-      await api.recordJobPayment(paymentRecord.backendId, {
-        amount: Number(form.amount || 0),
-        paid_on: form.date,
-        method: form.method,
-        payment_ref: form.ref,
-        notes: form.notes,
-      });
+      // Item 10: same modal, but Save Changes goes to the existing
+      // PUT .../payments/<id> route when editing, instead of always
+      // POSTing a new payment.
+      if (editingPayment) {
+        await api.updateJobPayment(paymentRecord.backendId, editingPayment.id, payload);
+        notify('Payment updated');
+      } else {
+        await api.recordJobPayment(paymentRecord.backendId, payload);
+        notify('Payment recorded');
+      }
       setPaymentRecord(null);
-      notify('Payment recorded');
+      setEditingPayment(null);
       loadJobs();
     } catch (paymentError) {
-      notify(paymentError.message || 'Could not record payment', 'error');
+      notify(paymentError.message || 'Could not save payment', 'error');
     }
   };
 
@@ -326,6 +352,29 @@ export default function Jobs() {
       loadJobs();
     } catch (finishError) {
       notify(finishError.message || 'Could not mark job as finished', 'error');
+    }
+  };
+
+  // Item 11 (build decisions): real Cancel action. "Cancelled" already
+  // existed as a filter label, but nothing ever set a job to that status -
+  // same pattern as handleMarkFinished above: reuses the existing
+  // update_job() route (status is already in its update allowlist), just a
+  // status transition, not a delete. Job stays in history, marked cancelled.
+  // Confirmation now uses the in-app ConfirmModal (see cancelTarget state)
+  // instead of window.confirm() - a raw browser dialog isn't appropriate
+  // for an app end users interact with.
+  const handleCancelJob = job => setCancelTarget(job);
+
+  const confirmCancelJob = async () => {
+    const job = cancelTarget;
+    if (!job) return;
+    setCancelTarget(null);
+    try {
+      await api.updateJob(job.backendId, { status: 'cancelled' });
+      notify(`${job.id} cancelled`);
+      loadJobs();
+    } catch (cancelError) {
+      notify(cancelError.message || 'Could not cancel job', 'error');
     }
   };
 
@@ -394,9 +443,10 @@ export default function Jobs() {
             job={job}
             onPreview={setPreview}
             onEdit={setEditRecord}
-            onPayment={setPaymentRecord}
+            onPayment={job => { setEditingPayment(null); setPaymentRecord(job); }}
             onOpenProgress={setProgressJob}
             onMarkFinished={handleMarkFinished}
+            onCancel={handleCancelJob}
           />
         ))}
       </RegisterCard>
@@ -414,18 +464,48 @@ export default function Jobs() {
         actions={preview && (
           <>
             <button className="filter-btn" style={{ background: '#3A506B', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => { setProgressJob(preview); setPreview(null); }}>Update Progress</button>
-            <button className="filter-btn" style={{ background: '#3A506B', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => { setPaymentRecord(preview); setPreview(null); }}>Record Payment</button>
+            <button className="filter-btn" style={{ background: '#3A506B', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => { setEditingPayment(null); setPaymentRecord(preview); setPreview(null); }}>Record Payment</button>
             <button className="filter-btn" style={{ background: '#3A506B', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => { setEditRecord(preview); setPreview(null); }}>Edit Job</button>
             {preview.status === 'in_session' && (
               <button className="filter-btn" style={{ background: '#3A506B', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => { handleMarkFinished(preview); setPreview(null); }}>Mark Finished</button>
             )}
+            {preview.status !== 'cancelled' && preview.status !== 'finished' && (
+              <button className="filter-btn" style={{ background: '#c0392b', color: '#fff', borderRadius: '999px', padding: '8px 14px', border: 'none' }} onClick={() => { handleCancelJob(preview); setPreview(null); }}>Cancel Job</button>
+            )}
           </>
         )}
-      />
+      >
+        {/* Item 10: payment history for this job, with an Edit action on
+            each row. This is the only place payments were visible at all
+            before this change, since there's no dedicated payments page -
+            the backend edit route already existed, this list is what was
+            missing to actually reach it from the UI. */}
+        {preview && preview.payments.length > 0 && (
+          <div style={{ padding: '0 20px 20px', borderTop: '1px solid var(--border-faint)', marginTop: '10px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-body)', margin: '14px 0 8px' }}>Payment History</div>
+            {preview.payments.map(payment => (
+              <div key={payment.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-faint)' }}>
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-body)' }}>MK {Number(payment.amount || 0).toLocaleString()} - {payment.method}</div>
+                  <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{payment.paid_on} - {payment.payment_ref}{payment.notes ? ` - ${payment.notes}` : ''}</div>
+                </div>
+                <button
+                  className="filter-btn"
+                  style={{ padding: '4px 8px', fontSize: '9px' }}
+                  onClick={() => { setEditingPayment(payment); setPaymentRecord(preview); setPreview(null); }}
+                >
+                  Edit
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </PrintPreviewModal>
       <RecordPaymentModal
         isOpen={Boolean(paymentRecord)}
         initialData={paymentRecord}
-        onClose={() => setPaymentRecord(null)}
+        editingPayment={editingPayment}
+        onClose={() => { setPaymentRecord(null); setEditingPayment(null); }}
         onSave={handlePayment}
       />
       <JobProgressModal
@@ -433,6 +513,15 @@ export default function Jobs() {
         job={progressJob}
         onClose={() => setProgressJob(null)}
         onSave={handleSaveProgress}
+      />
+      <ConfirmModal
+        isOpen={Boolean(cancelTarget)}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={confirmCancelJob}
+        title="Cancel Job"
+        message={cancelTarget ? `Cancel job ${cancelTarget.id}? This keeps it in history, marked as cancelled.` : ''}
+        confirmLabel="Cancel Job"
+        danger
       />
       <ModuleToast toast={toast} />
     </main>

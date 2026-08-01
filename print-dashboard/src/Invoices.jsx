@@ -111,7 +111,7 @@ function InvoiceRow({ inv, onPreview, onOutstandingTab }) {
         {/* Item 4 (Prompt 7): show what's still owed alongside the total,
             distinct from "Paid" status badges — a partially-paid invoice
             should visibly show its remaining balance, not just its total. */}
-        {inv.balanceValue > 0 && inv.status !== 'draft' && (
+        {inv.balanceValue > 0 && inv.status !== 'draft' && inv.status !== 'cancelled' && (
           <div className="activity-time" style={{ color: 'var(--warning)', fontWeight: 600 }}>Owed: {inv.balanceLabel}</div>
         )}
         <div className="activity-time">Issued: {inv.issued || '-'}</div>
