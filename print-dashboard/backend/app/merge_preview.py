@@ -53,7 +53,6 @@ REF_KEYED_TABLES = {
     "proposals": "proposal_ref",
     "expenses": "expense_ref",
     "payments": "payment_ref",
-    "materials": "material_ref",
     "production_machines": "machine_ref",
     "advances": "advance_ref",
     "export_jobs": "export_ref",
@@ -66,8 +65,13 @@ REF_KEYED_TABLES = {
     # entirely unmergeable. vendors is deliberately NOT added here --
     # it already has a real, working name-based match in
     # NAME_KEYED_TABLES, so no vendor_ref exists or is needed.
-    # staff intentionally excluded (decision #1, 2026-07-31): stays
-    # local to each device permanently, never appears in sync previews.
+    # staff intentionally excluded (decision #1, build-decisions.md):
+    # stays local to each device permanently, never appears in sync previews.
+    # materials intentionally excluded (decision #2, build-decisions.md):
+    # same reasoning -- stays local, only material_transactions sync now.
+    # See merge_apply.py's materials/material_transactions comments for
+    # the full explanation (ref-only matching duplicated stock when the
+    # same material was created independently on two devices).
     "clients": "client_ref",
     "pricing_items": "pricing_item_ref",
     "material_transactions": "material_transaction_ref",

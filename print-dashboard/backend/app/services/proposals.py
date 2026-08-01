@@ -59,6 +59,12 @@ def apply_proposal_line_items(proposal, line_items):
                 unit=item.get("unit", "item"),
                 unit_price=unit_price,
                 amount=amount,
+                # Same dual-naming approach as description/desc above --
+                # accepts pricing_item_id/machine_id (backend-native,
+                # matches InvoiceLineItem) from what Proposals.jsx sends
+                # (build decision #5).
+                pricing_item_id=item.get("pricing_item_id"),
+                machine_id=item.get("machine_id"),
             )
         )
 

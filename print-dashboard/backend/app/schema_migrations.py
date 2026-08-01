@@ -602,6 +602,98 @@ def ensure_device_ownership_schema():
     return changed
 
 
+def ensure_pricing_item_capabilities():
+    """Adds PricingItem.required_capability_id -- see the column's
+    comment in models.py (build decision #5: "pick a service, app
+    picks the machine automatically").
+
+    Backfill strategy for EXISTING pricing items: derive a capability
+    from the item's own machine_id, via that machine's category ->
+    matching capabilities (the same category-based linkage
+    ensure_default_capabilities_seed() already establishes between
+    machines and capabilities). Where a machine has exactly one
+    capability in its category, that's an unambiguous, safe backfill.
+    Where a machine has several (a machine's category can map to
+    multiple capabilities), this does NOT guess which one -- left NULL
+    instead, same as a pricing item with no machine_id at all. A wrong
+    guess here would silently mis-assign machines later.
+
+    Must run after ensure_default_capabilities_seed() (needs
+    machine.capabilities to already be populated to backfill from).
+    """
+    changed = []
+    table_name = "pricing_items"
+
+    if table_name not in _tables():
+        return changed
+
+    columns = _columns(table_name)
+    if "required_capability_id" not in columns:
+        _add_column(table_name, "required_capability_id INTEGER REFERENCES capabilities(id)")
+        db.session.commit()
+        changed.append(f"{table_name}.required_capability_id")
+
+    from .models import PricingItem
+
+    items_needing_backfill = PricingItem.query.filter(
+        PricingItem.required_capability_id.is_(None),
+        PricingItem.machine_id.isnot(None),
+    ).all()
+
+    backfilled = 0
+    for item in items_needing_backfill:
+        machine = item.machine
+        if machine is None or len(machine.capabilities) != 1:
+            continue  # ambiguous or no machine -- leave NULL, don't guess
+        item.required_capability_id = machine.capabilities[0].id
+        backfilled += 1
+
+    if backfilled:
+        db.session.commit()
+        changed.append(f"{table_name}.required_capability_id_backfilled:{backfilled}")
+
+    return changed
+
+
+def ensure_proposal_machine_schema():
+    """Adds Proposal.machine_id / Proposal.required_capability_id -- see
+    both columns' comments in models.py (build decision #5: "Proposals
+    currently have no machine field at all, so this is also adding
+    that concept there for the first time"). Also adds the matching
+    ProposalLineItem.pricing_item_id / machine_id, mirroring
+    InvoiceLineItem's own columns of the same name -- needed so a
+    proposal's per-line machine survives conversion into a Job.
+
+    No backfill needed for any of these -- there's no existing data to
+    derive a sensible value FROM; every existing proposal simply gets
+    NULL/unassigned, same starting state as a brand-new one.
+    """
+    changed = []
+
+    if "proposals" in _tables():
+        columns = _columns("proposals")
+        if "machine_id" not in columns:
+            _add_column("proposals", "machine_id INTEGER REFERENCES production_machines(id)")
+            changed.append("proposals.machine_id")
+        if "required_capability_id" not in columns:
+            _add_column("proposals", "required_capability_id INTEGER REFERENCES capabilities(id)")
+            changed.append("proposals.required_capability_id")
+
+    if "proposal_line_items" in _tables():
+        columns = _columns("proposal_line_items")
+        if "pricing_item_id" not in columns:
+            _add_column("proposal_line_items", "pricing_item_id INTEGER REFERENCES pricing_items(id)")
+            changed.append("proposal_line_items.pricing_item_id")
+        if "machine_id" not in columns:
+            _add_column("proposal_line_items", "machine_id INTEGER REFERENCES production_machines(id)")
+            changed.append("proposal_line_items.machine_id")
+
+    if changed:
+        db.session.commit()
+
+    return changed
+
+
 def run_full_upgrade():
     """Single entry point covering every migration added so far, in order.
     Call this once (e.g. from a `flask shell` one-liner or a small script)
@@ -646,6 +738,7 @@ def run_full_upgrade():
     staff_assignment = ensure_staff_assignment_schema()
     proposal_job_planning = ensure_proposal_job_planning_schema()
     proposal_line_item_quantity = ensure_proposal_line_item_quantity_schema()
+    proposal_machine = ensure_proposal_machine_schema()
     job_invoice_schema = ensure_job_invoice_schema()
     payment_invoice_nullable = ensure_payment_invoice_nullable_schema()
     # Priority 2 (Machine Management): must run after db.create_all() (so the
@@ -654,6 +747,9 @@ def run_full_upgrade():
     # same ordering requirement documented above for prompt4/staff_assignment.
     machine_capability_schema = ensure_machine_capability_schema()
     default_capabilities = ensure_default_capabilities_seed()
+    # Must run after default_capabilities above -- backfill derives from
+    # machine.capabilities, which that migration just populated.
+    pricing_item_capabilities = ensure_pricing_item_capabilities()
     material_transaction_output = ensure_material_transaction_output_schema()
     material_transaction_vendor = ensure_material_transaction_vendor_schema()
     core_staff = ensure_core_staff_seed()
@@ -668,10 +764,12 @@ def run_full_upgrade():
         "staff_assignment_schema_changes": staff_assignment,
         "proposal_job_planning_schema_changes": proposal_job_planning,
         "proposal_line_item_quantity_schema_changes": proposal_line_item_quantity,
+        "proposal_machine_schema_changes": proposal_machine,
         "core_staff_seeded": core_staff,
         "payment_invoice_nullable_schema_changes": payment_invoice_nullable,
         "machine_capability_schema_changes": machine_capability_schema,
         "default_capabilities_seed": default_capabilities,
+        "pricing_item_capabilities_changes": pricing_item_capabilities,
         "material_transaction_output_schema_changes": material_transaction_output,
         "material_transaction_vendor_schema_changes": material_transaction_vendor,
         "device_ownership_schema_changes": device_ownership,

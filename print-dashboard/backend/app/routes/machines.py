@@ -3,6 +3,7 @@ from flask import Blueprint, jsonify, request
 from ..extensions import db
 from ..models import AuditLog, Capability, PricingItem, ProductionMachine
 from ..services.machines import (
+    auto_assign_machine,
     compatible_machines,
     machine_workload,
     serialize_machine,
@@ -132,7 +133,18 @@ def get_compatible_machines():
     capability_id = request.args.get("capability_id", type=int)
     only_available = request.args.get("only_available", "true").lower() in {"1", "true", "yes"}
     machines = compatible_machines(capability_id, only_available=only_available)
-    return jsonify({"items": [serialize_machine(m) for m in machines], "total": len(machines)})
+    # Build decision #5: alongside the full compatible list (still
+    # returned, for a "more than one? show which" fallback view), also
+    # return the single machine the app would auto-pick -- see
+    # auto_assign_machine's own docstring for the tie-break rule
+    # (available + least busy). None if nothing compatible+available
+    # exists right now.
+    auto_pick = auto_assign_machine(capability_id)
+    return jsonify({
+        "items": [serialize_machine(m) for m in machines],
+        "total": len(machines),
+        "auto_assigned_machine": serialize_machine(auto_pick) if auto_pick else None,
+    })
 
 
 @bp.get("/capabilities")
@@ -198,7 +210,10 @@ def list_pricing_items():
     return jsonify(
         list_response(
             query.order_by(PricingItem.category.asc(), PricingItem.name.asc()),
-            lambda item: item.to_dict() | {"machine_name": item.machine.name if item.machine else None},
+            lambda item: item.to_dict() | {
+                "machine_name": item.machine.name if item.machine else None,
+                "required_capability_name": item.required_capability.name if item.required_capability else None,
+            },
         )
     )
 
@@ -214,6 +229,7 @@ def create_pricing_item():
         name=data["name"],
         category=data["category"],
         machine_id=data.get("machine_id"),
+        required_capability_id=data.get("required_capability_id"),
         unit=data.get("unit", "unit"),
         price=data.get("price", 0),
         cost_estimate=data.get("cost_estimate", 0),
@@ -225,4 +241,7 @@ def create_pricing_item():
     db.session.flush()
     db.session.add(AuditLog(action=f"Created pricing item {item.code}", entity_type="pricing_item", entity_id=item.id))
     db.session.commit()
-    return jsonify(item.to_dict() | {"machine_name": item.machine.name if item.machine else None}), 201
+    return jsonify(item.to_dict() | {
+        "machine_name": item.machine.name if item.machine else None,
+        "required_capability_name": item.required_capability.name if item.required_capability else None,
+    }), 201

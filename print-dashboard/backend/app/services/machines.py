@@ -57,6 +57,30 @@ def compatible_machines(capability_id, only_available=False):
     return [m for m in machines if machine_has_capability(m, capability_id)]
 
 
+def auto_assign_machine(capability_id):
+    """Build decision #5 ("if more than one machine could do the job,
+    the app auto-picks one for you -- no manual override needed"):
+    picks the single best machine for a capability rather than leaving
+    that choice to whoever's filling in the form.
+
+    "Best" = compatible AND currently available (skips machines down
+    for maintenance/out of consumables), tie-broken by whichever has
+    the fewest jobs currently active on it (machine_workload's
+    active_job_count) -- an even spread across the fleet beats always
+    defaulting to whichever machine happens to sort first
+    alphabetically.
+
+    Returns None if no compatible+available machine exists at all --
+    callers should treat that as "leave machine_id unset, let a person
+    sort it out" rather than a hard error; a job can still be created
+    without a machine assigned.
+    """
+    candidates = compatible_machines(capability_id, only_available=True)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda m: machine_workload(m.id)["active_job_count"])
+
+
 def machine_workload(machine_id):
     """Count of jobs currently occupying this machine (active status), plus
     the full active job list for surfacing in the UI. Queried live rather

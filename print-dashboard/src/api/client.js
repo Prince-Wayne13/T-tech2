@@ -148,6 +148,12 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
+  // Build decision #5: given a capability_id, returns every compatible
+  // machine (still available for a "more than one? show which" view)
+  // PLUS auto_assigned_machine -- the single machine the backend picks
+  // for you (available + least busy -- see services/machines.py's
+  // auto_assign_machine()). null if nothing compatible is available.
+  compatibleMachines: (capabilityId) => request(`/machines/compatible?capability_id=${capabilityId}`),
   pricingItems: (params = '') => request(`/machines/pricing${params}`),
   createPricingItem: (payload) => request('/machines/pricing', {
     method: 'POST',

@@ -22,40 +22,12 @@ const D = {
 };
 
 /* ═══════════════════════════════════════
-   SERVICE DATA
+   SERVICE DATA -- build decision #5: "Service picker should be tied
+   to your real price list, not the fake hardcoded list it uses
+   today." The hardcoded SERVICES array that used to live here is
+   gone; ServiceDropdown below now fetches real PricingItem rows via
+   api.pricingItems() instead.
 ═══════════════════════════════════════ */
-const SERVICES = [
-  { category: 'PVC Cards', items: [
-    { name: 'PVC Card Printing', unit: 'card' },
-  ]},
-  { category: 'Sublimation', items: [
-    { name: 'Mug Cup Print', unit: 'mug' },
-  ]},
-  { category: 'UV DTF', items: [
-    { name: 'UV DTF (Other/Assorted)', unit: 'unit' },
-  ]},
-  { category: 'Large Format', items: [
-    { name: 'Banner Printing', unit: 'sqm' },
-    { name: 'Sticker Printing', unit: 'sqm' },
-  ]},
-  { category: 'DTF Apparel', items: [
-    { name: 'DTF T-Shirt', unit: 'print' },
-    { name: 'DTF Diary', unit: 'diary' },
-    { name: 'DTF Other', unit: 'unit' },
-  ]},
-  { category: 'Cutting', items: [
-    { name: 'Cutting Stencil', unit: 'unit' },
-  ]},
-  { category: 'Digital Print', items: [
-    { name: 'Book Printing', unit: 'book' },
-    { name: 'Magazine Printing', unit: 'magazine' },
-    { name: 'Calendar Printing', unit: 'calendar' },
-    { name: 'Normal Printing', unit: 'page' },
-  ]},
-  { category: 'Finishing', items: [
-    { name: 'Book Binding', unit: 'book' },
-  ]},
-];
 
 /* ═══════════════════════════════════════
    SHARED STYLES
@@ -202,23 +174,51 @@ function SplitPane({ formChildren, previewContent, showGrid = false, showPreview
    SERVICE DROPDOWN SELECTOR
 ═══════════════════════════════════════ */
 function ServiceDropdown({ selectedService, onSelect }) {
-  const allServices = SERVICES.flatMap(cat => cat.items.map(item => ({ ...item, category: cat.category })));
+  // Build decision #5: real price list, not the old hardcoded SERVICES
+  // array. Fetched once per mount -- non-fatal if it fails, the
+  // dropdown just renders empty (matches the fetch pattern used
+  // elsewhere in this file for clients/staff/machines).
+  const [pricingItems, setPricingItems] = useState([]);
+  useEffect(() => {
+    api.pricingItems('?per_page=500&active=true')
+      .then(data => setPricingItems(data.items || []))
+      .catch(() => setPricingItems([]));
+  }, []);
+
+  // Grouped by the pricing item's own `category` column -- the same
+  // grouping already shown/edited on the Settings price-list screen.
+  const grouped = pricingItems.reduce((acc, item) => {
+    (acc[item.category] = acc[item.category] || []).push(item);
+    return acc;
+  }, {});
+
   return (
     <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-faint)', background: 'var(--bg-card)', flexShrink: 0 }}>
       <label style={labelStyle}>Select Service</label>
       <select
         style={{ ...inputStyle, cursor: 'pointer' }}
-        value={selectedService?.name || ''}
+        value={selectedService?.id || ''}
         onChange={e => {
-          const service = allServices.find(s => s.name === e.target.value);
-          if (service) onSelect(service);
+          const item = pricingItems.find(p => String(p.id) === e.target.value);
+          if (item) {
+            onSelect({
+              id: item.id,
+              name: item.name,
+              unit: item.unit,
+              price: item.price,
+              requiredCapabilityId: item.required_capability_id,
+            });
+          }
         }}
       >
         <option value="">— Choose a service —</option>
-        {SERVICES.map(cat => (
-          <optgroup key={cat.category} label={cat.category}>
-            {cat.items.map(item => (
-              <option key={item.name} value={item.name}>
+        {pricingItems.length === 0 && (
+          <option value="" disabled>No active price list items found — add some in Settings first</option>
+        )}
+        {Object.entries(grouped).map(([category, items]) => (
+          <optgroup key={category} label={category}>
+            {items.map(item => (
+              <option key={item.id} value={item.id}>
                 {item.name} (per {item.unit})
               </option>
             ))}
@@ -475,7 +475,7 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
 
   const addItem = () => {
     if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate) }] }));
+      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate), pricingItemId: selectedService.id }] }));
       setQty('1'); setRate(''); setSelectedService(null);
     }
   };
@@ -547,13 +547,14 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
 
 /* ═══════════════════════════════════════ MODAL: New Proposal ═══════════════════════════════════════ */
 export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', validDays: '', contact: '', notes: '', discount: 0, priority: 'medium', assignedStaffId: '' });
+  const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', validDays: '', contact: '', notes: '', discount: 0, priority: 'medium', assignedStaffId: '', machineId: '' });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
   const [rate, setRate] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const [clients, setClients] = useState([]);
   const [staffList, setStaffList] = useState([]);
+  const [machineList, setMachineList] = useState([]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -595,10 +596,17 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
       // fields for that reason — see their call sites below/in PrintLayouts.
       priority: initialData?.priority || 'medium',
       assignedStaffId: initialData?.assignedStaffId || initialData?.assigned_staff_id || '',
+      // Build decision #5: "Proposals currently have no machine field
+      // at all, so this is also adding that concept there for the
+      // first time." Internal-only, same as priority/assignedStaffId
+      // above -- never shown to the client, never on the PDF, only
+      // relevant once/if this proposal converts into a Job.
+      machineId: initialData?.machineId || initialData?.machine_id || '',
     });
     setSelectedService(null); setQty('1'); setRate(''); setShowPreview(false);
     api.clients('?per_page=500').then(data => setClients(data.items || [])).catch(() => setClients([]));
     api.staff('?active=true').then(data => setStaffList(data.items || [])).catch(() => setStaffList([]));
+    api.machines('?per_page=500').then(data => setMachineList(data.items || [])).catch(() => setMachineList([]));
   }, [isOpen, initialData]);
 
   // Contact autofill (confirmed design, dev-log 2026-07-23): selecting/typing
@@ -642,8 +650,27 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
 
   const addItem = () => {
     if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate), unit: selectedService.unit }] }));
+      setForm(p => ({ ...p, items: [...p.items, {
+        desc: selectedService.name, qty: Number(qty), rate: Number(rate), unit: selectedService.unit,
+        pricingItemId: selectedService.id,
+        requiredCapabilityId: selectedService.requiredCapabilityId,
+        machineId: form.machineId || null,
+      }] }));
       setQty('1'); setRate(''); setSelectedService(null);
+    }
+  };
+  // Build decision #5, extended to Proposals -- identical auto-assign
+  // behavior to NewJobModal's handleServiceSelect.
+  const handleServiceSelect = async (service) => {
+    setSelectedService(service); setQty('1');
+    if (!service.requiredCapabilityId) return;
+    try {
+      const { auto_assigned_machine } = await api.compatibleMachines(service.requiredCapabilityId);
+      if (auto_assigned_machine) {
+        setForm(prev => ({ ...prev, machineId: auto_assigned_machine.id }));
+      }
+    } catch {
+      // Non-fatal -- see NewJobModal's handleServiceSelect for why.
     }
   };
   const subtotal = calculateTotal(form.items);
@@ -705,8 +732,15 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
                 {staffList.map(s => <option key={s.id} value={s.id}>{s.name}{s.role ? ` (${s.role})` : ''}</option>)}
               </select>
             </div>
+            <div>
+              <label style={labelStyle}>Assigned Machine</label>
+              <select style={{ ...inputStyle, cursor: 'pointer' }} value={form.machineId} onChange={e => setForm({ ...form, machineId: e.target.value })}>
+                <option value="">— Unassigned —</option>
+                {machineList.map(m => <option key={m.id} value={m.id}>{m.name}{m.category ? ` (${m.category})` : ''}</option>)}
+              </select>
+            </div>
           </div>
-          <ServiceDropdown selectedService={selectedService} onSelect={s => { setSelectedService(s); setQty('1'); }} />
+          <ServiceDropdown selectedService={selectedService} onSelect={handleServiceSelect} />
           <div style={{ flex: 1, padding: '12px 20px' }}>
             <label style={labelStyle}>Scope Items ({form.items.length})</label>
             {form.items.length === 0
@@ -827,8 +861,38 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
 
   const addItem = () => {
     if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate) }] }));
+      setForm(p => ({ ...p, items: [...p.items, {
+        desc: selectedService.name, qty: Number(qty), rate: Number(rate),
+        pricingItemId: selectedService.id,
+        requiredCapabilityId: selectedService.requiredCapabilityId,
+        // Build decision #5: each line item carries its OWN machine
+        // (one job can need several machines across its services) --
+        // captured from whatever form.machineId was auto-assigned/
+        // chosen at the moment THIS item was added, not re-read later.
+        machineId: form.machineId || null,
+      }] }));
       setQty('1'); setRate(''); setSelectedService(null);
+    }
+  };
+  // Build decision #5: "once a service is picked, the app should
+  // automatically assign a machine that can actually do it... if more
+  // than one machine could do the job, the app auto-picks one for you
+  // (no manual override needed)." The existing "Assigned Machine"
+  // dropdown above is left as a manual override for edge cases (e.g.
+  // a specific machine is down) -- this removes the manual STEP, not
+  // the manual OPTION.
+  const handleServiceSelect = async (service) => {
+    setSelectedService(service); setQty('1');
+    if (!service.requiredCapabilityId) return; // legacy pricing item
+      // with no capability set yet -- nothing to auto-assign from.
+    try {
+      const { auto_assigned_machine } = await api.compatibleMachines(service.requiredCapabilityId);
+      if (auto_assigned_machine) {
+        setForm(prev => ({ ...prev, machineId: auto_assigned_machine.id }));
+      }
+    } catch {
+      // Non-fatal: auto-assign is a convenience, not a requirement --
+      // the manual "Assigned Machine" dropdown still works if this fails.
     }
   };
   const removeItem = i => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }));
@@ -876,7 +940,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
               </select>
             </div>
           </div>
-          <ServiceDropdown selectedService={selectedService} onSelect={s => { setSelectedService(s); setQty('1'); }} />
+          <ServiceDropdown selectedService={selectedService} onSelect={handleServiceSelect} />
           <div style={{ flex: 1, padding: '12px 20px' }}>
             <label style={labelStyle}>Line Items ({form.items.length})</label>
             {form.items.length === 0

@@ -38,6 +38,10 @@ def create_proposal():
         contact=data.get("contact"),
         priority=data.get("priority", "medium"),
         assigned_staff_id=data.get("assigned_staff_id"),
+        # Build decision #5: mirrors Job's own machine_id/
+        # required_capability_id exactly.
+        machine_id=data.get("machine_id"),
+        required_capability_id=data.get("required_capability_id"),
         prepared_by=data.get("prepared_by"),
         notes=data.get("notes"),
     )
@@ -58,7 +62,7 @@ def get_proposal(proposal_id):
 def update_proposal(proposal_id):
     proposal = Proposal.query.get_or_404(proposal_id)
     data = request.get_json() or {}
-    for field in ["client_name", "title", "status", "discount_amount", "currency", "contact", "priority", "assigned_staff_id", "prepared_by", "notes"]:
+    for field in ["client_name", "title", "status", "discount_amount", "currency", "contact", "priority", "assigned_staff_id", "machine_id", "required_capability_id", "prepared_by", "notes"]:
         if field in data:
             setattr(proposal, field, data[field])
     if "valid_until" in data:
@@ -102,6 +106,12 @@ def accept_proposal(proposal_id):
         # the source of truth for the Job's initial due_date.
         due_date=proposal.valid_until,
         assigned_staff_id=proposal.assigned_staff_id,
+        # Build decision #5: same carry-over pattern already used for
+        # assigned_staff_id above -- machine_id and
+        # required_capability_id were captured on the Proposal but
+        # would otherwise never reach the Job created here.
+        machine_id=proposal.machine_id,
+        required_capability_id=proposal.required_capability_id,
         notes=proposal.notes,
     )
     invoice = create_invoice_for_job(
@@ -113,6 +123,11 @@ def accept_proposal(proposal_id):
                 "quantity": float(item.quantity or 1),
                 "unit": item.unit or "item",
                 "unit_price": float(item.unit_price or item.amount or 0),
+                # Same carry-over, at the per-line-item level -- build
+                # decision #5's "one job can need several machines"
+                # (InvoiceLineItem already supports this per-line).
+                "pricing_item_id": item.pricing_item_id,
+                "machine_id": item.machine_id,
             }
             for item in proposal.line_items
         ],

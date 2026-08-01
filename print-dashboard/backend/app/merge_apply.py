@@ -145,22 +145,20 @@ SAFE_TO_WRITE_TABLES = {
             "status", "generated_by", "notes", "device_id", "created_at", "updated_at",
         ],
     },
-    "materials": {
-        "model": Material,
-        "key_column": "material_ref",
-        "columns": [
-            "material_ref", "name", "machine_id", "category", "vendor_id",
-            "unit", "unit_cost", "reorder_point", "active", "notes",
-            "device_id", "created_at", "updated_at",
-        ],
-        "fk_translations": {
-            "machine_id": ("production_machines", "machine_ref"),
-            "vendor_id": ("vendors", "name"),
-        },
-    },
-    # Must run after materials, jobs, and vendors above -- all three FK
-    # targets need to already have this run's new rows committed and
-    # flushed before a transaction pointing at any of them can resolve.
+    # materials intentionally NOT synced (decision #2, build-decisions.md):
+    # stays local to each device permanently. Previously synced via
+    # material_ref, but matching was ref-only -- two devices independently
+    # creating "Large Format Ink" got two different refs and therefore two
+    # unrelated rows, duplicating stock instead of recognizing the same
+    # material. Removed here; material_id below is resolved by name
+    # instead of translated (see _resolve_material_fk), since a raw
+    # untranslated id would silently point at the wrong material on the
+    # receiving device, and a normal fk_translations lookup can't assume
+    # the receiving device even has a matching material at all.
+    # Must run after jobs and vendors above -- material_id resolution can
+    # create a fresh local Material (no machine/vendor link needed for
+    # that), but job_id and vendor_id translation both need those tables'
+    # same-run rows already committed and flushed.
     "material_transactions": {
         "model": MaterialTransaction,
         "key_column": "material_transaction_ref",
@@ -171,10 +169,12 @@ SAFE_TO_WRITE_TABLES = {
             "device_id", "created_at", "updated_at",
         ],
         "fk_translations": {
-            "material_id": ("materials", "material_ref"),
             "job_id": ("jobs", "job_ref"),
             "vendor_id": ("vendors", "name"),
         },
+        # material_id deliberately NOT in fk_translations above -- see
+        # _resolve_material_fk below and this table's comment.
+        "material_fk_column": "material_id",
     },
     "clients": {
         "model": Client,
@@ -276,7 +276,7 @@ SAFE_TO_WRITE_TABLES = {
 # is silently never applied even if present in SAFE_TO_WRITE_TABLES.
 APPLY_ORDER = [
     "production_machines", "capabilities", "vendors",
-    "expense_categories", "advances", "export_jobs", "materials",
+    "expense_categories", "advances", "export_jobs",
     "clients", "pricing_items", "jobs", "invoices",
     "expenses", "sales", "petty_cash_entries", "material_transactions",
 ]
@@ -303,6 +303,12 @@ class TableApplyResult:
     conflicts_created: int = 0
     skipped_reason: str | None = None
     errors: list = field(default_factory=list)
+    # Informational, non-fatal notes -- e.g. a material that couldn't be
+    # matched by name and was created fresh instead (see
+    # _resolve_material_fk). Distinct from errors: nothing failed, no
+    # row was skipped, this is just visibility into something that
+    # quietly happened.
+    notes: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -313,6 +319,7 @@ class TableApplyResult:
             "conflicts_created": self.conflicts_created,
             "skipped_reason": self.skipped_reason,
             "errors": self.errors,
+            "notes": self.notes,
         }
 
 
@@ -403,9 +410,9 @@ def _translate_fk(column: str, raw_value, referenced_table: str, referenced_key:
     referenced table's natural key (e.g. machine_ref, vendor name).
 
     Looked up straight against the live ORM/session (not conn_b), since
-    by the time materials are processed (APPLY_ORDER runs machines/
-    vendors first and flushes after each write) any row referenced by a
-    same-run add_from_b is already visible here.
+    by the time a table with FK dependencies is processed, APPLY_ORDER
+    has already run and flushed the tables it depends on, so any row
+    added earlier in this same merge run is already visible here.
 
     Returns (resolved_local_id, ok). On failure, ok=False and a message
     is appended to errors -- callers must skip the row rather than guess.
@@ -427,7 +434,6 @@ def _translate_fk(column: str, raw_value, referenced_table: str, referenced_key:
         "jobs": Job,
         "expenses": Expense,
         "expense_categories": ExpenseCategory,
-        "materials": Material,
     }[referenced_table]
     match = model.query.filter_by(**{referenced_key: natural_key_value}).first()
     if match is None:
@@ -438,6 +444,69 @@ def _translate_fk(column: str, raw_value, referenced_table: str, referenced_key:
         )
         return None, False
     return match.id, True
+
+
+def _resolve_material_fk(conn_b, raw_b_material_id, notes: list):
+    """Resolves material_transactions.material_id for an incoming row
+    from B. Deliberately NOT a _translate_fk() call -- materials don't
+    sync (decision #2, build-decisions.md: "the materials themselves
+    should not sync"), so there's no guarantee this device even has a
+    material matching B's. A transaction with no material at all would
+    be meaningless -- it exists to describe stock movement FOR a
+    specific material -- so this is a deliberate exception to "never
+    guess, never auto-create":
+
+      1. Look up B's material name for this raw id (via conn_b).
+      2. Try to match it to an existing LOCAL material by name --
+         trimmed, case-insensitive (SQLite's default string comparison
+         is case-sensitive, so this can't be a plain filter_by(name=)).
+      3. No match -> create that material fresh on this device (a real
+         row, not a text placeholder), so the transaction has something
+         real to attach to instead of being orphaned or dropped.
+         reorder_point/category/vendor left unset -- this device's
+         owner manages the new material independently from here, same
+         "materials never sync" rule applies to the new row too.
+
+    Returns (resolved_local_material_id, ok). ok=False only if B's own
+    material row is missing from B's backup entirely (nothing to match
+    OR create from) -- still skips the row via the normal row_errors
+    path rather than guessing.
+    """
+    if raw_b_material_id is None:
+        return None, False  # material_id is NOT NULL on this table; a
+        # missing value means the row itself is malformed, not a normal
+        # miss -- always an error, never silently resolved.
+
+    b_material = conn_b.execute(
+        "SELECT name, unit, unit_cost FROM materials WHERE id = ?",
+        (raw_b_material_id,),
+    ).fetchone()
+    if b_material is None:
+        return None, False
+
+    b_name = (b_material["name"] or "").strip()
+    existing = Material.query.filter(
+        db.func.lower(db.func.trim(Material.name)) == b_name.lower()
+    ).first()
+    if existing is not None:
+        return existing.id, True
+
+    from .services.ref_generator import next_material_ref
+
+    new_material = Material(
+        material_ref=next_material_ref(),
+        name=b_name,
+        unit=b_material["unit"] or "unit",
+        unit_cost=b_material["unit_cost"] or 0,
+    )
+    db.session.add(new_material)
+    db.session.flush()
+    notes.append(
+        f"material_id: no local material matched {b_name!r} -- created "
+        "it fresh on this device so the transaction has something real "
+        "to attach to."
+    )
+    return new_material.id, True
 
 
 def _snapshot_live_db_as_zip(tmpdir: str, expected_db_name: str = "app.db") -> str:
@@ -532,6 +601,7 @@ def apply_merge(zip_path_a: str | None, zip_path_b: str, dry_run_only: bool = Tr
                     key_column = spec["key_column"]
                     columns = spec["columns"]
                     fk_translations = spec.get("fk_translations", {})
+                    material_fk_column = spec.get("material_fk_column")
                     table_changes = preview_by_table[table]["changes"]
 
                     result = TableApplyResult(table=table, applied=True)
@@ -651,6 +721,26 @@ def apply_merge(zip_path_a: str | None, zip_path_b: str, dry_run_only: bool = Tr
                         if row_errors:
                             result.errors.extend(row_errors)
                             continue
+
+                        # material_fk_column (material_transactions.
+                        # material_id only): materials don't sync, so
+                        # unlike a normal fk_translations lookup this
+                        # can't assume the referenced row exists here.
+                        # See _resolve_material_fk's docstring for why
+                        # this creates a fresh local material on a miss
+                        # instead of failing the row.
+                        if material_fk_column:
+                            raw_b_id = row_data.get(material_fk_column)
+                            resolved_id, ok = _resolve_material_fk(conn_b, raw_b_id, result.notes)
+                            if ok:
+                                row_data[material_fk_column] = resolved_id
+                            else:
+                                result.errors.append(
+                                    f"{key_column}={key_value}: {material_fk_column} -- "
+                                    f"B's own material (id={raw_b_id}) was not found in "
+                                    "B's backup either, nothing to match or create from."
+                                )
+                                continue
 
                         if action == "add_from_b":
                             new_row = model(**row_data)

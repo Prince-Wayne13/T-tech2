@@ -146,6 +146,22 @@ class PricingItem(TimestampMixin, SerializableMixin, db.Model):
     name = db.Column(db.String(180), nullable=False, index=True)
     category = db.Column(db.String(80), nullable=False, index=True)
     machine_id = db.Column(db.Integer, db.ForeignKey("production_machines.id"))
+    # Build decision #5: the service picker needs to know WHICH
+    # capability a given price-list item requires, so it can hand that
+    # straight to services/machines.py's compatible_machines() and
+    # auto-assign a machine -- the same lookup Job.required_capability_id
+    # already uses for validation (services/machines.py's
+    # assert_machine_compatible). machine_id above only says "the
+    # machine this item is USUALLY billed against" -- it doesn't answer
+    # "which machines COULD do this", because a machine can have
+    # several capabilities (seeded by category -- see
+    # schema_migrations.ensure_default_capabilities_seed) and this item
+    # needs exactly one of them, explicitly, not inferred by guessing
+    # which of the machine's several capabilities is the relevant one.
+    # Nullable so existing pricing items aren't broken -- a service
+    # with no capability set just skips auto-assignment and falls back
+    # to machine_id directly.
+    required_capability_id = db.Column(db.Integer, db.ForeignKey("capabilities.id"), nullable=True, index=True)
     unit = db.Column(db.String(40), nullable=False, default="unit")
     price = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     cost_estimate = db.Column(db.Numeric(14, 2), nullable=False, default=0)
@@ -154,6 +170,7 @@ class PricingItem(TimestampMixin, SerializableMixin, db.Model):
     notes = db.Column(db.Text)
 
     machine = db.relationship("ProductionMachine", backref="pricing_items")
+    required_capability = db.relationship("Capability", backref="pricing_items")
 
 
 # Wayne's ask ("we got this much vinyl, we've used this much, made this much,
@@ -407,6 +424,15 @@ class Proposal(TimestampMixin, SerializableMixin, db.Model):
     contact = db.Column(db.String(160))
     priority = db.Column(db.String(30), default="medium")
     assigned_staff_id = db.Column(db.Integer, db.ForeignKey("staff.id"), nullable=True, index=True)
+    # Build decision #5: "Proposals currently have no machine field at
+    # all, so this is also adding that concept there for the first
+    # time." Mirrors Job.machine_id / Job.required_capability_id
+    # exactly -- internal-only, not shown on the proposal document,
+    # not sent to the client. Populated the same way Job's is: picking
+    # a service auto-assigns a compatible machine (see
+    # services/machines.py's auto_assign_machine()).
+    machine_id = db.Column(db.Integer, db.ForeignKey("production_machines.id"), nullable=True, index=True)
+    required_capability_id = db.Column(db.Integer, db.ForeignKey("capabilities.id"), nullable=True, index=True)
     # Item 6: free text, editable at any status. Will later feed "Prepared by"
     # display on proposal documents; no such display wired in this pass.
     prepared_by = db.Column(db.String(160))
@@ -420,6 +446,8 @@ class Proposal(TimestampMixin, SerializableMixin, db.Model):
 
     client = db.relationship("Client", backref="proposals")
     assigned_staff = db.relationship("Staff", backref="assigned_proposals")
+    machine = db.relationship("ProductionMachine", backref="proposals")
+    required_capability = db.relationship("Capability", backref="proposals")
     # backref=backref(...) with uselist=False on BOTH sides: the plain string-form
     # backref used previously only sets uselist=False on the forward accessor
     # (Proposal.converted_invoice); the reverse accessor (Invoice.source_proposal)
@@ -452,8 +480,16 @@ class ProposalLineItem(TimestampMixin, SerializableMixin, db.Model):
     unit = db.Column(db.String(40), default="item")
     unit_price = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+    # Build decision #5: mirrors InvoiceLineItem.pricing_item_id /
+    # machine_id exactly. Needed so accept_proposal() (routes/
+    # proposals.py) can carry each line's own machine assignment onto
+    # the InvoiceLineItem rows of the Job/Invoice it creates.
+    pricing_item_id = db.Column(db.Integer, db.ForeignKey("pricing_items.id"))
+    machine_id = db.Column(db.Integer, db.ForeignKey("production_machines.id"))
 
     proposal = db.relationship("Proposal", back_populates="line_items")
+    pricing_item = db.relationship("PricingItem", backref="proposal_line_items")
+    machine = db.relationship("ProductionMachine", backref="proposal_line_items")
 
 
 class ExpenseCategory(TimestampMixin, SerializableMixin, db.Model):
