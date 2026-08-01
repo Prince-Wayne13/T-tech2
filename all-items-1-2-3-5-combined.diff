@@ -1,0 +1,1524 @@
+diff --git a/print-dashboard/backend/app/merge_apply.py b/print-dashboard/backend/app/merge_apply.py
+index 770064a..cfae545 100644
+--- a/print-dashboard/backend/app/merge_apply.py
++++ b/print-dashboard/backend/app/merge_apply.py
+@@ -7,40 +7,59 @@ merge_preview.py's docstring and this module's own FK dependency mapping
+ -- see SAFE_TO_WRITE_TABLES below. Every other device_id table is
+ reported as "not merged" rather than silently skipped or guessed at.
+ 
+-vendors, materials, and staff are now included:
++vendors and material_transactions are now included:
+   - vendors: matched by name (NAME_KEYED_TABLES in merge_preview.py).
+     Vendor is deliberately loose/editable -- not a rigid identity -- so
+     name-matching is the right fit, no FK translation needed on this side.
+-  - staff: matched by (device_id, id) via merge_preview.py's
+-    WEAK_KEY_TABLES -- no stable business key exists, so this is applied
+-    with the same caveat already documented there.
+-  - materials: matched by material_ref (a real, per-device-stamped unique
+-    key -- same tier as machine_ref). This is the first table here with
+-    actual cross-device foreign keys that need translation rather than
+-    verbatim copy: Material.machine_id and Material.vendor_id are raw
+-    local integers on B, meaningless on this device. FK_TRANSLATIONS
+-    below resolves each one through the referenced table's natural key
+-    (machine_ref for machines, name for vendors) to find/skip correctly
+-    instead of silently pointing at whatever row happens to share that
+-    raw id locally -- that would be real data corruption, not a cosmetic
+-    gap. If a referenced row can't be found locally at all (shouldn't
+-    normally happen since machines/vendors sync too, but not assumed),
+-    it's reported as a per-row error rather than guessed at or dropped.
+-
+-    This is also why table application order matters now: machines and
+-    vendors must be written before materials in the same run, so a
+-    material's FK lookup can see rows added earlier in this same merge.
+-    APPLY_ORDER (not SAFE_TO_WRITE_TABLES's dict order, which SQLAlchemy
+-    doesn't guarantee) makes that explicit, and each write is flushed
+-    immediately so later lookups in the same run can see it.
+-
+-  material_transactions is deliberately still excluded -- it depends on
+-  the still-blocked `jobs` table via its own job_id FK.
++  - staff is deliberately NOT included here (build decision: "Staff
++    should never sync between devices"). Each device keeps its own
++    staff list forever; this module never reads, writes, or compares
++    the staff table. Jobs and petty cash entries still reference a
++    staff member by FK, so those two tables get a small special case
++    (see soft_fk_columns below) that clears the field to unassigned
++    when the referenced staff member doesn't exist locally, instead of
++    trying to translate/create/skip like a normal FK.
++  - materials is likewise deliberately NOT included here (build
++    decision: "Material transactions should sync -- the materials
++    themselves should not"). Materials were matched by material_ref
++    only, and refs are never comparable across two independently-
++    created rows -- if the same material (e.g. "Large Format Ink") got
++    created separately on two devices, each got its own ref, so a sync
++    saw two unrelated materials and duplicated stock instead of
++    recognizing them as the same thing. Rather than build smarter
++    matching for the material list itself, it now stays local per
++    device permanently, same as staff. This module never writes to the
++    materials table.
++  - material_transactions: matched by transaction_ref (a real,
++    per-device-stamped unique key -- see schema_migrations.py's
++    ensure_material_transaction_refs()). Behaves exactly like
++    jobs/invoices/etc -- an edit to your own transaction on another
++    device merges back as an edit here, using the same "newest wins"
++    rule as everything else. Unlike materials, transactions have a
++    genuine cross-device identity now, so they sync safely even though
++    the material list they reference does not.
++
++    material_id is the one FK on this table that can't use a normal
++    fk_translations lookup: since materials don't sync, the receiving
++    device may not have B's material at all. Handled by a dedicated
++    resolver (see _resolve_material_fk below) that first tries an
++    existing local material matching B's material name (trimmed,
++    case-insensitive -- same idea as build decision #6's client
++    matching), and if none exists, creates that material fresh on this
++    device so the transaction has something real to attach to instead
++    of being left orphaned. This is a deliberate, narrow exception to
++    "never guess, never auto-create" (see _translate_fk's docstring) --
++    spelled out explicitly here because it departs from that rule, not
++    because the rule was dropped.
++
++  vendor_id and job_id on material_transactions DO use the normal
++  fk_translations lookup (vendors and jobs both sync and both have a
++  real natural key), so only material_id gets special handling.
+ 
+ `sales` was initially miscategorized as safe (only FKs to jobs) before
+ catching that Sale.job_id is NOT NULL, so it transitively depends on
+-`jobs`, which IS blocked -- corrected before this module was written, not
+-after.
++`jobs` -- `jobs` is safe now too (see APPLY_ORDER), so this is
++historical context, not a current restriction.
+ 
+ Design:
+   - Uses merge_preview.preview_merge()'s OWN dry-run output as the single
+@@ -80,8 +99,8 @@ from datetime import date, datetime
+ from .extensions import db
+ from .models import (
+     Advance, Capability, Client, Expense, ExpenseCategory, ExportJob,
+-    Invoice, Job, Material, PettyCash, PricingItem, ProductionMachine,
+-    Sale, Staff, SyncConflict, Vendor,
++    Invoice, Job, Material, MaterialTransaction, PettyCash, PricingItem,
++    ProductionMachine, Sale, Staff, SyncConflict, Vendor,
+ )
+ from .merge_preview import preview_merge
+ 
+@@ -118,11 +137,8 @@ SAFE_TO_WRITE_TABLES = {
+             "device_id", "created_at", "updated_at",
+         ],
+     },
+-    "staff": {
+-        "model": Staff,
+-        "key_column": "staff_ref",
+-        "columns": ["staff_ref", "name", "role", "active", "notes", "device_id", "created_at", "updated_at"],
+-    },
++    # "staff" is deliberately NOT a key here -- see module docstring.
++    # Staff never syncs; do not re-add this entry.
+     "expense_categories": {
+         "model": ExpenseCategory,
+         "key_column": "name",
+@@ -144,18 +160,28 @@ SAFE_TO_WRITE_TABLES = {
+             "status", "generated_by", "notes", "device_id", "created_at", "updated_at",
+         ],
+     },
+-    "materials": {
+-        "model": Material,
+-        "key_column": "material_ref",
++    # "materials" is deliberately NOT a key here -- see module docstring.
++    # Materials never sync; do not re-add this entry.
++    "material_transactions": {
++        "model": MaterialTransaction,
++        "key_column": "transaction_ref",
+         "columns": [
+-            "material_ref", "name", "machine_id", "category", "vendor_id",
+-            "unit", "unit_cost", "reorder_point", "active", "notes",
++            "transaction_ref", "material_id", "transaction_type", "quantity",
++            "unit_cost", "transaction_date", "job_id", "vendor_id",
++            "output_quantity", "output_description", "notes",
+             "device_id", "created_at", "updated_at",
+         ],
+         "fk_translations": {
+-            "machine_id": ("production_machines", "machine_ref"),
++            "job_id": ("jobs", "job_ref"),
+             "vendor_id": ("vendors", "name"),
+         },
++        # material_id is deliberately NOT in fk_translations above --
++        # materials never sync, so there's no guarantee the receiving
++        # device has B's material at all. See module docstring's
++        # material_transactions section and _resolve_material_fk below:
++        # this finds an existing local material by name, or creates one
++        # fresh, rather than failing/skipping the row.
++        "material_fk_column": "material_id",
+     },
+     "clients": {
+         "model": Client,
+@@ -190,9 +216,14 @@ SAFE_TO_WRITE_TABLES = {
+         "fk_translations": {
+             "client_id": ("clients", "client_ref"),
+             "machine_id": ("production_machines", "machine_ref"),
+-            "assigned_staff_id": ("staff", "staff_ref"),
+             "required_capability_id": ("capabilities", "name"),
+         },
++        # assigned_staff_id is deliberately NOT in fk_translations above
++        # -- staff never syncs, so there is no source-of-truth to
++        # translate against. Handled separately as a soft field: see
++        # STAFF_FK_COLUMNS / _resolve_staff_fk below, which clears it
++        # to unassigned (None) rather than failing the whole job.
++        "soft_fk_columns": {"assigned_staff_id": "staff_ref"},
+     },
+     "invoices": {
+         "model": Invoice,
+@@ -244,9 +275,11 @@ SAFE_TO_WRITE_TABLES = {
+             "linked_expense_id", "notes", "device_id", "created_at", "updated_at",
+         ],
+         "fk_translations": {
+-            "staff_id": ("staff", "staff_ref"),
+             "linked_expense_id": ("expenses", "expense_ref"),
+         },
++        # staff_id is deliberately NOT translated -- staff never
++        # syncs. See jobs.soft_fk_columns above for the same pattern.
++        "soft_fk_columns": {"staff_id": "staff_ref"},
+     },
+ }
+ 
+@@ -258,10 +291,15 @@ SAFE_TO_WRITE_TABLES = {
+ # iterates this list, not the dict directly, so a table missing from here
+ # is silently never applied even if present in SAFE_TO_WRITE_TABLES.
+ APPLY_ORDER = [
+-    "production_machines", "capabilities", "vendors", "staff",
+-    "expense_categories", "advances", "export_jobs", "materials",
++    "production_machines", "capabilities", "vendors",
++    "expense_categories", "advances", "export_jobs",
+     "clients", "pricing_items", "jobs", "invoices",
+     "expenses", "sales", "petty_cash_entries",
++    # Must run after production_machines/vendors/jobs above: material_id
++    # resolution can create a fresh local Material (no machine/vendor
++    # link needed for that), but job_id and vendor_id translation both
++    # need those tables' same-run rows already committed-and-flushed.
++    "material_transactions",
+ ]
+ 
+ _missing_from_apply_order = set(SAFE_TO_WRITE_TABLES) - set(APPLY_ORDER)
+@@ -273,7 +311,12 @@ if _missing_from_apply_order:
+ 
+ NOT_YET_SAFE_TABLES = [
+     "proposals",
+-    "invoice_line_items", "proposal_line_items", "material_transactions",
++    "invoice_line_items", "proposal_line_items",
++    # "material_transactions" removed -- it moved to SAFE_TO_WRITE_TABLES /
++    # APPLY_ORDER above once transaction_ref existed and material_id had a
++    # real resolution strategy (_resolve_material_fk). Leaving it in both
++    # lists made every merge report it twice (once here as skipped, once
++    # for real) -- do not re-add it here.
+ ]
+ 
+ 
+@@ -286,6 +329,11 @@ class TableApplyResult:
+     conflicts_created: int = 0
+     skipped_reason: str | None = None
+     errors: list = field(default_factory=list)
++    # Informational, non-fatal notes -- e.g. a soft FK (staff) that
++    # couldn't be matched and was left unassigned. Distinct from
++    # `errors`: nothing failed, no row was skipped, this is just
++    # visibility into a field that quietly changed.
++    notes: list = field(default_factory=list)
+ 
+     def to_dict(self) -> dict:
+         return {
+@@ -296,6 +344,7 @@ class TableApplyResult:
+             "conflicts_created": self.conflicts_created,
+             "skipped_reason": self.skipped_reason,
+             "errors": self.errors,
++            "notes": self.notes,
+         }
+ 
+ 
+@@ -361,7 +410,8 @@ def _coerce_row(columns: list, row) -> dict:
+ 
+ def _fetch_b_row(conn_b, table: str, key_column: str, key_value):
+     """Looks up B's row for a change entry. Ref/name-keyed tables use a
+-    normal WHERE match. Weak-key tables (staff) are keyed in the preview
++    normal WHERE match. Weak-key tables (currently none -- WEAK_KEY_TABLES
++    in merge_preview.py is kept empty on purpose) are keyed in the preview
+     report as "device_id::id" strings -- split that back apart to find
+     the actual row, since there's no single real column to match on."""
+     if key_column == "__device_and_id__":
+@@ -386,9 +436,9 @@ def _translate_fk(column: str, raw_value, referenced_table: str, referenced_key:
+     referenced table's natural key (e.g. machine_ref, vendor name).
+ 
+     Looked up straight against the live ORM/session (not conn_b), since
+-    by the time materials are processed (APPLY_ORDER runs machines/
+-    vendors first and flushes after each write) any row referenced by a
+-    same-run add_from_b is already visible here.
++    by the time a table with FK dependencies is processed, APPLY_ORDER
++    has already run and flushed the tables it depends on, so any row
++    added earlier in this same merge run is already visible here.
+ 
+     Returns (resolved_local_id, ok). On failure, ok=False and a message
+     is appended to errors -- callers must skip the row rather than guess.
+@@ -405,7 +455,6 @@ def _translate_fk(column: str, raw_value, referenced_table: str, referenced_key:
+         "production_machines": ProductionMachine,
+         "vendors": Vendor,
+         "clients": Client,
+-        "staff": Staff,
+         "capabilities": Capability,
+         "jobs": Job,
+         "expenses": Expense,
+@@ -422,6 +471,75 @@ def _translate_fk(column: str, raw_value, referenced_table: str, referenced_key:
+     return match.id, True
+ 
+ 
++def _resolve_material_fk(conn_b, raw_b_material_id, notes: list):
++    """Resolves material_transactions.material_id for an incoming row from
++    B. Deliberately NOT a _translate_fk() call -- materials don't sync
++    (build decision: "Material transactions should sync -- the materials
++    themselves should not"), so there's no guarantee this device even has
++    a material matching B's. Unlike the staff soft-fk (which just clears
++    to unassigned on a miss), a transaction with no material at all would
++    be meaningless -- it exists to describe stock movement FOR a specific
++    material, so this is the one deliberate, narrow exception to "never
++    guess, never auto-create" elsewhere in this file:
++
++      1. Look up B's material name for this raw id (via conn_b, same
++         approach _translate_fk's callers already use for other FKs).
++      2. Try to match it to an existing LOCAL material by name --
++         trimmed, case-insensitive, same normalization build decision #6
++         uses for client name-matching (SQLite's default string
++         comparison is case-sensitive, so this can't just be a plain
++         filter_by(name=...)).
++      3. No match -> create that material fresh on this device (a real
++         row, not a text placeholder), so the transaction has something
++         real to attach to instead of being orphaned or dropped. Given a
++         reasonable starting unit/unit_cost of B's own values where
++         available, reorder_point/category/vendor left unset -- this
++         device's owner can fill those in locally since the material
++         itself is now theirs to manage independently (same "materials
++         never sync" rule applies to this newly-created row too).
++
++    Returns (resolved_local_material_id, ok). ok=False only if B's own
++    material row is missing from B's backup entirely (genuinely
++    unrecoverable -- nothing to match OR create from), which still skips
++    the row via the normal row_errors path rather than guessing.
++    """
++    if raw_b_material_id is None:
++        return None, False  # material_id is NOT NULL on this table; a
++        # missing value here means the row itself is malformed, not a
++        # normal miss -- always an error, never silently resolved.
++
++    b_material = conn_b.execute(
++        "SELECT name, unit, unit_cost FROM materials WHERE id = ?",
++        (raw_b_material_id,),
++    ).fetchone()
++    if b_material is None:
++        return None, False
++
++    b_name = (b_material["name"] or "").strip()
++    existing = Material.query.filter(
++        db.func.lower(db.func.trim(Material.name)) == b_name.lower()
++    ).first()
++    if existing is not None:
++        return existing.id, True
++
++    from .services.ref_generator import next_material_ref
++
++    new_material = Material(
++        material_ref=next_material_ref(),
++        name=b_name,
++        unit=b_material["unit"] or "unit",
++        unit_cost=b_material["unit_cost"] or 0,
++    )
++    db.session.add(new_material)
++    db.session.flush()
++    notes.append(
++        f"material_id: no local material matched {b_name!r} -- created "
++        "it fresh on this device so the transaction has something real "
++        "to attach to."
++    )
++    return new_material.id, True
++
++
+ def _snapshot_live_db_as_zip(tmpdir: str, expected_db_name: str = "app.db") -> str:
+     """Builds a zip of the LIVE database's current state, in the same
+     shape preview_merge() expects (a zip containing app.db). Used as the
+@@ -514,6 +632,8 @@ def apply_merge(zip_path_a: str | None, zip_path_b: str, dry_run_only: bool = Tr
+                     key_column = spec["key_column"]
+                     columns = spec["columns"]
+                     fk_translations = spec.get("fk_translations", {})
++                    soft_fk_columns = spec.get("soft_fk_columns", {})
++                    material_fk_column = spec.get("material_fk_column")
+                     table_changes = preview_by_table[table]["changes"]
+ 
+                     result = TableApplyResult(table=table, applied=True)
+@@ -630,6 +750,58 @@ def apply_merge(zip_path_a: str | None, zip_path_b: str, dry_run_only: bool = Tr
+                                     f"{key_column}={key_value}: " + row_errors[-1]
+                                 )
+ 
++                        # Soft FK columns (currently: assigned_staff_id,
++                        # petty_cash_entries.staff_id) point at a table
++                        # that deliberately never syncs (staff). There is
++                        # no source of truth to translate against, so
++                        # unlike fk_translations above this never fails
++                        # the row -- it resolves by name on THIS device
++                        # if a match exists, otherwise clears the field
++                        # to unassigned (None). A job or petty cash entry
++                        # is still fully valid without a staff assignment;
++                        # dropping the whole row over one optional field
++                        # would lose real data for no reason.
++                        for col, ref_key in soft_fk_columns.items():
++                            raw_b_id = row_data.get(col)
++                            if raw_b_id is None:
++                                continue
++                            b_ref_row = conn_b.execute(
++                                f"SELECT name FROM staff WHERE id = ?", (raw_b_id,)
++                            ).fetchone()
++                            resolved = None
++                            if b_ref_row is not None:
++                                match = Staff.query.filter_by(name=b_ref_row["name"]).first()
++                                if match is not None:
++                                    resolved = match.id
++                                else:
++                                    result.notes.append(
++                                        f"{key_column}={key_value}: {col} -- staff "
++                                        f"{b_ref_row['name']!r} not found on this "
++                                        "device, left unassigned."
++                                    )
++                            row_data[col] = resolved
++
++                        # material_fk_column (material_transactions.
++                        # material_id only): materials don't sync, so
++                        # unlike a normal fk_translations lookup this
++                        # can't assume the referenced row exists here.
++                        # Unlike soft_fk_columns above, a transaction
++                        # with no material at all is meaningless -- see
++                        # _resolve_material_fk's docstring for why this
++                        # creates a fresh local material on a miss
++                        # instead of clearing the field to None.
++                        if material_fk_column:
++                            raw_b_id = row_data.get(material_fk_column)
++                            resolved_id, ok = _resolve_material_fk(conn_b, raw_b_id, result.notes)
++                            if ok:
++                                row_data[material_fk_column] = resolved_id
++                            else:
++                                row_errors.append(
++                                    f"{key_column}={key_value}: {material_fk_column} -- "
++                                    f"B's own material (id={raw_b_id}) was not found in "
++                                    "B's backup either, nothing to match or create from."
++                                )
++
+                         if row_errors:
+                             result.errors.extend(row_errors)
+                             continue
+diff --git a/print-dashboard/backend/app/merge_preview.py b/print-dashboard/backend/app/merge_preview.py
+index 68849d4..4f74031 100644
+--- a/print-dashboard/backend/app/merge_preview.py
++++ b/print-dashboard/backend/app/merge_preview.py
+@@ -14,21 +14,40 @@ for reference numbers. This means "match by id" is actively wrong for
+ merge, and the real matching key differs by table:
+ 
+   - Tables with a unique *_ref column (jobs, invoices, proposals,
+-    expenses, payments, materials, machines, advances, exports, sales,
+-    petty cash, staff, clients, pricing_items) -- the ref IS the stable
+-    cross-device identity, because ref_generator.py already embeds a
+-    per-device fragment in every new ref (e.g. "JOB-4F32-0005"), so two
+-    devices can never produce the same ref for two different records.
++    expenses, payments, material_transactions, machines, advances,
++    exports, sales, petty cash, clients, pricing_items) -- the ref IS
++    the stable cross-device identity, because ref_generator.py already
++    embeds a per-device fragment in every new ref (e.g.
++    "JOB-4F32-0005"), so two devices can never produce the same ref
++    for two different records.
+ 
+   - Capability, Vendor -- neither has a _ref column, but `name` is a
+     real, deliberate identity for both (Capability.name is unique=True;
+     Vendor is deliberately loose/editable rather than rigid, so matched
+     by name on purpose, not as a fallback).
+ 
+-  - Staff previously had neither a ref nor a unique column and was
+-    matched by (device_id, id) -- see WEAK_KEY_TABLES below, now empty.
+-    staff_ref (see schema_migrations.ensure_staff_client_pricing_refs)
+-    replaced that weak match with a real one.
++  - Staff is deliberately NOT synced at all (see build decision doc,
++    "Staff should never sync between devices") -- each device manages
++    its own staff list independently, permanently. staff_ref still
++    exists on the model (used for display/reference only), but staff
++    is intentionally absent from every table map below. A job that
++    references a staff member unknown on the receiving device gets
++    that one field cleared to unassigned rather than failing the
++    whole job -- see merge_apply.py's staff handling.
++
++  - Material is likewise deliberately NOT synced (build decision:
++    "Material transactions should sync -- the materials themselves
++    should not"). Materials were previously matched by material_ref,
++    but that only ever compared refs -- never names -- so the same
++    material created independently on two devices (e.g. "Large Format
++    Ink") got two different refs and synced as two unrelated rows,
++    duplicating stock instead of recognizing them as the same thing.
++    Rather than build smarter matching, the material list itself now
++    stays local per device, same as staff. Its transactions (the
++    purchase/usage/adjustment log entries) DO sync -- see
++    material_transactions below and merge_apply.py's material-name
++    matching for how an incoming transaction finds or creates the
++    right local material to attach to.
+ 
+ Only these tables are covered by this first dry-run pass -- NOT all 20
+ device_id tables yet. Scope kept honest rather than claiming full
+@@ -53,20 +72,24 @@ REF_KEYED_TABLES = {
+     "proposals": "proposal_ref",
+     "expenses": "expense_ref",
+     "payments": "payment_ref",
+-    "materials": "material_ref",
++    "material_transactions": "transaction_ref",
+     "production_machines": "machine_ref",
+     "advances": "advance_ref",
+     "export_jobs": "export_ref",
+     "sales": "sale_ref",
+     "petty_cash_entries": "entry_ref",
+-    # Added once staff_ref/client_ref/pricing_item_ref existed (see
+-    # schema_migrations.ensure_staff_client_pricing_refs) -- these
+-    # previously had no unique column at all. staff was matched via
+-    # WEAK_KEY_TABLES below (now empty); clients/pricing_items were
+-    # entirely unmergeable. vendors is deliberately NOT added here --
+-    # it already has a real, working name-based match in
+-    # NAME_KEYED_TABLES, so no vendor_ref exists or is needed.
+-    "staff": "staff_ref",
++    # Added once client_ref/pricing_item_ref existed (see
++    # schema_migrations.ensure_staff_client_pricing_refs -- name kept
++    # for the migration despite staff no longer syncing, see below).
++    # clients/pricing_items were previously entirely unmergeable.
++    # vendors is deliberately NOT added here -- it already has a real,
++    # working name-based match in NAME_KEYED_TABLES, so no vendor_ref
++    # exists or is needed.
++    #
++    # "staff" is deliberately NOT in this map. Staff stays local to
++    # each device permanently (build decision: "Staff should never
++    # sync between devices") -- it is never compared, never merged,
++    # never written by this engine at all.
+     "clients": "client_ref",
+     "pricing_items": "pricing_item_ref",
+ }
+diff --git a/print-dashboard/backend/app/models.py b/print-dashboard/backend/app/models.py
+index 9746b5b..b14270e 100644
+--- a/print-dashboard/backend/app/models.py
++++ b/print-dashboard/backend/app/models.py
+@@ -146,6 +146,23 @@ class PricingItem(TimestampMixin, SerializableMixin, db.Model):
+     name = db.Column(db.String(180), nullable=False, index=True)
+     category = db.Column(db.String(80), nullable=False, index=True)
+     machine_id = db.Column(db.Integer, db.ForeignKey("production_machines.id"))
++    # Build decision #5 ("pick a service, app picks the machine
++    # automatically"): the service picker needs to know WHICH capability
++    # a given price-list item requires, so it can hand that straight to
++    # compatible_machines() (services/machines.py) and auto-assign a
++    # machine -- the same lookup Job.required_capability_id already uses
++    # for validation (see services/jobs.py's validate_job_machine_
++    # assignment). machine_id above only says "the machine this item is
++    # USUALLY billed against" -- it doesn't answer "which machines COULD
++    # do this", because a machine can have several capabilities (seeded
++    # by category -- see schema_migrations.ensure_default_capabilities_
++    # seed) and this item needs exactly one of them, explicitly, not
++    # inferred by guessing which of the machine's several capabilities
++    # is the relevant one. Nullable so existing/legacy pricing items
++    # aren't broken by this -- a service with no capability set just
++    # skips auto-assignment and falls back to machine_id directly (see
++    # routes/jobs.py's resolve_service_machine()).
++    required_capability_id = db.Column(db.Integer, db.ForeignKey("capabilities.id"), nullable=True, index=True)
+     unit = db.Column(db.String(40), nullable=False, default="unit")
+     price = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+     cost_estimate = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+@@ -154,6 +171,7 @@ class PricingItem(TimestampMixin, SerializableMixin, db.Model):
+     notes = db.Column(db.Text)
+ 
+     machine = db.relationship("ProductionMachine", backref="pricing_items")
++    required_capability = db.relationship("Capability", backref="pricing_items")
+ 
+ 
+ # Wayne's ask ("we got this much vinyl, we've used this much, made this much,
+@@ -196,6 +214,18 @@ class MaterialTransaction(TimestampMixin, SerializableMixin, db.Model):
+     __tablename__ = "material_transactions"
+ 
+     id = db.Column(db.Integer, primary_key=True)
++    # Stable cross-device identity for this transaction row (build decision:
++    # "Material transactions should sync -- the materials themselves should
++    # not"). Unlike Material, which stays local per device forever, an
++    # individual usage/purchase/adjustment log entry DOES sync -- and raw
++    # `id` is a per-device autoincrement, meaningless across devices (see
++    # ref_generator.py's own docstring). transaction_ref follows the exact
++    # same pattern as job_ref/invoice_ref/etc: a per-device fragment plus a
++    # sequential number, so two devices can never collide on the same ref
++    # for two different transactions. See schema_migrations.py's
++    # ensure_material_transaction_refs() for how this backfills onto
++    # existing rows.
++    transaction_ref = db.Column(db.String(40), unique=True, nullable=False, index=True)
+     material_id = db.Column(db.Integer, db.ForeignKey("materials.id"), nullable=False, index=True)
+     # "purchase" adds to stock (new delivery); "usage" subtracts from stock
+     # (consumed on a job). "adjustment" covers manual corrections (stock
+@@ -400,6 +430,17 @@ class Proposal(TimestampMixin, SerializableMixin, db.Model):
+     contact = db.Column(db.String(160))
+     priority = db.Column(db.String(30), default="medium")
+     assigned_staff_id = db.Column(db.Integer, db.ForeignKey("staff.id"), nullable=True, index=True)
++    # Build decision #5: "Proposals currently have no machine field at
++    # all, so this is also adding that concept there for the first
++    # time." Mirrors Job.machine_id / Job.required_capability_id
++    # exactly (same nullable/FK shape, same internal-only intent as
++    # priority/assigned_staff_id above -- not shown on the proposal
++    # document, not sent to the client). Populated the same way Job's
++    # is: picking a service auto-assigns a compatible machine (see
++    # services/machines.py's auto_assign_machine()) via the frontend's
++    # ServiceDropdown onSelect handler.
++    machine_id = db.Column(db.Integer, db.ForeignKey("production_machines.id"), nullable=True, index=True)
++    required_capability_id = db.Column(db.Integer, db.ForeignKey("capabilities.id"), nullable=True, index=True)
+     # Item 6: free text, editable at any status. Will later feed "Prepared by"
+     # display on proposal documents; no such display wired in this pass.
+     prepared_by = db.Column(db.String(160))
+@@ -413,6 +454,8 @@ class Proposal(TimestampMixin, SerializableMixin, db.Model):
+ 
+     client = db.relationship("Client", backref="proposals")
+     assigned_staff = db.relationship("Staff", backref="assigned_proposals")
++    machine = db.relationship("ProductionMachine", backref="proposals")
++    required_capability = db.relationship("Capability", backref="proposals")
+     # backref=backref(...) with uselist=False on BOTH sides: the plain string-form
+     # backref used previously only sets uselist=False on the forward accessor
+     # (Proposal.converted_invoice); the reverse accessor (Invoice.source_proposal)
+@@ -445,8 +488,19 @@ class ProposalLineItem(TimestampMixin, SerializableMixin, db.Model):
+     unit = db.Column(db.String(40), default="item")
+     unit_price = db.Column(db.Numeric(14, 2), nullable=False, default=0)
+     amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
++    # Build decision #5: mirrors InvoiceLineItem.pricing_item_id /
++    # machine_id exactly -- see that model's own columns of the same
++    # name. Needed so accept_proposal() (routes/proposals.py) can carry
++    # each line's own machine assignment onto the InvoiceLineItem rows
++    # of the Job/Invoice it creates, instead of that information only
++    # existing transiently in the frontend form and being lost the
++    # moment the proposal is saved.
++    pricing_item_id = db.Column(db.Integer, db.ForeignKey("pricing_items.id"))
++    machine_id = db.Column(db.Integer, db.ForeignKey("production_machines.id"))
+ 
+     proposal = db.relationship("Proposal", back_populates="line_items")
++    pricing_item = db.relationship("PricingItem", backref="proposal_line_items")
++    machine = db.relationship("ProductionMachine", backref="proposal_line_items")
+ 
+ 
+ class ExpenseCategory(TimestampMixin, SerializableMixin, db.Model):
+diff --git a/print-dashboard/backend/app/restore_inspector.py b/print-dashboard/backend/app/restore_inspector.py
+index 94a5dc8..daa30a5 100644
+--- a/print-dashboard/backend/app/restore_inspector.py
++++ b/print-dashboard/backend/app/restore_inspector.py
+@@ -59,6 +59,20 @@ class BackupEntry:
+     full_path: str
+     size_bytes: int
+     modified_at: str  # ISO timestamp, from the file's mtime on disk
++    # The actual date/time of the data inside this backup (most recent
++    # updated_at across every table in the backup's database) -- NOT the
++    # same thing as modified_at above, which is just when the zip FILE
++    # was written to disk and can lag behind slightly (e.g. mtime
++    # granularity, filesystem/sync-tool quirks). Computed by opening and
++    # reading the zip via preview_backup() -- the same read-only,
++    # never-raise approach already used for the single-backup preview
++    # screen, reused here rather than duplicated. None if the zip
++    # couldn't be read (corrupt/incomplete), so the frontend has an
++    # honest "unknown" to fall back to instead of a fabricated date --
++    # see list_available_backups()'s docstring for why this is only
++    # computed for the one entry per device that survives dedup, not
++    # every zip found.
++    most_recent_updated_at: str | None = None
+ 
+     def to_dict(self) -> dict:
+         return {
+@@ -67,6 +81,7 @@ class BackupEntry:
+             "full_path": self.full_path,
+             "size_bytes": self.size_bytes,
+             "modified_at": self.modified_at,
++            "most_recent_updated_at": self.most_recent_updated_at,
+         }
+ 
+ 
+@@ -92,13 +107,34 @@ def list_available_backups(sync_fallback_dir: str) -> list[BackupEntry]:
+     """Scans every device subfolder under TTechStudio-Backups/ for zip
+     files. Returns an empty list (not an error) if the backup folder
+     doesn't exist yet -- e.g. brand-new install, no backup has run yet.
++
++    Returns exactly ONE entry per device -- the newest backup found for
++    that device, by file mtime -- not every zip. A device can easily
++    accumulate several backup zips over time (see backup_scheduler.py's
++    retention/cleanup, if any); showing every single one duplicated the
++    same device repeatedly in the UI (and, since device_id was used as
++    the React list key, silently broke key uniqueness too). Callers that
++    genuinely need every historical zip for a device should read the
++    folder directly -- this function's contract is "what's the latest
++    thing available from each device right now".
++
++    most_recent_updated_at (the actual data timestamp inside the backup,
++    not the file's mtime) is only computed for the one winning entry per
++    device, via preview_backup() -- deliberately NOT for every zip found,
++    since that means extracting and opening a full SQLite database per
++    call. Cost stays proportional to device count, not to how many old
++    zips happen to be sitting in each device's folder. A backup that
++    can't be read (corrupt/incomplete) gets most_recent_updated_at=None
++    rather than raising -- the frontend already has an 'unknown' fallback
++    for exactly this case.
+     """
+     sync_root, _is_real = detect_sync_folder(sync_fallback_dir)
+     backups_root = os.path.join(sync_root, BACKUP_SUBFOLDER)
+ 
+-    entries: list[BackupEntry] = []
+     if not os.path.isdir(backups_root):
+-        return entries
++        return []
++
++    newest_by_device: dict[str, BackupEntry] = {}
+ 
+     for device_id in sorted(os.listdir(backups_root)):
+         device_dir = os.path.join(backups_root, device_id)
+@@ -109,15 +145,25 @@ def list_available_backups(sync_fallback_dir: str) -> list[BackupEntry]:
+                 continue
+             full_path = os.path.join(device_dir, filename)
+             stat = os.stat(full_path)
+-            entries.append(
+-                BackupEntry(
+-                    device_id=device_id,
+-                    filename=filename,
+-                    full_path=full_path,
+-                    size_bytes=stat.st_size,
+-                    modified_at=datetime.fromtimestamp(stat.st_mtime).isoformat(),
+-                )
++            candidate = BackupEntry(
++                device_id=device_id,
++                filename=filename,
++                full_path=full_path,
++                size_bytes=stat.st_size,
++                modified_at=datetime.fromtimestamp(stat.st_mtime).isoformat(),
+             )
++            current_best = newest_by_device.get(device_id)
++            if current_best is None or candidate.modified_at > current_best.modified_at:
++                newest_by_device[device_id] = candidate
++
++    entries = list(newest_by_device.values())
++
++    # Enrich only the entries that survived dedup -- one preview_backup()
++    # call per device, not per zip. See docstring above for why.
++    for entry in entries:
++        preview = preview_backup(entry.full_path)
++        if preview.ok:
++            entry.most_recent_updated_at = preview.most_recent_updated_at
+ 
+     # Newest first across all devices, so the frontend's default view
+     # is "what changed most recently, from any machine".
+diff --git a/print-dashboard/backend/app/routes/machines.py b/print-dashboard/backend/app/routes/machines.py
+index d29b531..fc06f35 100644
+--- a/print-dashboard/backend/app/routes/machines.py
++++ b/print-dashboard/backend/app/routes/machines.py
+@@ -3,6 +3,7 @@ from flask import Blueprint, jsonify, request
+ from ..extensions import db
+ from ..models import AuditLog, Capability, PricingItem, ProductionMachine
+ from ..services.machines import (
++    auto_assign_machine,
+     compatible_machines,
+     machine_workload,
+     serialize_machine,
+@@ -132,7 +133,18 @@ def get_compatible_machines():
+     capability_id = request.args.get("capability_id", type=int)
+     only_available = request.args.get("only_available", "true").lower() in {"1", "true", "yes"}
+     machines = compatible_machines(capability_id, only_available=only_available)
+-    return jsonify({"items": [serialize_machine(m) for m in machines], "total": len(machines)})
++    # Build decision #5: alongside the full compatible list (still
++    # returned, for a "more than one? show which" fallback view), also
++    # return the single machine the app would auto-pick -- see
++    # auto_assign_machine's own docstring for the tie-break rule
++    # (available + least busy). None if nothing compatible+available
++    # exists right now.
++    auto_pick = auto_assign_machine(capability_id)
++    return jsonify({
++        "items": [serialize_machine(m) for m in machines],
++        "total": len(machines),
++        "auto_assigned_machine": serialize_machine(auto_pick) if auto_pick else None,
++    })
+ 
+ 
+ @bp.get("/capabilities")
+@@ -198,7 +210,10 @@ def list_pricing_items():
+     return jsonify(
+         list_response(
+             query.order_by(PricingItem.category.asc(), PricingItem.name.asc()),
+-            lambda item: item.to_dict() | {"machine_name": item.machine.name if item.machine else None},
++            lambda item: item.to_dict() | {
++                "machine_name": item.machine.name if item.machine else None,
++                "required_capability_name": item.required_capability.name if item.required_capability else None,
++            },
+         )
+     )
+ 
+@@ -214,6 +229,7 @@ def create_pricing_item():
+         name=data["name"],
+         category=data["category"],
+         machine_id=data.get("machine_id"),
++        required_capability_id=data.get("required_capability_id"),
+         unit=data.get("unit", "unit"),
+         price=data.get("price", 0),
+         cost_estimate=data.get("cost_estimate", 0),
+@@ -225,4 +241,7 @@ def create_pricing_item():
+     db.session.flush()
+     db.session.add(AuditLog(action=f"Created pricing item {item.code}", entity_type="pricing_item", entity_id=item.id))
+     db.session.commit()
+-    return jsonify(item.to_dict() | {"machine_name": item.machine.name if item.machine else None}), 201
+\ No newline at end of file
++    return jsonify(item.to_dict() | {
++        "machine_name": item.machine.name if item.machine else None,
++        "required_capability_name": item.required_capability.name if item.required_capability else None,
++    }), 201
+\ No newline at end of file
+diff --git a/print-dashboard/backend/app/routes/materials.py b/print-dashboard/backend/app/routes/materials.py
+index 572b9bc..5596715 100644
+--- a/print-dashboard/backend/app/routes/materials.py
++++ b/print-dashboard/backend/app/routes/materials.py
+@@ -8,7 +8,13 @@ from flask import Blueprint, jsonify, request
+ 
+ from ..extensions import db
+ from ..models import AuditLog, Material, MaterialTransaction
+-from ..services.materials import material_reconciliation, next_material_ref, serialize_material, serialize_transaction
++from ..services.materials import (
++    material_reconciliation,
++    next_material_ref,
++    next_material_transaction_ref,
++    serialize_material,
++    serialize_transaction,
++)
+ from ..utils import parse_date
+ from .common import apply_search, list_response
+ 
+@@ -134,6 +140,7 @@ def create_material_transaction(material_id):
+         return jsonify({"error": "quantity is required"}), 400
+ 
+     txn = MaterialTransaction(
++        transaction_ref=next_material_transaction_ref(),
+         material_id=material.id,
+         transaction_type=transaction_type,
+         quantity=quantity,
+diff --git a/print-dashboard/backend/app/routes/proposals.py b/print-dashboard/backend/app/routes/proposals.py
+index 693217f..b3b71a3 100644
+--- a/print-dashboard/backend/app/routes/proposals.py
++++ b/print-dashboard/backend/app/routes/proposals.py
+@@ -38,6 +38,11 @@ def create_proposal():
+         contact=data.get("contact"),
+         priority=data.get("priority", "medium"),
+         assigned_staff_id=data.get("assigned_staff_id"),
++        # Build decision #5: mirrors Job's own machine_id/
++        # required_capability_id exactly -- see both columns' comments
++        # in models.py.
++        machine_id=data.get("machine_id"),
++        required_capability_id=data.get("required_capability_id"),
+         prepared_by=data.get("prepared_by"),
+         notes=data.get("notes"),
+     )
+@@ -58,7 +63,7 @@ def get_proposal(proposal_id):
+ def update_proposal(proposal_id):
+     proposal = Proposal.query.get_or_404(proposal_id)
+     data = request.get_json() or {}
+-    for field in ["client_name", "title", "status", "discount_amount", "currency", "contact", "priority", "assigned_staff_id", "prepared_by", "notes"]:
++    for field in ["client_name", "title", "status", "discount_amount", "currency", "contact", "priority", "assigned_staff_id", "machine_id", "required_capability_id", "prepared_by", "notes"]:
+         if field in data:
+             setattr(proposal, field, data[field])
+     if "valid_until" in data:
+@@ -102,6 +107,14 @@ def accept_proposal(proposal_id):
+         # the source of truth for the Job's initial due_date.
+         due_date=proposal.valid_until,
+         assigned_staff_id=proposal.assigned_staff_id,
++        # Build decision #5: same gap this session's earlier fix already
++        # closed for priority/assigned_staff_id above -- machine_id and
++        # required_capability_id were captured on the Proposal but never
++        # carried onto the Job created here, so the machine assignment
++        # had to be redone by hand at the exact moment it should already
++        # be known.
++        machine_id=proposal.machine_id,
++        required_capability_id=proposal.required_capability_id,
+         notes=proposal.notes,
+     )
+     invoice = create_invoice_for_job(
+@@ -113,6 +126,13 @@ def accept_proposal(proposal_id):
+                 "quantity": float(item.quantity or 1),
+                 "unit": item.unit or "item",
+                 "unit_price": float(item.unit_price or item.amount or 0),
++                # Same carry-over gap as machine_id/required_capability_id
++                # above, at the per-line-item level -- see build decision
++                # #5's "one job can need several machines" (Job/
++                # InvoiceLineItem already support this per-line, see
++                # services/invoices.py's apply_line_items()).
++                "pricing_item_id": item.pricing_item_id,
++                "machine_id": item.machine_id,
+             }
+             for item in proposal.line_items
+         ],
+diff --git a/print-dashboard/backend/app/schema_migrations.py b/print-dashboard/backend/app/schema_migrations.py
+index ae6ff63..1cae55c 100644
+--- a/print-dashboard/backend/app/schema_migrations.py
++++ b/print-dashboard/backend/app/schema_migrations.py
+@@ -3,7 +3,7 @@
+ from sqlalchemy import inspect, text
+ 
+ from .extensions import db
+-from .models import Invoice, Job, Staff
++from .models import Invoice, Job, MaterialTransaction, Staff
+ from .services.invoices import sync_invoice_amount
+ from .services.jobs import normalise_job_status
+ 
+@@ -473,6 +473,64 @@ def ensure_material_transaction_output_schema():
+     return changed
+ 
+ 
++def ensure_material_transaction_refs():
++    """Adds MaterialTransaction.transaction_ref -- see the column's comment
++    in models.py for why it exists (build decision: "Material transactions
++    should sync -- the materials themselves should not"). Transactions
++    previously had no unique column at all besides the local, per-device
++    `id`, which is exactly the "match by id" problem merge_preview.py's own
++    docstring warns about -- two devices independently produce
++    material_transactions.id=1 for genuinely different rows.
++
++    Follows the exact same shape as ensure_staff_client_pricing_refs()
++    below -- same reasoning applies here word for word: backfilling with
++    next_material_transaction_ref() (the function new rows use going
++    forward) would be wrong, since _next_sequential_ref() counts existing
++    rows, which doesn't change mid-backfill -- every row in the batch
++    would get the identical count and therefore the identical ref. Uses a
++    plain enumerate() counter local to this backfill pass instead.
++
++    Must run after ensure_device_ownership_schema() (filters by
++    device_id) and after ensure_material_transaction_output_schema() /
++    ensure_material_transaction_vendor_schema() purely for tidy ordering
++    (no actual column dependency between them, but all three touch the
++    same table).
++    """
++    changed = []
++
++    from .services.ref_generator import _device_fragment
++
++    table_name = "material_transactions"
++    column_name = "transaction_ref"
++
++    if table_name not in _tables():
++        return changed
++
++    columns = _columns(table_name)
++    if column_name not in columns:
++        _add_column(table_name, f"{column_name} VARCHAR(40)")
++        db.session.commit()
++        changed.append(f"{table_name}.{column_name}")
++
++    rows_needing_ref = MaterialTransaction.query.filter(
++        MaterialTransaction.transaction_ref.is_(None)
++    ).order_by(MaterialTransaction.id).all()
++
++    if rows_needing_ref:
++        already_have_ref = MaterialTransaction.query.filter(
++            MaterialTransaction.transaction_ref.isnot(None)
++        ).count()
++        device_fragment = _device_fragment()
++
++        for offset, row in enumerate(rows_needing_ref, start=1):
++            row.transaction_ref = f"MATX-{device_fragment}-{(already_have_ref + offset):04d}"
++
++        db.session.commit()
++        changed.append(f"{table_name}.{column_name}_backfilled:{len(rows_needing_ref)}")
++
++    return changed
++
++
+ def ensure_staff_client_pricing_refs():
+     """Adds staff_ref/client_ref/pricing_item_ref -- see each column's
+     comment in models.py for why these exist (cross-device merge matching
+@@ -601,6 +659,96 @@ def ensure_device_ownership_schema():
+     return changed
+ 
+ 
++def ensure_pricing_item_capabilities():
++    """Adds PricingItem.required_capability_id -- see the column's
++    comment in models.py for why it exists (build decision #5: "pick a
++    service, app picks the machine automatically").
++
++    Backfill strategy for EXISTING pricing items: derive a capability
++    from the item's own machine_id, via that machine's category ->
++    matching capabilities (the same category-based linkage
++    ensure_default_capabilities_seed() already establishes between
++    machines and capabilities). Where a machine has exactly one
++    capability in its category, that's an unambiguous, safe backfill.
++    Where a machine has several (a machine's category can map to
++    multiple capabilities -- e.g. "Large Format" covers Vinyl Stickers,
++    Banner Printing, Contra Vision, Window Frosting all at once), this
++    does NOT guess which one -- left NULL instead, exactly like a
++    pricing item with no machine_id at all. A wrong guess here would
++    silently mis-assign machines later; NULL just means this one item
++    falls back to machine_id directly (see routes/jobs.py's
++    resolve_service_machine()) until Wayne sets the real capability
++    explicitly through the pricing item form.
++
++    Must run after ensure_default_capabilities_seed() (needs
++    machine.capabilities to already be populated to backfill from) and
++    after ensure_staff_client_pricing_refs() (both touch pricing_items;
++    no actual column dependency between them, kept adjacent for tidy
++    ordering only).
++    """
++    changed = []
++    table_name = "pricing_items"
++
++    if table_name not in _tables():
++        return changed
++
++    columns = _columns(table_name)
++    if "required_capability_id" not in columns:
++        _add_column(table_name, "required_capability_id INTEGER REFERENCES capabilities(id)")
++        db.session.commit()
++        changed.append(f"{table_name}.required_capability_id")
++
++    from .models import PricingItem
++
++    items_needing_backfill = PricingItem.query.filter(
++        PricingItem.required_capability_id.is_(None),
++        PricingItem.machine_id.isnot(None),
++    ).all()
++
++    backfilled = 0
++    for item in items_needing_backfill:
++        machine = item.machine
++        if machine is None or len(machine.capabilities) != 1:
++            continue  # ambiguous or no machine -- leave NULL, don't guess
++        item.required_capability_id = machine.capabilities[0].id
++        backfilled += 1
++
++    if backfilled:
++        db.session.commit()
++        changed.append(f"{table_name}.required_capability_id_backfilled:{backfilled}")
++
++    return changed
++
++
++def ensure_proposal_machine_schema():
++    """Adds Proposal.machine_id / Proposal.required_capability_id -- see
++    both columns' comments in models.py (build decision #5: "Proposals
++    currently have no machine field at all, so this is also adding that
++    concept there for the first time"). No backfill needed -- unlike
++    ensure_pricing_item_capabilities() above, there's no existing data
++    to derive a sensible value FROM; every existing proposal simply gets
++    NULL/unassigned for both, same starting state as a brand-new one.
++    """
++    changed = []
++    table_name = "proposals"
++
++    if table_name not in _tables():
++        return changed
++
++    columns = _columns(table_name)
++    if "machine_id" not in columns:
++        _add_column(table_name, "machine_id INTEGER REFERENCES production_machines(id)")
++        changed.append(f"{table_name}.machine_id")
++    if "required_capability_id" not in columns:
++        _add_column(table_name, "required_capability_id INTEGER REFERENCES capabilities(id)")
++        changed.append(f"{table_name}.required_capability_id")
++
++    if changed:
++        db.session.commit()
++
++    return changed
++
++
+ def run_full_upgrade():
+     """Single entry point covering every migration added so far, in order.
+     Call this once (e.g. from a `flask shell` one-liner or a small script)
+@@ -645,6 +793,7 @@ def run_full_upgrade():
+     staff_assignment = ensure_staff_assignment_schema()
+     proposal_job_planning = ensure_proposal_job_planning_schema()
+     proposal_line_item_quantity = ensure_proposal_line_item_quantity_schema()
++    proposal_machine = ensure_proposal_machine_schema()
+     job_invoice_schema = ensure_job_invoice_schema()
+     payment_invoice_nullable = ensure_payment_invoice_nullable_schema()
+     # Priority 2 (Machine Management): must run after db.create_all() (so the
+@@ -653,8 +802,14 @@ def run_full_upgrade():
+     # same ordering requirement documented above for prompt4/staff_assignment.
+     machine_capability_schema = ensure_machine_capability_schema()
+     default_capabilities = ensure_default_capabilities_seed()
++    # Must run after default_capabilities above -- backfill derives from
++    # machine.capabilities, which that migration just populated.
++    pricing_item_capabilities = ensure_pricing_item_capabilities()
+     material_transaction_output = ensure_material_transaction_output_schema()
+     material_transaction_vendor = ensure_material_transaction_vendor_schema()
++    # Must run after device_ownership above (backfill logic mirrors
++    # ensure_staff_client_pricing_refs(), which has the same requirement).
++    material_transaction_refs = ensure_material_transaction_refs()
+     core_staff = ensure_core_staff_seed()
+     normalized = normalize_legacy_job_statuses()
+     backfilled = backfill_invoice_jobs()
+@@ -667,12 +822,15 @@ def run_full_upgrade():
+         "staff_assignment_schema_changes": staff_assignment,
+         "proposal_job_planning_schema_changes": proposal_job_planning,
+         "proposal_line_item_quantity_schema_changes": proposal_line_item_quantity,
++        "proposal_machine_schema_changes": proposal_machine,
+         "core_staff_seeded": core_staff,
+         "payment_invoice_nullable_schema_changes": payment_invoice_nullable,
+         "machine_capability_schema_changes": machine_capability_schema,
+         "default_capabilities_seed": default_capabilities,
++        "pricing_item_capabilities_changes": pricing_item_capabilities,
+         "material_transaction_output_schema_changes": material_transaction_output,
+         "material_transaction_vendor_schema_changes": material_transaction_vendor,
++        "material_transaction_refs_changes": material_transaction_refs,
+         "device_ownership_schema_changes": device_ownership,
+         "staff_client_pricing_refs_changes": staff_client_pricing_refs,
+         "job_invoice_flow": {
+diff --git a/print-dashboard/backend/app/seed.py b/print-dashboard/backend/app/seed.py
+index 50a2309..332d86e 100644
+--- a/print-dashboard/backend/app/seed.py
++++ b/print-dashboard/backend/app/seed.py
+@@ -974,7 +974,8 @@ def seed_mock_data(reset=False):
+                     notes="Month-end physical count",
+                 ))
+ 
+-    for txn in material_transactions:
++    for i, txn in enumerate(material_transactions, start=1):
++        txn.transaction_ref = f"MATX-{i:04d}"
+         txn.created_at = as_datetime(txn.transaction_date)
+         txn.updated_at = as_datetime(txn.transaction_date)
+     db.session.add_all(material_transactions)
+diff --git a/print-dashboard/backend/app/services/machines.py b/print-dashboard/backend/app/services/machines.py
+index 57ab121..c22b0cc 100644
+--- a/print-dashboard/backend/app/services/machines.py
++++ b/print-dashboard/backend/app/services/machines.py
+@@ -57,6 +57,31 @@ def compatible_machines(capability_id, only_available=False):
+     return [m for m in machines if machine_has_capability(m, capability_id)]
+ 
+ 
++def auto_assign_machine(capability_id):
++    """Build decision #5 ("if more than one machine could do the job,
++    the app auto-picks one for you -- no manual override needed"):
++    picks the single best machine for a capability rather than leaving
++    that choice to whoever's filling in the form.
++
++    "Best" = compatible AND currently available (skips machines down
++    for maintenance/out of consumables -- see ProductionMachine.
++    available's own comment), tie-broken by whichever has the fewest
++    jobs currently active on it (machine_workload's active_job_count) --
++    an even spread across the fleet beats always defaulting to
++    whichever machine happens to sort first alphabetically.
++
++    Returns None if no compatible+available machine exists at all (e.g.
++    every machine for this capability is down, or capability_id is
++    genuinely unmatched by any machine) -- callers should treat that as
++    "leave machine_id unset, let a person sort it out" rather than a
++    hard error; a job can still be created without a machine assigned.
++    """
++    candidates = compatible_machines(capability_id, only_available=True)
++    if not candidates:
++        return None
++    return min(candidates, key=lambda m: machine_workload(m.id)["active_job_count"])
++
++
+ def machine_workload(machine_id):
+     """Count of jobs currently occupying this machine (active status), plus
+     the full active job list for surfacing in the UI. Queried live rather
+diff --git a/print-dashboard/backend/app/services/materials.py b/print-dashboard/backend/app/services/materials.py
+index ffcfba2..6d13f6b 100644
+--- a/print-dashboard/backend/app/services/materials.py
++++ b/print-dashboard/backend/app/services/materials.py
+@@ -16,7 +16,7 @@ from decimal import Decimal
+ 
+ from ..models import Material, MaterialTransaction
+ from .invoices import invoice_totals
+-from .ref_generator import next_material_ref  # noqa: F401 -- re-exported so
++from .ref_generator import next_material_ref, next_material_transaction_ref  # noqa: F401 -- re-exported so
+     # routes/materials.py's existing `from ..services.materials import
+     # next_material_ref` keeps working unchanged; the real, collision-safe
+     # implementation now lives in ref_generator.py alongside every other
+diff --git a/print-dashboard/backend/app/services/proposals.py b/print-dashboard/backend/app/services/proposals.py
+index aa4d1b9..feb1ce1 100644
+--- a/print-dashboard/backend/app/services/proposals.py
++++ b/print-dashboard/backend/app/services/proposals.py
+@@ -59,6 +59,12 @@ def apply_proposal_line_items(proposal, line_items):
+                 unit=item.get("unit", "item"),
+                 unit_price=unit_price,
+                 amount=amount,
++                # Same dual-naming approach as description/desc above --
++                # accepts pricing_item_id/machine_id (backend-native,
++                # matches InvoiceLineItem) directly from what
++                # Proposals.jsx sends (see build decision #5).
++                pricing_item_id=item.get("pricing_item_id"),
++                machine_id=item.get("machine_id"),
+             )
+         )
+ 
+diff --git a/print-dashboard/backend/app/services/ref_generator.py b/print-dashboard/backend/app/services/ref_generator.py
+index 7a6a817..d5b0e33 100644
+--- a/print-dashboard/backend/app/services/ref_generator.py
++++ b/print-dashboard/backend/app/services/ref_generator.py
+@@ -118,6 +118,11 @@ def next_material_ref() -> str:
+     return _next_sequential_ref(Material, "MAT")
+ 
+ 
++def next_material_transaction_ref() -> str:
++    from ..models import MaterialTransaction
++    return _next_sequential_ref(MaterialTransaction, "MATX")
++
++
+ def next_advance_ref() -> str:
+     from ..models import Advance
+     return _next_sequential_ref(Advance, "ADV")
+diff --git a/print-dashboard/src/Jobs.jsx b/print-dashboard/src/Jobs.jsx
+index 274dabc..e315bb9 100644
+--- a/print-dashboard/src/Jobs.jsx
++++ b/print-dashboard/src/Jobs.jsx
+@@ -81,8 +81,24 @@ function jobPayload(form, fallback = {}) {
+     quantity: Number(item.qty ?? item.quantity ?? 1) || 1,
+     unit_price: Number(item.rate ?? item.unit_price ?? 0) || 0,
+     unit: item.unit || 'item',
++    // Build decision #5: each service line carries its own pricing
++    // item + machine (a job can need several machines across its
++    // services) -- both already fully supported on the backend
++    // (InvoiceLineItem.machine_id / pricing_item_id, applied via
++    // services/invoices.py's apply_line_items()); this was the one
++    // missing piece: the frontend simply wasn't sending them.
++    pricing_item_id: item.pricingItemId || item.pricing_item_id || null,
++    machine_id: item.machineId || item.machine_id || null,
+   }));
+   const totalCount = lineItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
++  // The job's single top-level machine_id/required_capability_id are a
++  // summary of its PRIMARY assignment (validated server-side by
++  // validate_job_machine_assignment) -- each line item still carries
++  // its own machine_id above for jobs that genuinely need several.
++  // Derived from the first line's service, matching how machineId
++  // already gets set from whichever service was most recently picked.
++  const primaryCapabilityId = (form.items || []).find(item => item.requiredCapabilityId)?.requiredCapabilityId
++    || fallback.required_capability_id || null;
+ 
+   return {
+     client_name: form.client || fallback.client || 'Walk-in Client',
+@@ -90,6 +106,7 @@ function jobPayload(form, fallback = {}) {
+     priority: form.priority || fallback.priority || 'medium',
+     due_date: form.due || fallback.due_date || null,
+     machine_id: form.machineId || fallback.machine_id || null,
++    required_capability_id: primaryCapabilityId,
+     service_category: fallback.service_category || form.specs?.[0],
+     assigned_staff_id: form.assignedStaffId || fallback.assignedStaffId || null,
+     notes: [form.notes, form.specs?.join(', ')].filter(Boolean).join('\n'),
+diff --git a/print-dashboard/src/Proposals.jsx b/print-dashboard/src/Proposals.jsx
+index bb4ae25..2f40995 100644
+--- a/print-dashboard/src/Proposals.jsx
++++ b/print-dashboard/src/Proposals.jsx
+@@ -119,22 +119,35 @@ export default function Proposals() {
+         quantity: Number(item.qty ?? item.quantity ?? 1) || 1,
+         unit_price: Number(item.rate ?? item.unit_price ?? item.amount ?? 0) || 0,
+         unit: item.unit || 'item',
++        // Build decision #5: mirrors jobPayload's own comment in
++        // Jobs.jsx -- both already fully supported end-to-end on the
++        // backend (ProposalLineItem.machine_id / pricing_item_id,
++        // carried onto the converted Job's invoice by accept_proposal()
++        // in routes/proposals.py).
++        pricing_item_id: item.pricingItemId || item.pricing_item_id || null,
++        machine_id: item.machineId || item.machine_id || null,
+       })),
+       valid_until: form.validUntil || null,
+       contact: form.contact,
+       notes: form.notes,
+       status: editRecord?.status || 'draft',
+       discount_amount: Number(form.discount || 0),
+-      // Internal-only fields (Job/Proposal parity). Sent here so they aren't
+-      // silently dropped from the form, but note: Proposal has no
+-      // priority/assigned_staff_id columns on the backend yet, and
+-      // accept_proposal() doesn't currently read these two keys onto the
+-      // Job it creates. Until that backend piece lands, the API will ignore
+-      // unknown keys (routes/proposals.py's create/update only pull named
+-      // fields), so this is safe to send now and becomes live the moment
+-      // the backend is extended — it does not need a second frontend change.
++      // Internal-only fields (Job/Proposal parity) -- Proposal now has
++      // real columns for all four (priority, assigned_staff_id,
++      // machine_id, required_capability_id) and accept_proposal()
++      // carries them onto the Job it creates. The stale note that used
++      // to be here (claiming these were sent-but-ignored) was
++      // corrected once those backend pieces actually landed.
+       priority: form.priority,
+       assigned_staff_id: form.assignedStaffId || null,
++      // Build decision #5: "Proposals currently have no machine field
++      // at all, so this is also adding that concept there for the
++      // first time." Job-level summary field, same idea as
++      // jobPayload's primaryCapabilityId in Jobs.jsx -- derived from
++      // whichever service line most recently set form.machineId (see
++      // Modals.jsx's handleServiceSelect for the Proposal modal).
++      machine_id: form.machineId || null,
++      required_capability_id: (form.items || []).find(item => item.requiredCapabilityId)?.requiredCapabilityId || null,
+     };
+     const request = editRecord?.id
+       ? api.updateProposal(editRecord.id, payload)
+diff --git a/print-dashboard/src/api/client.js b/print-dashboard/src/api/client.js
+index 3eb9f37..43fcf89 100644
+--- a/print-dashboard/src/api/client.js
++++ b/print-dashboard/src/api/client.js
+@@ -148,6 +148,12 @@ export const api = {
+     method: 'POST',
+     body: JSON.stringify(payload),
+   }),
++  // Build decision #5: given a capability_id, returns every compatible
++  // machine (still available for a "more than one? show which" view)
++  // PLUS auto_assigned_machine -- the single machine the backend picks
++  // for you (available + least busy -- see services/machines.py's
++  // auto_assign_machine()). null if nothing compatible is available.
++  compatibleMachines: (capabilityId) => request(`/machines/compatible?capability_id=${capabilityId}`),
+   pricingItems: (params = '') => request(`/machines/pricing${params}`),
+   createPricingItem: (payload) => request('/machines/pricing', {
+     method: 'POST',
+diff --git a/print-dashboard/src/components/Modals.jsx b/print-dashboard/src/components/Modals.jsx
+index bab308d..6d54267 100644
+--- a/print-dashboard/src/components/Modals.jsx
++++ b/print-dashboard/src/components/Modals.jsx
+@@ -22,40 +22,14 @@ const D = {
+ };
+ 
+ /* ═══════════════════════════════════════
+-   SERVICE DATA
++   SERVICE DATA -- build decision #5: "Service picker should be tied
++   to your real price list, not the fake hardcoded list it uses
++   today." The hardcoded SERVICES array that used to live here is
++   gone; ServiceDropdown below now fetches real PricingItem rows via
++   api.pricingItems() instead. See ServiceDropdown's own comment for
++   why grouping is done by pricing item category (already a real
++   column) rather than re-deriving categories some other way.
+ ═══════════════════════════════════════ */
+-const SERVICES = [
+-  { category: 'PVC Cards', items: [
+-    { name: 'PVC Card Printing', unit: 'card' },
+-  ]},
+-  { category: 'Sublimation', items: [
+-    { name: 'Mug Cup Print', unit: 'mug' },
+-  ]},
+-  { category: 'UV DTF', items: [
+-    { name: 'UV DTF (Other/Assorted)', unit: 'unit' },
+-  ]},
+-  { category: 'Large Format', items: [
+-    { name: 'Banner Printing', unit: 'sqm' },
+-    { name: 'Sticker Printing', unit: 'sqm' },
+-  ]},
+-  { category: 'DTF Apparel', items: [
+-    { name: 'DTF T-Shirt', unit: 'print' },
+-    { name: 'DTF Diary', unit: 'diary' },
+-    { name: 'DTF Other', unit: 'unit' },
+-  ]},
+-  { category: 'Cutting', items: [
+-    { name: 'Cutting Stencil', unit: 'unit' },
+-  ]},
+-  { category: 'Digital Print', items: [
+-    { name: 'Book Printing', unit: 'book' },
+-    { name: 'Magazine Printing', unit: 'magazine' },
+-    { name: 'Calendar Printing', unit: 'calendar' },
+-    { name: 'Normal Printing', unit: 'page' },
+-  ]},
+-  { category: 'Finishing', items: [
+-    { name: 'Book Binding', unit: 'book' },
+-  ]},
+-];
+ 
+ /* ═══════════════════════════════════════
+    SHARED STYLES
+@@ -202,23 +176,58 @@ function SplitPane({ formChildren, previewContent, showGrid = false, showPreview
+    SERVICE DROPDOWN SELECTOR
+ ═══════════════════════════════════════ */
+ function ServiceDropdown({ selectedService, onSelect }) {
+-  const allServices = SERVICES.flatMap(cat => cat.items.map(item => ({ ...item, category: cat.category })));
++  // Build decision #5: real price list, not the old hardcoded SERVICES
++  // array. Fetched once per mount (pricing items don't change mid-form)
++  // rather than per-open, since this dropdown can remount inside a modal
++  // that's already open (e.g. switching between Job/Proposal tabs) --
++  // matches the non-fatal fetch pattern used elsewhere in this file
++  // (AddExpenseModal's categories/vendors, NewJobModal's clients/staff/
++  // machines): the dropdown still renders, just empty, if this fails.
++  const [pricingItems, setPricingItems] = useState([]);
++  useEffect(() => {
++    api.pricingItems('?per_page=500&active=true')
++      .then(data => setPricingItems(data.items || []))
++      .catch(() => setPricingItems([]));
++  }, []);
++
++  // Grouped by the pricing item's own `category` column (a real,
++  // user-managed field on PricingItem) rather than re-deriving groups
++  // some other way -- this is exactly the grouping Wayne already sees
++  // and edits on the Settings price-list screen, so the dropdown here
++  // matches it instead of inventing a second, possibly-inconsistent
++  // categorization.
++  const grouped = pricingItems.reduce((acc, item) => {
++    (acc[item.category] = acc[item.category] || []).push(item);
++    return acc;
++  }, {});
++
+   return (
+     <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-faint)', background: 'var(--bg-card)', flexShrink: 0 }}>
+       <label style={labelStyle}>Select Service</label>
+       <select
+         style={{ ...inputStyle, cursor: 'pointer' }}
+-        value={selectedService?.name || ''}
++        value={selectedService?.id || ''}
+         onChange={e => {
+-          const service = allServices.find(s => s.name === e.target.value);
+-          if (service) onSelect(service);
++          const item = pricingItems.find(p => String(p.id) === e.target.value);
++          if (item) {
++            onSelect({
++              id: item.id,
++              name: item.name,
++              unit: item.unit,
++              price: item.price,
++              requiredCapabilityId: item.required_capability_id,
++            });
++          }
+         }}
+       >
+         <option value="">— Choose a service —</option>
+-        {SERVICES.map(cat => (
+-          <optgroup key={cat.category} label={cat.category}>
+-            {cat.items.map(item => (
+-              <option key={item.name} value={item.name}>
++        {pricingItems.length === 0 && (
++          <option value="" disabled>No active price list items found — add some in Settings first</option>
++        )}
++        {Object.entries(grouped).map(([category, items]) => (
++          <optgroup key={category} label={category}>
++            {items.map(item => (
++              <option key={item.id} value={item.id}>
+                 {item.name} (per {item.unit})
+               </option>
+             ))}
+@@ -547,13 +556,14 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
+ 
+ /* ═══════════════════════════════════════ MODAL: New Proposal ═══════════════════════════════════════ */
+ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }) {
+-  const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', validDays: '', contact: '', notes: '', discount: 0, priority: 'medium', assignedStaffId: '' });
++  const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', validDays: '', contact: '', notes: '', discount: 0, priority: 'medium', assignedStaffId: '', machineId: '' });
+   const [selectedService, setSelectedService] = useState(null);
+   const [qty, setQty] = useState('1');
+   const [rate, setRate] = useState('');
+   const [showPreview, setShowPreview] = useState(false);
+   const [clients, setClients] = useState([]);
+   const [staffList, setStaffList] = useState([]);
++  const [machineList, setMachineList] = useState([]);
+ 
+   useEffect(() => {
+     if (!isOpen) return;
+@@ -595,10 +605,17 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
+       // fields for that reason — see their call sites below/in PrintLayouts.
+       priority: initialData?.priority || 'medium',
+       assignedStaffId: initialData?.assignedStaffId || initialData?.assigned_staff_id || '',
++      // Build decision #5: "Proposals currently have no machine field
++      // at all, so this is also adding that concept there for the
++      // first time." Internal-only, same as priority/assignedStaffId
++      // above -- never shown to the client, never on the PDF, only
++      // relevant once/if this proposal converts into a Job.
++      machineId: initialData?.machineId || initialData?.machine_id || '',
+     });
+     setSelectedService(null); setQty('1'); setRate(''); setShowPreview(false);
+     api.clients('?per_page=500').then(data => setClients(data.items || [])).catch(() => setClients([]));
+     api.staff('?active=true').then(data => setStaffList(data.items || [])).catch(() => setStaffList([]));
++    api.machines('?per_page=500').then(data => setMachineList(data.items || [])).catch(() => setMachineList([]));
+   }, [isOpen, initialData]);
+ 
+   // Contact autofill (confirmed design, dev-log 2026-07-23): selecting/typing
+@@ -642,10 +659,33 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
+ 
+   const addItem = () => {
+     if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
+-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate), unit: selectedService.unit }] }));
++      setForm(p => ({ ...p, items: [...p.items, {
++        desc: selectedService.name, qty: Number(qty), rate: Number(rate), unit: selectedService.unit,
++        pricingItemId: selectedService.id,
++        requiredCapabilityId: selectedService.requiredCapabilityId,
++        machineId: form.machineId || null,
++      }] }));
+       setQty('1'); setRate(''); setSelectedService(null);
+     }
+   };
++  // Build decision #5, extended to Proposals (see machineId comment
++  // above) -- identical auto-assign behavior to NewJobModal's
++  // handleServiceSelect. Kept as a separate copy rather than a shared
++  // extracted helper: the two modals' setForm shapes differ enough
++  // (different field sets entirely) that sharing would need its own
++  // abstraction layer for little real benefit at this size.
++  const handleServiceSelect = async (service) => {
++    setSelectedService(service); setQty('1');
++    if (!service.requiredCapabilityId) return;
++    try {
++      const { auto_assigned_machine } = await api.compatibleMachines(service.requiredCapabilityId);
++      if (auto_assigned_machine) {
++        setForm(prev => ({ ...prev, machineId: auto_assigned_machine.id }));
++      }
++    } catch {
++      // Non-fatal -- see NewJobModal's handleServiceSelect for why.
++    }
++  };
+   const subtotal = calculateTotal(form.items);
+   const total = Math.max(subtotal - Number(form.discount || 0), 0);
+ 
+@@ -705,8 +745,15 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
+                 {staffList.map(s => <option key={s.id} value={s.id}>{s.name}{s.role ? ` (${s.role})` : ''}</option>)}
+               </select>
+             </div>
++            <div>
++              <label style={labelStyle}>Assigned Machine</label>
++              <select style={{ ...inputStyle, cursor: 'pointer' }} value={form.machineId} onChange={e => setForm({ ...form, machineId: e.target.value })}>
++                <option value="">— Unassigned —</option>
++                {machineList.map(m => <option key={m.id} value={m.id}>{m.name}{m.category ? ` (${m.category})` : ''}</option>)}
++              </select>
++            </div>
+           </div>
+-          <ServiceDropdown selectedService={selectedService} onSelect={s => { setSelectedService(s); setQty('1'); }} />
++          <ServiceDropdown selectedService={selectedService} onSelect={handleServiceSelect} />
+           <div style={{ flex: 1, padding: '12px 20px' }}>
+             <label style={labelStyle}>Scope Items ({form.items.length})</label>
+             {form.items.length === 0
+@@ -827,10 +874,50 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
+ 
+   const addItem = () => {
+     if (selectedService && Number(qty) > 0 && Number(rate) > 0) {
+-      setForm(p => ({ ...p, items: [...p.items, { desc: selectedService.name, qty: Number(qty), rate: Number(rate) }] }));
++      setForm(p => ({ ...p, items: [...p.items, {
++        desc: selectedService.name, qty: Number(qty), rate: Number(rate),
++        pricingItemId: selectedService.id,
++        requiredCapabilityId: selectedService.requiredCapabilityId,
++        // Build decision #5: each line item carries its OWN machine
++        // (one job can need several machines across its services) --
++        // captured from whatever form.machineId was auto-assigned/
++        // chosen at the moment THIS item was added, not re-read later.
++        machineId: form.machineId || null,
++      }] }));
+       setQty('1'); setRate(''); setSelectedService(null);
+     }
+   };
++  // Build decision #5: "once a service is picked, the app should
++  // automatically assign a machine that can actually do it... if more
++  // than one machine could do the job, the app auto-picks one for you
++  // (no manual override needed)." Fires on every service selection,
++  // not just the first -- switching services mid-form re-assigns to
++  // match whatever's actually selected right now. Still overwrites
++  // form.machineId even if something was already chosen: the service
++  // just picked is the source of truth for what machine THIS line
++  // needs, matching how selecting a new service also resets qty/rate.
++  // The existing "Assigned Machine" dropdown further down is left in
++  // place as a manual override for edge cases (e.g. a specific machine
++  // is down and Wayne wants a different compatible one) -- decision #5
++  // asks for auto-assignment to remove the manual STEP, not the
++  // manual OPTION.
++  const handleServiceSelect = async (service) => {
++    setSelectedService(service); setQty('1');
++    if (!service.requiredCapabilityId) return; // legacy pricing item with
++      // no capability set yet -- nothing to auto-assign from, leave
++      // machineId as whatever it already was (see PricingItem.
++      // required_capability_id's own comment in models.py for why this
++      // can legitimately be null).
++    try {
++      const { auto_assigned_machine } = await api.compatibleMachines(service.requiredCapabilityId);
++      if (auto_assigned_machine) {
++        setForm(prev => ({ ...prev, machineId: auto_assigned_machine.id }));
++      }
++    } catch {
++      // Non-fatal: auto-assign is a convenience, not a requirement --
++      // the manual "Assigned Machine" dropdown still works if this fails.
++    }
++  };
+   const removeItem = i => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }));
+   const total = calculateDiscountedTotal(form.items, form.discount);
+ 
+@@ -876,7 +963,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
+               </select>
+             </div>
+           </div>
+-          <ServiceDropdown selectedService={selectedService} onSelect={s => { setSelectedService(s); setQty('1'); }} />
++          <ServiceDropdown selectedService={selectedService} onSelect={handleServiceSelect} />
+           <div style={{ flex: 1, padding: '12px 20px' }}>
+             <label style={labelStyle}>Line Items ({form.items.length})</label>
+             {form.items.length === 0
