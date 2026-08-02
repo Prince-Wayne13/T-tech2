@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
 import { compactDate, money } from './utils/format';
+import { friendlyError } from './utils/errors';
 import PreviewModal from './components/PreviewModal';
 import { NewVendorModal } from './components/Modals';
 import { downloadInvoicePDF } from './components/InvoicePDF';
@@ -156,7 +157,7 @@ export default function Vendors() {
       notify(editRecord ? 'Vendor updated' : 'Vendor created');
       loadVendors();
     } catch (saveError) {
-      notify(saveError.message || 'Could not save vendor', 'error');
+      notify(friendlyError(saveError, 'Could not save vendor'), 'error');
     }
   };
 

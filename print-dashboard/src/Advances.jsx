@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
 import { compactDate, money } from './utils/format';
+import { friendlyError } from './utils/errors';
 import PreviewModal from './components/PreviewModal';
 import { NewAdvanceModal } from './components/Modals';
 import { downloadInvoicePDF } from './components/InvoicePDF';
@@ -121,7 +122,7 @@ export default function Advances() {
       notify('Advance created');
       loadAdvances();
     } catch (saveError) {
-      notify(saveError.message || 'Could not save advance', 'error');
+      notify(friendlyError(saveError, 'Could not save advance'), 'error');
     }
   };
 

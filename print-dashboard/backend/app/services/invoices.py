@@ -27,7 +27,10 @@ def invoice_totals(invoice):
 
     discount = decimal_money(invoice.discount_amount)
     taxable = max(subtotal - discount, Decimal("0.00"))
-    tax = (taxable * Decimal(str(invoice.tax_rate or 0))).quantize(Decimal("0.01"))
+    # Item 16: tax removed from the invoice flow. Invoice.tax_rate column is
+    # left in place (no migration) but is no longer read here; tax is always
+    # treated as 0.
+    tax = Decimal("0.00")
     total = taxable + tax
     payment_rows = invoice.job.payments if invoice.job else invoice.payments
     paid = sum((payment.amount or Decimal("0.00") for payment in payment_rows), Decimal("0.00"))

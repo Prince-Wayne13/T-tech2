@@ -681,4 +681,4 @@ class PettyCash(TimestampMixin, SerializableMixin, db.Model):
     notes = db.Column(db.Text)
 
     staff = db.relationship("Staff", backref="petty_cash_entries")
-    linked_expense = db.relationship("Expense", backref="petty_cash_source")
+    linked_expense = db.relationship("Expense", backref=db.backref("petty_cash_source", uselist=False))

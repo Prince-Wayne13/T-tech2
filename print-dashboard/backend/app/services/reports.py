@@ -48,7 +48,10 @@ def build_dashboard_summary():
     outstanding = sum(totals[i.id]["balance"] for i in invoices if invoice_status_from_totals(totals[i.id]) in {"not_paid", "partial"})
     paid = sum(totals[i.id]["paid"] for i in invoices)
     booked_revenue = sum(totals[i.id]["total"] for i in invoices if invoice_status_from_totals(totals[i.id]) in active_invoice_statuses())
-    total_expenses = sum(money(e.amount) for e in expenses if e.status in PAID_STATUSES)
+    # Item 18: match services/vendors.py's own rule for "actually paid" -
+    # status alone isn't enough, an approved-but-unpaid expense has no
+    # paid_on yet and shouldn't count as cash already gone.
+    total_expenses = sum(money(e.amount) for e in expenses if e.status in PAID_STATUSES and e.paid_on)
     overdue = [
         i for i in invoices
         if i.due_on and i.due_on < date.today() and invoice_status_from_totals(totals[i.id]) not in {"paid", "cancelled"}
@@ -77,7 +80,10 @@ def build_financial_report(period="month"):
 
     revenue = sum(invoice_totals(invoice)["total"] for invoice in invoices if invoice_status_from_totals(invoice_totals(invoice)) in active_invoice_statuses())
     paid = sum(invoice_totals(invoice)["paid"] for invoice in invoices)
-    expense_total = sum(money(expense.amount) for expense in expenses if expense.status in PAID_STATUSES)
+    # Item 18: same fix as build_dashboard_summary() above - bring this in
+    # line with the month-by-month breakdown below, which already correctly
+    # gates on paid_on.
+    expense_total = sum(money(expense.amount) for expense in expenses if expense.status in PAID_STATUSES and expense.paid_on)
 
     by_status = defaultdict(float)
     by_month = defaultdict(float)

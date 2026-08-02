@@ -23,7 +23,23 @@ async function request(path, options = {}) {
   });
 
   if (!response.ok) {
-    const message = await response.text();
+    const bodyText = await response.text();
+    // Flask routes across the backend commonly return jsonify({"error": "..."})
+    // (or occasionally {"message": "..."}) on failure - without this, that
+    // JSON's raw text (braces, quotes, key name and all) was being thrown
+    // as the Error's message and could end up shown to the user verbatim.
+    // Falls back to the raw body text for the rare non-JSON error response
+    // (e.g. a proxy/server error page), which friendlyError() (utils/errors.js)
+    // is responsible for catching and replacing with a generic message.
+    let message = bodyText;
+    try {
+      const parsed = JSON.parse(bodyText);
+      if (parsed && typeof parsed === 'object') {
+        message = parsed.error || parsed.message || bodyText;
+      }
+    } catch {
+      // Not JSON - keep the raw text, friendlyError() will sanitize it.
+    }
     throw new Error(message || `Request failed with ${response.status}`);
   }
 
@@ -204,6 +220,7 @@ export const api = {
     body: JSON.stringify(payload),
   }),
   expenseCategories: (params = '') => request(`/expenses/categories${params}`),
+  seedExpenseCategories: () => request('/expenses/categories/seed', { method: 'POST' }),
   analyticsVendors: () => request('/reports/analytics/vendors'),
   analyticsClients: () => request('/reports/analytics/clients'),
   analyticsProjections: () => request('/reports/analytics/projections'),

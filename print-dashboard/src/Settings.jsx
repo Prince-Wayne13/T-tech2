@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
+import { friendlyError } from './utils/errors';
 
 /* ═══════════════════════════════════════
    ICON SYSTEM
@@ -287,7 +288,7 @@ export default function Settings() {
       const others = (backups || []).filter((b) => b.device_id !== identity.device_id);
       setOtherDevices(others);
     } catch (error) {
-      setSyncMessage(error.message || 'Could not check for other devices.');
+      setSyncMessage(friendlyError(error, 'Could not check for other devices.'));
     } finally {
       setLoadingDevices(false);
     }
@@ -308,7 +309,7 @@ export default function Settings() {
       const result = await api.mergePreview(thisDeviceBackup.full_path, otherBackup.full_path);
       setSyncPreview({ ...result, otherBackup });
     } catch (error) {
-      setSyncMessage(error.message || 'Could not compare with that device.');
+      setSyncMessage(friendlyError(error, 'Could not compare with that device.'));
     } finally {
       setCheckingDeviceId(null);
     }
@@ -322,7 +323,7 @@ export default function Settings() {
       setSyncMessage(result.ok ? 'Sync applied successfully.' : (result.message || 'Sync failed.'));
       setSyncPreview(null);
     } catch (error) {
-      setSyncMessage(error.message || 'Sync failed.');
+      setSyncMessage(friendlyError(error, 'Sync failed.'));
     } finally {
       setApplyingDeviceId(null);
     }
@@ -333,13 +334,15 @@ export default function Settings() {
       const status = await api.backupStatus();
       setBackupStatus(status);
     } catch (error) {
-      console.error('Failed to load backup status:', error);
+      // Background status poll - failing silently here is fine, the
+      // existing status/message on screen just stays stale until the next
+      // successful poll, same as the equivalent pattern elsewhere in the app.
     }
     try {
       const status = await api.reportsBackupStatus();
       setReportsStatus(status);
     } catch (error) {
-      console.error('Failed to load reports status:', error);
+      // See note above.
     }
   };
 
@@ -350,7 +353,7 @@ export default function Settings() {
       const result = await api.runBackupNow();
       setBackupActionMessage(result.message || (result.ok ? 'Backup completed.' : 'Backup failed.'));
     } catch (error) {
-      setBackupActionMessage(error.message || 'Backup failed.');
+      setBackupActionMessage(friendlyError(error, 'Backup failed.'));
     } finally {
       setRunningBackup(false);
       loadBackupAndReportsStatus();
@@ -364,7 +367,7 @@ export default function Settings() {
       const result = await api.sendReportsNow();
       setReportsActionMessage(result.message || (result.ok ? 'Reports sent to Drive.' : 'Reports send failed.'));
     } catch (error) {
-      setReportsActionMessage(error.message || 'Reports send failed.');
+      setReportsActionMessage(friendlyError(error, 'Reports send failed.'));
     } finally {
       setSendingReports(false);
       loadBackupAndReportsStatus();
@@ -379,8 +382,7 @@ export default function Settings() {
       setMachines(machineData.items || []);
       setPricingItems(pricingData.items || []);
     } catch (error) {
-      console.error('Failed to load settings data:', error);
-      setLoadError(error.message || 'Failed to load settings data.');
+      setLoadError(friendlyError(error, 'Failed to load settings data.'));
     } finally {
       setLoadingPricing(false);
     }
@@ -434,7 +436,9 @@ export default function Settings() {
       await api.deletePricingItem(targetId);
       setPricingItems(prev => prev.filter(item => item.id !== targetId));
     } catch (error) {
-      console.error('Failed to delete pricing item:', error);
+      // Delete failed - resync the list from the backend rather than
+      // trusting the optimistic removal, and let the refreshed list itself
+      // reflect reality instead of surfacing raw dev output.
       await loadPricing();
     }
   };
@@ -450,6 +454,32 @@ export default function Settings() {
       await loadPricing();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Fills in the 7 real expense categories (Materials, Ink & Consumables,
+  // etc.) if any are missing - covers a fresh/reset database where nothing
+  // ever populated the ExpenseCategory table, which otherwise left the
+  // Add Expense modal's category picker showing "No categories found"
+  // with no way to fix it from the UI. Safe to click more than once -
+  // routes/expenses.py's seed_expense_categories() only adds what's
+  // missing by name, never duplicates or resets existing rows.
+  const [categorySeedMessage, setCategorySeedMessage] = useState('');
+  const seedExpenseCategories = async () => {
+    setSaving(true);
+    setCategorySeedMessage('');
+    try {
+      const result = await api.seedExpenseCategories();
+      const createdCount = (result.created || []).length;
+      setCategorySeedMessage(
+        createdCount > 0
+          ? `Added ${createdCount} categor${createdCount === 1 ? 'y' : 'ies'}: ${result.created.join(', ')}`
+          : 'All 7 categories already present - nothing to add.'
+      );
+    } catch (error) {
+      setCategorySeedMessage(friendlyError(error, 'Could not seed expense categories.'));
     } finally {
       setSaving(false);
     }
@@ -881,6 +911,22 @@ export default function Settings() {
           <div style={{ gridColumn: '1 / -1' }}>
             <label style={{ display: 'block', fontSize: '10px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '4px' }}>Receipt Footer Text</label>
             <textarea style={{...inputStyle, minHeight: '60px', resize: 'vertical'}} value={defaults.receiptFooter} onChange={(e) => setDefaults(prev => ({ ...prev, receiptFooter: e.target.value }))} />
+          </div>
+          <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-faint)', paddingTop: '12px', marginTop: '4px' }}>
+            <label style={{ display: 'block', fontSize: '10px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '6px' }}>Expense Categories</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                onClick={seedExpenseCategories}
+                disabled={saving}
+                style={{ background: 'var(--bg-canvas)', border: '1px solid var(--border-faint)', borderRadius: '6px', padding: '4px 8px', fontSize: '10px', fontWeight: '600', color: 'var(--primary)', cursor: saving ? 'default' : 'pointer' }}
+              >
+                Add Missing Categories
+              </button>
+              {categorySeedMessage && <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{categorySeedMessage}</span>}
+            </div>
+            <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              Fills in the 7 standard categories (Materials, Ink & Consumables, Installation, Maintenance, Utilities, Transport, Petty Cash) if the Add Expense category picker is showing empty. Safe to click more than once.
+            </div>
           </div>
         </div>
       </div>

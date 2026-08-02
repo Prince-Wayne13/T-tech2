@@ -3,7 +3,7 @@ import './styles.css';
 import { api } from './api/client';
 import { money } from './utils/format';
 import { ModuleHeader, StatsGrid } from './components/ModuleStandard';
-import { PrintPreviewModal } from './components/PrintLayouts';
+import { downloadTablePDF } from './components/TablePDF';
 
 // ── Reports rebuild (nav/reports consolidation session) ──────────────────
 // Replaces the previous generic report-library list with two tabs:
@@ -707,13 +707,42 @@ function MaterialsSection() {
   const rows = data?.materials || [];
   const unreconciledCount = data?.flags?.unreconciled_count?.length || 0;
   const varianceCount = data?.flags?.count_variance?.length || 0;
-  // Item 3 (flagged gap, fixed this pass): print/export for this report.
-  // preview holds the same payload useAnalyticsData already fetched -
-  // PrintPreviewModal's 'materials_reconciliation' type (PrintLayouts.jsx)
-  // renders it, and the browser's native print dialog (triggered by
-  // window.print(), same mechanism every other print layout in this app
-  // uses) handles the actual PDF/paper output.
-  const [preview, setPreview] = useState(null);
+  // Build decision #12: Print removed entirely - this now downloads a real
+  // .pdf via TablePDF.jsx (@react-pdf/renderer), same mechanism every other
+  // download in the app uses, instead of opening an in-app preview and
+  // relying on the browser's native Print dialog (window.print()).
+  const downloadReconciliationPdf = () => {
+    if (!data) return;
+    const columns = [
+      { label: 'Material', flex: 1.6, render: row => `${row.name}${row.material_ref ? ` (${row.material_ref})` : ''}` },
+      { label: 'Opening', flex: 0.8, align: 'right', render: row => row.opening_stock.toLocaleString() },
+      { label: 'Purchased', flex: 0.8, align: 'right', render: row => `+${row.purchased.toLocaleString()}` },
+      { label: 'Consumed', flex: 0.8, align: 'right', render: row => `-${row.consumed.toLocaleString()}` },
+      { label: 'Closing', flex: 1, align: 'right', render: row => `${row.closing_stock.toLocaleString()} ${row.unit || ''}` },
+      {
+        label: 'Output Produced', flex: 1.4,
+        render: row => {
+          const entries = Object.entries(row.output_produced || {});
+          return entries.length === 0 ? '-' : entries.map(([label, qty]) => `${qty.toLocaleString()} ${label}`).join(', ');
+        },
+      },
+      {
+        label: 'Count Variance', flex: 1, align: 'right',
+        render: row => {
+          if (!row.physical_count_check) return 'Not counted';
+          const variance = row.physical_count_check.variance;
+          return `${variance >= 0 ? '+' : ''}${variance.toLocaleString()}`;
+        },
+      },
+    ];
+    downloadTablePDF({
+      title: `Materials Reconciliation - ${month}`,
+      subtitle: `${rows.length} material${rows.length !== 1 ? 's' : ''}`,
+      columns,
+      rows,
+      filename: `materials-reconciliation-${month}.pdf`,
+    });
+  };
 
   return (
     <SectionShell title="Materials - Month-End Reconciliation" loading={loading} error={error} empty={false}>
@@ -742,10 +771,10 @@ function MaterialsSection() {
         <button
           className="filter-btn"
           disabled={loading || !data}
-          onClick={() => setPreview(data)}
+          onClick={downloadReconciliationPdf}
           style={{ fontSize: '11px' }}
         >
-          Print / Export
+          Download PDF
         </button>
         {(unreconciledCount > 0 || varianceCount > 0) && !loading && (
           <span style={{ fontSize: '10px' }}>
@@ -804,15 +833,6 @@ function MaterialsSection() {
           </tbody>
         </table>
       </div>
-      <PrintPreviewModal
-        type="materials_reconciliation"
-        title={`Materials Reconciliation - ${month}`}
-        data={preview}
-        onClose={() => setPreview(null)}
-        actions={
-          <button className="filter-btn active" onClick={() => window.print()}>Print</button>
-        }
-      />
     </SectionShell>
   );
 }

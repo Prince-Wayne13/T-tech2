@@ -153,7 +153,10 @@ export async function downloadPDF(data, filename = 'document.pdf', type = 'invoi
     link.remove();
     URL.revokeObjectURL(url);
   } catch (error) {
-    console.error('PDF download failed:', error);
+    // Swallowed intentionally - no toast/notify plumbing reaches this
+    // helper. (Note: this module isn't currently imported anywhere in the
+    // app - InvoicePDF.jsx is the one actually wired up to Download
+    // buttons - but cleaned up in the same pass regardless.)
   }
 }
 

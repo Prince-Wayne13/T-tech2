@@ -5,6 +5,7 @@ import { NewJobModal, RecordPaymentModal, JobProgressModal, ConfirmModal } from 
 import { downloadTablePDF } from './components/TablePDF';
 import { api } from './api/client';
 import { shortDate } from './utils/format';
+import { friendlyError } from './utils/errors';
 import {
   Icon,
   ModuleHeader,
@@ -294,7 +295,7 @@ export default function Jobs() {
       notify(editRecord ? 'Job updated' : 'Job created');
       loadJobs();
     } catch (saveError) {
-      notify(saveError.message || 'Could not save job', 'error');
+      notify(friendlyError(saveError, 'Could not save job'), 'error');
     }
   };
 
@@ -322,7 +323,7 @@ export default function Jobs() {
       setEditingPayment(null);
       loadJobs();
     } catch (paymentError) {
-      notify(paymentError.message || 'Could not save payment', 'error');
+      notify(friendlyError(paymentError, 'Could not save payment'), 'error');
     }
   };
 
@@ -338,7 +339,7 @@ export default function Jobs() {
       setProgressJob(null);
       loadJobs();
     } catch (progressError) {
-      notify(progressError.message || 'Could not update progress', 'error');
+      notify(friendlyError(progressError, 'Could not update progress'), 'error');
     }
   };
 
@@ -351,7 +352,7 @@ export default function Jobs() {
       notify(`${job.id} marked as finished`);
       loadJobs();
     } catch (finishError) {
-      notify(finishError.message || 'Could not mark job as finished', 'error');
+      notify(friendlyError(finishError, 'Could not mark job as finished'), 'error');
     }
   };
 
@@ -374,7 +375,7 @@ export default function Jobs() {
       notify(`${job.id} cancelled`);
       loadJobs();
     } catch (cancelError) {
-      notify(cancelError.message || 'Could not cancel job', 'error');
+      notify(friendlyError(cancelError, 'Could not cancel job'), 'error');
     }
   };
 

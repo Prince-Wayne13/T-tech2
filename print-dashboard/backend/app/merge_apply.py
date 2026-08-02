@@ -80,8 +80,8 @@ from datetime import date, datetime
 from .extensions import db
 from .models import (
     Advance, Capability, Client, Expense, ExpenseCategory, ExportJob,
-    Invoice, Job, Material, MaterialTransaction, PettyCash, PricingItem,
-    ProductionMachine, Sale, Staff, SyncConflict, Vendor,
+    Invoice, Job, Material, MaterialTransaction, Payment, PettyCash,
+    PricingItem, ProductionMachine, Sale, Staff, SyncConflict, Vendor,
 )
 from .merge_preview import preview_merge
 
@@ -250,6 +250,31 @@ SAFE_TO_WRITE_TABLES = {
             "job_id": ("jobs", "job_ref"),
         },
     },
+    # Item 20: payments had a ref-keyed entry in merge_preview.py's
+    # REF_KEYED_TABLES (so the preview screen could name a payment as
+    # changed) but no matching entry here, so the apply step silently
+    # skipped writing it -- worse than being left off both lists, since a
+    # preview could claim a payment synced when it never actually did.
+    # Anything that recalculates from real payment rows (e.g.
+    # services/reports.py's by_month, which iterates invoice.job.payments
+    # directly) found nothing after a sync, even though the Sale's stored
+    # amount (which doesn't need live payment rows) looked correct.
+    # Must run after jobs and invoices above -- invoice_id/job_id
+    # translation needs those tables' same-run rows already
+    # committed-and-flushed.
+    "payments": {
+        "model": Payment,
+        "key_column": "payment_ref",
+        "columns": [
+            "payment_ref", "invoice_id", "job_id", "amount", "method",
+            "paid_on", "received_by", "notes",
+            "device_id", "created_at", "updated_at",
+        ],
+        "fk_translations": {
+            "invoice_id": ("invoices", "invoice_ref"),
+            "job_id": ("jobs", "job_ref"),
+        },
+    },
     # Must run after expenses above: linked_expense_id resolves through
     # the expenses table, which needs to already have this run's new
     # rows committed-and-flushed first (same ordering requirement as
@@ -277,7 +302,7 @@ SAFE_TO_WRITE_TABLES = {
 APPLY_ORDER = [
     "production_machines", "capabilities", "vendors",
     "expense_categories", "advances", "export_jobs",
-    "clients", "pricing_items", "jobs", "invoices",
+    "clients", "pricing_items", "jobs", "invoices", "payments",
     "expenses", "sales", "petty_cash_entries", "material_transactions",
 ]
 

@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
 import { compactDate, money, shortDate } from './utils/format';
+import { friendlyError } from './utils/errors';
 import ActionModal from './components/ActionModal';
+import { ConfirmModal } from './components/Modals';
 import { Icon, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
 
 const D = {
@@ -163,6 +165,9 @@ export default function PettyCash() {
   const [balance, setBalance] = useState(0);
   const [staffList, setStaffList] = useState([]);
   const [showEntry, setShowEntry] = useState(false);
+  // In-app delete confirmation, replacing window.confirm() (build decisions
+  // item 15) - null means no delete is pending.
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { toast, notify } = useModuleToast();
@@ -221,19 +226,23 @@ export default function PettyCash() {
       notify('Petty cash entry recorded');
       loadData();
     } catch (saveError) {
-      notify(saveError.message || 'Could not save entry', 'error');
+      notify(friendlyError(saveError, 'Could not save entry'), 'error');
     }
   };
 
-  const handleDelete = async entry => {
-    if (!window.confirm(`Delete ${entry.id}?`)) return;
+  const handleDelete = entry => setDeleteTarget(entry);
+
+  const confirmDelete = async () => {
+    const entry = deleteTarget;
+    setDeleteTarget(null);
+    if (!entry) return;
     try {
       const result = await api.deletePettyCashEntry(entry.backendId);
       setBalance(Number(result.balance || 0));
       notify('Petty cash entry deleted');
       loadData();
     } catch (deleteError) {
-      notify(deleteError.message || 'Could not delete entry', 'error');
+      notify(friendlyError(deleteError, 'Could not delete entry'), 'error');
     }
   };
 
@@ -275,6 +284,15 @@ export default function PettyCash() {
         {filtered.map(entry => <EntryRow key={entry.id} entry={entry} onDelete={handleDelete} />)}
       </RegisterCard>
       <AddPettyCashModal isOpen={showEntry} onClose={() => setShowEntry(false)} onSave={handleSave} staffList={staffList} />
+      <ConfirmModal
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={confirmDelete}
+        title="Delete Entry"
+        message={deleteTarget ? `Delete ${deleteTarget.id}? This cannot be undone.` : ''}
+        confirmLabel="Delete"
+        danger
+      />
       <ModuleToast toast={toast} />
     </main>
   );

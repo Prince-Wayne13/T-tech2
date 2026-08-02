@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
+import { friendlyError } from './utils/errors';
 import { Icon, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
 
 const D = {
@@ -105,7 +106,7 @@ export default function ExportData() {
       notify('Export created');
       loadExports();
     } catch (saveError) {
-      notify(saveError.message || 'Could not create export', 'error');
+      notify(friendlyError(saveError, 'Could not create export'), 'error');
     }
   };
 

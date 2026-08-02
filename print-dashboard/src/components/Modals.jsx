@@ -4,6 +4,7 @@
 import React, { useEffect, useState, useLayoutEffect, useRef } from 'react';
 import { calculateLineTotal, calculateTotal, calculateDiscountedTotal } from '../utils/calculateTotal';
 import { api } from '../api/client';
+import { friendlyError } from '../utils/errors';
 
 /* ═══════════════════════════════════════
    ICON SYSTEM
@@ -452,7 +453,7 @@ function SimpleRecordPreview({ type, data }) {
 
 /* ═══════════════════════════════════════ MODAL: New Invoice ═══════════════════════════════════════ */
 export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ client: '', items: [], due: '', notes: '', discount: 0, taxRate: 0 });
+  const [form, setForm] = useState({ client: '', items: [], due: '', notes: '', discount: 0 });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
   const [rate, setRate] = useState('');
@@ -466,16 +467,6 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
       due: initialData?.due_on || initialData?.due || '',
       notes: initialData?.notes || '',
       discount: Number(initialData?.discount_amount || 0),
-      // Item 8 (flagged gap, fixed this pass): tax_rate is a real column on
-      // Invoice (models.py) and services/invoices.py's invoice_totals()
-      // already computes tax = (subtotal - discount) * tax_rate, total =
-      // taxable + tax - but this form never captured or displayed that
-      // rate, so it always saved as 0 and the live preview below never
-      // matched what a non-zero rate would actually produce once saved.
-      // Stored here as a fraction (0.165 = 16.5%), matching the backend
-      // column's own units (Numeric(6,4), same fraction convention as the
-      // backend applies it in - not a percentage int needing /100 either side).
-      taxRate: Number(initialData?.tax_rate || 0),
     });
     setSelectedService(null); setQty('1'); setRate(''); setShowPreview(false);
   }, [isOpen, initialData]);
@@ -489,8 +480,7 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
   const removeItem = i => setForm(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }));
   const subtotal = calculateTotal(form.items);
   const taxable = Math.max(subtotal - Number(form.discount || 0), 0);
-  const taxAmount = taxable * Number(form.taxRate || 0);
-  const total = taxable + taxAmount;
+  const total = taxable;
 
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title={initialData ? 'Edit Invoice' : 'New Invoice'} wide footer={<>
@@ -525,19 +515,12 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
           <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-faint)', flexShrink: 0 }}>
             <label style={labelStyle}>Discount (flat amount, MK)</label>
             <input type="number" min="0" style={inputStyle} placeholder="0" value={form.discount || ''} onChange={e => setForm({ ...form, discount: Number(e.target.value) || 0 })} />
-            <label style={{ ...labelStyle, marginTop: '10px' }}>Tax Rate (%, optional)</label>
-            <input type="number" min="0" step="0.01" style={inputStyle} placeholder="0" value={form.taxRate ? form.taxRate * 100 : ''} onChange={e => setForm({ ...form, taxRate: (Number(e.target.value) || 0) / 100 })} />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '10px', color: 'var(--text-muted)' }}>
               <span>Subtotal</span><span>MK {subtotal.toLocaleString()}</span>
             </div>
             {form.discount > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
                 <span>Discount</span><span>-MK {Number(form.discount).toLocaleString()}</span>
-              </div>
-            )}
-            {form.taxRate > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)' }}>
-                <span>Tax ({(form.taxRate * 100).toFixed(2)}%)</span><span>+MK {taxAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
               </div>
             )}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '11px', fontWeight: 700, color: 'var(--text-head)' }}>
@@ -1015,10 +998,12 @@ function VendorPicker({ vendorId, onSelectVendor, vendors, onVendorCreated }) {
   const [showAddNew, setShowAddNew] = useState(false);
   const [newVendor, setNewVendor] = useState({ name: '', phone: '', email: '' });
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   const handleCreateVendor = async () => {
     if (!newVendor.name.trim()) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const created = await api.createVendor({ name: newVendor.name, phone: newVendor.phone, email: newVendor.email, category: 'Other' });
       onVendorCreated(created);
@@ -1026,9 +1011,10 @@ function VendorPicker({ vendorId, onSelectVendor, vendors, onVendorCreated }) {
       setShowAddNew(false);
       setNewVendor({ name: '', phone: '', email: '' });
     } catch (err) {
-      // Surfaced via the modal's own notify pattern isn't available here,
-      // so fall back to a lightweight inline message.
-      alert(err.message || 'Could not create vendor');
+      // A page-level notify/toast isn't reachable from this nested picker,
+      // so this shows a plain inline message instead of the browser's
+      // native alert() - and never the raw error text (see utils/errors.js).
+      setSaveError(friendlyError(err, 'Could not create vendor'));
     } finally {
       setSaving(false);
     }
@@ -1041,6 +1027,7 @@ function VendorPicker({ vendorId, onSelectVendor, vendors, onVendorCreated }) {
         <input style={inputStyle} placeholder="Vendor name" value={newVendor.name} onChange={e => setNewVendor({ ...newVendor, name: e.target.value })} />
         <input style={inputStyle} placeholder="Phone" value={newVendor.phone} onChange={e => setNewVendor({ ...newVendor, phone: e.target.value })} />
         <input style={inputStyle} placeholder="Email" value={newVendor.email} onChange={e => setNewVendor({ ...newVendor, email: e.target.value })} />
+        {saveError && <div style={{ fontSize: '10px', color: 'var(--red, #c0392b)' }}>{saveError}</div>}
         <div style={{ display: 'flex', gap: '8px' }}>
           <button onClick={() => setShowAddNew(false)} style={cancelButton}>Cancel</button>
           <button onClick={handleCreateVendor} style={createButton} disabled={saving}>{saving ? 'Saving...' : 'Save Vendor'}</button>
@@ -1371,12 +1358,11 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
 }
 
 /* ═══════════════════════════════════════ MODAL: Confirm ═══════════════════════════════════════
-   Generic in-app confirmation dialog. Added to replace window.confirm()
-   calls, which render as a raw browser dialog (shows the page URL, native
-   OS chrome) - fine for a dev tool, not appropriate for an app end users
-   are meant to use. Only wired into Jobs.jsx's Cancel Job action for now;
-   pettycash.jsx and Materials.jsx still use window.confirm() and are
-   flagged as a follow-up, not touched in this pass.
+   Generic in-app confirmation dialog. Replaces window.confirm() calls,
+   which render as a raw browser dialog (shows the page URL, native OS
+   chrome) - fine for a dev tool, not appropriate for an app end users are
+   meant to use. Now wired into every destructive-action confirm across the
+   app (Jobs Cancel, Petty Cash delete, Materials transaction delete).
 ═══════════════════════════════════════ */
 export function ConfirmModal({ isOpen, onClose, onConfirm, title = 'Are you sure?', message, confirmLabel = 'Confirm', danger = false }) {
   return (
@@ -1385,6 +1371,35 @@ export function ConfirmModal({ isOpen, onClose, onConfirm, title = 'Are you sure
       <button onClick={onConfirm} style={danger ? { ...createButton, background: 'var(--red, #c0392b)' } : createButton}>{confirmLabel}</button>
     </>}>
       <div style={{ padding: '20px', fontSize: '12px', color: 'var(--text-body)', lineHeight: 1.5 }}>{message}</div>
+    </ModalWrapper>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: Mark Paid (date entry) ═══════════════════════════════════════
+   Replaces Expenses.jsx's window.prompt('Date paid (YYYY-MM-DD):', ...) -
+   a raw browser dialog (shows the page URL/host, native OS chrome), same
+   problem as window.confirm()/alert() fixed elsewhere in this file, just
+   missed in that pass since it's window.prompt(), not confirm()/alert().
+   A real <input type="date"> also avoids the free-text prompt's own
+   failure mode: nothing stopped 'YYYY-MM-DD' from being typed back in
+   or the date malformed, since it was just a string.
+═══════════════════════════════════════ */
+export function MarkPaidModal({ isOpen, onClose, onConfirm, defaultDate }) {
+  const [date, setDate] = useState(defaultDate || new Date().toISOString().slice(0, 10));
+
+  useEffect(() => {
+    if (isOpen) setDate(defaultDate || new Date().toISOString().slice(0, 10));
+  }, [isOpen, defaultDate]);
+
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title="Mark Paid" footer={<>
+      <button onClick={onClose} style={cancelButton}>Cancel</button>
+      <button onClick={() => onConfirm(date)} style={createButton}>Mark Paid</button>
+    </>}>
+      <div style={{ padding: '20px', display: 'grid', gap: '8px' }}>
+        <label style={labelStyle}>Date Paid</label>
+        <input type="date" style={inputStyle} value={date} onChange={e => setDate(e.target.value)} />
+      </div>
     </ModalWrapper>
   );
 }

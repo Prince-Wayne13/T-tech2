@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
 import { compactDate, money } from './utils/format';
+import { friendlyError } from './utils/errors';
 import PreviewModal from './components/PreviewModal';
-import { AddExpenseModal } from './components/Modals';
+import { AddExpenseModal, MarkPaidModal } from './components/Modals';
 import { downloadInvoicePDF } from './components/InvoicePDF';
 import { Icon, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
 
@@ -46,12 +47,19 @@ const mapExpense = expense => ({
   vendorName: expense.vendor_name || expense.submitted_by || 'Internal',
   vendorId: expense.vendor_id || null,
   notes: expense.notes || 'Backend expense record',
+  // Item 19 follow-up: petty-cash-generated expenses are edited from the
+  // Petty Cash page only - see routes/expenses.py's update_expense(),
+  // which now rejects edits to these server-side too. This flag gates the
+  // Edit/status buttons here so the block is visible before the click,
+  // not just after a failed request.
+  isPettyCashLinked: Boolean(expense.is_petty_cash_linked),
 });
 
 // Shared row renderer. `onOutstandingTab` gates the Payables-style
 // relabeling (pending -> "Scheduled") and the days-overdue display that
 // only made sense in the money-owed framing.
 function ExpenseRow({ exp, onPreview, onStatus, onOutstandingTab, onEdit }) {
+  const [showMarkPaid, setShowMarkPaid] = useState(false);
   const statusConfig = {
     pending: { label: onOutstandingTab ? 'Scheduled' : 'Pending', cls: onOutstandingTab ? 'pending' : 'pending', accent: 'var(--warning)' },
     approved: { label: 'Approved', cls: 'active', accent: 'var(--primary)' },
@@ -83,47 +91,58 @@ function ExpenseRow({ exp, onPreview, onStatus, onOutstandingTab, onEdit }) {
         <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Preview" onClick={() => onPreview(exp)}>
           <Icon d={D.eye} size={11} />
         </button>
-        <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Edit" onClick={() => onEdit(exp)}>
-          Edit
-        </button>
-        {exp.status === 'pending' && (
+        {exp.isPettyCashLinked ? (
+          <span title="Created from a Petty Cash entry — edit it from the Petty Cash page instead" style={{ fontSize: '9px', color: 'var(--text-muted)', padding: '4px 8px' }}>
+            From Petty Cash
+          </span>
+        ) : (
           <>
-            <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Approve" onClick={() => onStatus(exp, 'approved')}>
-              <Icon d={D.check} size={11} />
+            <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} title="Edit" onClick={() => onEdit(exp)}>
+              Edit
             </button>
-            <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Reject" onClick={() => onStatus(exp, 'rejected')}>
-              <Icon d={D.alert} size={11} />
-            </button>
+            {exp.status === 'pending' && (
+              <>
+                <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Approve" onClick={() => onStatus(exp, 'approved')}>
+                  <Icon d={D.check} size={11} />
+                </button>
+                <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Reject" onClick={() => onStatus(exp, 'rejected')}>
+                  <Icon d={D.alert} size={11} />
+                </button>
+              </>
+            )}
+            {exp.status === 'approved' && (
+              <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} onClick={() => onStatus(exp, 'reimbursed')}>
+                Reimburse
+              </button>
+            )}
+            {/* Mark Paid: available once an expense is approved or reimbursed —
+                i.e. it's a real, sanctioned cost, just not yet recorded as cash
+                out the door. Deliberately excluded for 'pending'/'rejected': an
+                unapproved or rejected expense being marked paid would mean money
+                left the business for something never signed off on, which is a
+                different problem (approve it first) than this button solves. */}
+            {(exp.status === 'approved' || exp.status === 'reimbursed') && (
+              <button
+                className="filter-btn"
+                style={{ padding: '4px 8px', fontSize: '9px' }}
+                title="Record the date this was actually paid"
+                onClick={() => setShowMarkPaid(true)}
+              >
+                Mark Paid
+              </button>
+            )}
           </>
         )}
-        {exp.status === 'approved' && (
-          <button className="filter-btn" style={{ padding: '4px 8px', fontSize: '9px' }} onClick={() => onStatus(exp, 'reimbursed')}>
-            Reimburse
-          </button>
-        )}
-        {/* Mark Paid: available once an expense is approved or reimbursed —
-            i.e. it's a real, sanctioned cost, just not yet recorded as cash
-            out the door. Deliberately excluded for 'pending'/'rejected': an
-            unapproved or rejected expense being marked paid would mean money
-            left the business for something never signed off on, which is a
-            different problem (approve it first) than this button solves. */}
-        {(exp.status === 'approved' || exp.status === 'reimbursed') && (
-          <button
-            className="filter-btn"
-            style={{ padding: '4px 8px', fontSize: '9px' }}
-            title="Record the date this was actually paid"
-            onClick={() => {
-              const today = new Date().toISOString().slice(0, 10);
-              const entered = window.prompt('Date paid (YYYY-MM-DD):', exp.paid_on || today);
-              if (entered === null) return; // cancelled
-              const paidOn = entered.trim() || today;
-              onStatus(exp, 'paid', { paid_on: paidOn });
-            }}
-          >
-            Mark Paid
-          </button>
-        )}
       </div>
+      <MarkPaidModal
+        isOpen={showMarkPaid}
+        onClose={() => setShowMarkPaid(false)}
+        defaultDate={exp.paid_on || new Date().toISOString().slice(0, 10)}
+        onConfirm={paidOn => {
+          setShowMarkPaid(false);
+          onStatus(exp, 'paid', { paid_on: paidOn || new Date().toISOString().slice(0, 10) });
+        }}
+      />
     </div>
   );
 }
@@ -245,7 +264,7 @@ export default function Expenses() {
       notify(editRecord ? 'Expense updated' : 'Expense created');
       loadExpenses();
     } catch (saveError) {
-      notify(saveError.message || 'Could not save expense', 'error');
+      notify(friendlyError(saveError, 'Could not save expense'), 'error');
     }
   };
 
@@ -263,7 +282,7 @@ export default function Expenses() {
       notify(`Expense marked ${status}`);
       loadExpenses();
     } catch (saveError) {
-      notify(saveError.message || 'Could not update expense', 'error');
+      notify(friendlyError(saveError, 'Could not update expense'), 'error');
     }
   };
 

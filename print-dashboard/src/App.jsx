@@ -17,9 +17,11 @@ import ExportData from './ExportData';
 import Settings from './Settings';
 import { api } from './api/client';
 import { compactDate, money } from './utils/format';
+import { friendlyError } from './utils/errors';
 import PreviewModal from './components/PreviewModal';
 import ttechIcon from './assets/ttech-icon.png';
-import { downloadPreviewPdf, recordToPdfHtml, shareText } from './utils/downloads';
+import { downloadTablePDF } from './components/TablePDF';
+import { shareText } from './utils/downloads';
 import {
   AddExpenseModal,
   ActivityPreviewModal,
@@ -567,7 +569,16 @@ function ActionModal({ action, onClose, onSubmit }) {
             </label>
           ))}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
-            <button className="filter-btn" onClick={() => downloadPreviewPdf(`${action} Draft`, recordToPdfHtml(`${action} Draft`, values))}>Download PDF</button>
+            <button className="filter-btn" onClick={() => downloadTablePDF({
+              title: `${action} Draft`,
+              subtitle: compactDate(new Date()),
+              columns: [
+                { label: 'Field', key: 'field', flex: 1 },
+                { label: 'Value', key: 'value', flex: 1.6 },
+              ],
+              rows: fields.map(field => ({ field, value: values[field] || '-' })),
+              filename: `${action.toLowerCase().replace(/\s+/g, '-')}-draft.pdf`,
+            })}>Download PDF</button>
             <button className="filter-btn" onClick={() => shareText(action, JSON.stringify(values, null, 2))}>Share</button>
             <button className="filter-btn active" onClick={() => onSubmit(action, values)}>Create</button>
           </div>
@@ -706,7 +717,7 @@ export default function App() {
         else setPreview({ title: `${action} Preview`, data: { action, values, status: 'Draft ready' } });
       }
     } catch (error) {
-      setPreview({ title: `${action} Failed`, data: { error: error.message, values } });
+      setPreview({ title: `${action} Failed`, data: { error: friendlyError(error, 'Something went wrong. Please try again.'), values } });
     } finally {
       setActionModal(null);
     }

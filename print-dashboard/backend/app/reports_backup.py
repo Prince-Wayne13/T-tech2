@@ -3,10 +3,10 @@ reports_backup.py
 
 Builds a weekly package of the business reports (cashflow, income
 statement, and the other analytics already shown in the app), turns
-them into HTML pages, zips them into a single password-protected file,
-and sends that zip to the detected cloud-sync folder (Google Drive /
-OneDrive / Dropbox) ONLY -- it is never kept as a local copy, unlike
-the regular database backup.
+them into real PDF files via report_pdf.py (reportlab), zips them into
+a single password-protected file, and sends that zip to the detected
+cloud-sync folder (Google Drive / OneDrive / Dropbox) ONLY -- it is
+never kept as a local copy, unlike the regular database backup.
 
 Status tracking, in plain terms:
   - "inactive"  -- a report was already sent this week; not due yet.
@@ -54,142 +54,46 @@ class ReportsSendResult:
     timestamp: datetime = field(default_factory=datetime.now)
 
 
-def _html_document(title: str, sections: list[tuple[str, dict]]) -> str:
-    """
-    Turns a report title plus a list of (heading, data-dict) pairs into
-    a single, plain, readable HTML page. No PDF conversion -- per
-    explicit instruction, zipped HTML is fine for now.
-    """
-    parts = [
-        "<!DOCTYPE html><html><head><meta charset='utf-8'>",
-        f"<title>{title}</title>",
-        "<style>",
-        "body{font-family:Arial,Helvetica,sans-serif;margin:32px;color:#222;}",
-        "h1{font-size:22px;border-bottom:2px solid #333;padding-bottom:8px;}",
-        "h2{font-size:17px;margin-top:28px;color:#333;}",
-        "table{border-collapse:collapse;width:100%;margin-top:8px;}",
-        "td,th{border:1px solid #ccc;padding:6px 10px;text-align:left;font-size:13px;}",
-        "th{background:#2b2f38;color:#fff;}",
-        "tr:nth-child(even){background:#f5f6f8;}",
-        ".generated{color:#777;font-size:12px;margin-bottom:24px;}",
-        "</style></head><body>",
-        f"<h1>{title}</h1>",
-        f"<div class='generated'>Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>",
-    ]
-
-    for heading, data in sections:
-        parts.append(f"<h2>{heading}</h2>")
-        parts.append(_dict_to_table(data))
-
-    parts.append("</body></html>")
-    return "\n".join(parts)
-
-
-def _dict_to_table(data) -> str:
-    """
-    Renders any plain dict/list/number structure as a simple nested
-    HTML table -- good enough for a readable report page without
-    needing a bespoke template per report.
-    """
-    if isinstance(data, dict):
-        rows = []
-        for key, value in data.items():
-            rows.append(f"<tr><th>{key}</th><td>{_dict_to_table(value)}</td></tr>")
-        return f"<table>{''.join(rows)}</table>"
-    if isinstance(data, list):
-        if not data:
-            return "<em>None</em>"
-        rows = []
-        for item in data:
-            rows.append(f"<tr><td>{_dict_to_table(item)}</td></tr>")
-        return f"<table>{''.join(rows)}</table>"
-    return str(data)
-
-
-def build_report_html_files(tmp_dir: Path) -> list[Path]:
+def build_report_pdf_files(tmp_dir: Path) -> list[Path]:
     """
     Pulls the real analytics already used elsewhere in the app (same
     functions the on-screen Reports page calls) and writes each one out
     as its own HTML file inside tmp_dir. Returns the list of file paths
     written, ready to be zipped.
     """
+    from .report_pdf import build_analytics_pdf, build_cashflow_pdf, build_income_statement_pdf
     from .services.reports import (
         build_dashboard_summary,
         build_financial_report,
         build_job_throughput,
-        build_machine_revenue,
         build_quantity_produced,
     )
 
     financials = build_financial_report()
     dashboard = build_dashboard_summary()
+    quantity_produced = build_quantity_produced()
+    job_throughput = build_job_throughput()
 
     files_written = []
 
-    # Income statement -- revenue, expenses, profit, on both booked and
-    # cash bases, exactly as already computed by build_financial_report().
-    income_statement_html = _html_document(
-        "Income Statement",
-        [
-            ("Booked Revenue, Expenses & Profit", {
-                "revenue": financials["revenue"],
-                "expenses": financials["expenses"],
-                "profit": financials["profit"],
-            }),
-            ("Cash-Basis Revenue, Expenses & Profit", {
-                "cash_revenue": financials["cash_revenue"],
-                "cash_expenses": financials["cash_expenses"],
-                "cash_profit": financials["cash_profit"],
-            }),
-            ("Revenue By Status", financials["invoice_totals_by_status"]),
-            ("Expenses By Category", financials["expense_totals_by_category"]),
-            ("Top Clients", financials["top_clients"]),
-        ],
-    )
-    path = tmp_dir / "income-statement.html"
-    path.write_text(income_statement_html, encoding="utf-8")
+    path = tmp_dir / "income-statement.pdf"
+    build_income_statement_pdf(financials, path)
     files_written.append(path)
 
-    # Cashflow -- month-by-month cash actually collected/paid, plus the
-    # dashboard's point-in-time cash balance and receivables.
-    cashflow_html = _html_document(
-        "Cashflow Report",
-        [
-            ("Current Position", {
-                "cash_balance": dashboard["cash_balance"],
-                "receivables": dashboard["receivables"],
-                "overdue_invoices": dashboard["overdue_invoices"],
-            }),
-            ("Cash Collected By Month", financials["revenue_by_month"]),
-            ("Cash Paid Out By Month (Expenses)", financials["expenses_by_month"]),
-            ("Receivables Aging", financials["receivables_aging"]),
-        ],
-    )
-    path = tmp_dir / "cashflow.html"
-    path.write_text(cashflow_html, encoding="utf-8")
+    path = tmp_dir / "cashflow.pdf"
+    build_cashflow_pdf(financials, dashboard, path)
     files_written.append(path)
 
-    # Everything else already considered "analytics" in this app.
-    analytics_html = _html_document(
-        "Analytics — Production & Machines",
-        [
-            ("Job Pipeline", dashboard["pipeline"]),
-            ("Machine Revenue", financials["machine_revenue"]),
-            ("Quantity Produced", build_quantity_produced()),
-            ("Job Throughput", build_job_throughput()),
-            ("Product Mix (Revenue)", financials["product_mix"]),
-        ],
-    )
-    path = tmp_dir / "analytics.html"
-    path.write_text(analytics_html, encoding="utf-8")
+    path = tmp_dir / "analytics.pdf"
+    build_analytics_pdf(dashboard, financials, quantity_produced, job_throughput, path)
     files_written.append(path)
 
     return files_written
 
 
-def zip_and_encrypt(html_files: list[Path], zip_path: Path) -> None:
+def zip_and_encrypt(pdf_files: list[Path], zip_path: Path) -> None:
     """
-    Zips the given HTML files into a single password-protected archive
+    Zips the given PDF files into a single password-protected archive
     using real AES-256 encryption (not the old, weak ZipCrypto that
     plain `zipfile` only supports). Opening it later (7-Zip, WinRAR,
     etc.) will ask for the password.
@@ -198,8 +102,8 @@ def zip_and_encrypt(html_files: list[Path], zip_path: Path) -> None:
         zip_path, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES
     ) as zf:
         zf.setpassword(ZIP_PASSWORD)
-        for html_file in html_files:
-            zf.write(html_file, arcname=html_file.name)
+        for pdf_file in pdf_files:
+            zf.write(pdf_file, arcname=pdf_file.name)
 
 
 class WeeklyReportsScheduler:
@@ -333,11 +237,11 @@ class WeeklyReportsScheduler:
 
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_dir = Path(tmp)
-                html_files = build_report_html_files(tmp_dir)
+                pdf_files = build_report_pdf_files(tmp_dir)
 
                 timestamp = datetime.now().strftime("%Y-%m-%d-%H%M")
                 zip_path = tmp_dir / f"TTechStudio-Reports-{timestamp}.zip"
-                zip_and_encrypt(html_files, zip_path)
+                zip_and_encrypt(pdf_files, zip_path)
 
                 sync_folder, is_real = detect_sync_folder(self.sync_fallback_dir)
 

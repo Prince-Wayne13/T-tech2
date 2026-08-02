@@ -6,6 +6,7 @@ from ..models import AuditLog, Job
 from ..services.jobs import (
     ACTIVE_STATUS,
     CANCELLED_STATUS,
+    _sync_linked_sale,
     add_job_payment,
     create_invoice_for_job,
     normalise_job_status,
@@ -130,6 +131,11 @@ def update_job(job_id):
             job.invoice.status = CANCELLED_STATUS
         else:
             sync_invoice_amount(job.invoice)
+    # Item 17: editing a job's line items/discount/etc. changes the invoice
+    # total but, unlike add_job_payment()/update_job_payment(), never called
+    # _sync_linked_sale() - so the Sales log could go stale on any job edit
+    # that wasn't a payment. Mirrors the payment routes' own call.
+    _sync_linked_sale(job)
     db.session.add(AuditLog(action=f"Updated job {job.job_ref}", entity_type="job", entity_id=job.id))
     db.session.commit()
     return jsonify(serialize_job(job))

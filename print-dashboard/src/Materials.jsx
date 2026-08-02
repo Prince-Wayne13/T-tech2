@@ -17,7 +17,8 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
 import { money, compactDate, number } from './utils/format';
-import { NewMaterialModal, RecordMaterialTransactionModal } from './components/Modals';
+import { friendlyError } from './utils/errors';
+import { NewMaterialModal, RecordMaterialTransactionModal, ConfirmModal } from './components/Modals';
 import { Icon, ModuleHeader, ModuleToast, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
 
 const D = {
@@ -311,6 +312,9 @@ export default function Materials() {
   const [jobs, setJobs] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [txnRefreshKey, setTxnRefreshKey] = useState(0);
+  // In-app delete confirmation, replacing window.confirm() (build decisions
+  // item 15) - null means no delete is pending.
+  const [deleteTxnTarget, setDeleteTxnTarget] = useState(null);
   const { toast, notify } = useModuleToast();
 
   const loadMaterials = () => {
@@ -371,7 +375,7 @@ export default function Materials() {
       loadMaterials();
       notify('Materials synced');
     } catch (syncError) {
-      notify(syncError.message || 'Could not sync materials', 'error');
+      notify(friendlyError(syncError, 'Could not sync materials'), 'error');
     } finally {
       setSyncingMaterials(false);
     }
@@ -398,7 +402,7 @@ export default function Materials() {
       setEditRecord(null);
       loadMaterials();
     } catch (saveError) {
-      notify(saveError.message || 'Could not save material', 'error');
+      notify(friendlyError(saveError, 'Could not save material'), 'error');
     }
   };
 
@@ -440,19 +444,23 @@ export default function Materials() {
         if (updated) setSelected(updated);
       }
     } catch (saveError) {
-      notify(saveError.message || 'Could not save transaction', 'error');
+      notify(friendlyError(saveError, 'Could not save transaction'), 'error');
     }
   };
 
-  const handleDeleteTransaction = async txn => {
-    if (!window.confirm(`Delete this ${txn.transaction_type} transaction (${txn.quantity})? This cannot be undone.`)) return;
+  const handleDeleteTransaction = txn => setDeleteTxnTarget(txn);
+
+  const confirmDeleteTransaction = async () => {
+    const txn = deleteTxnTarget;
+    setDeleteTxnTarget(null);
+    if (!txn) return;
     try {
       await api.deleteMaterialTransaction(txn.id);
       notify('Transaction deleted');
       loadMaterials();
       setTxnRefreshKey(k => k + 1);
     } catch (deleteError) {
-      notify(deleteError.message || 'Could not delete transaction', 'error');
+      notify(friendlyError(deleteError, 'Could not delete transaction'), 'error');
     }
   };
 
@@ -559,6 +567,15 @@ export default function Materials() {
         vendors={vendors}
         onClose={() => { setTxnMaterial(null); setEditTxn(null); }}
         onSave={handleLogTransaction}
+      />
+      <ConfirmModal
+        isOpen={!!deleteTxnTarget}
+        onClose={() => setDeleteTxnTarget(null)}
+        onConfirm={confirmDeleteTransaction}
+        title="Delete Transaction"
+        message={deleteTxnTarget ? `Delete this ${deleteTxnTarget.transaction_type} transaction (${deleteTxnTarget.quantity})? This cannot be undone.` : ''}
+        confirmLabel="Delete"
+        danger
       />
       <ModuleToast toast={toast} />
     </main>
