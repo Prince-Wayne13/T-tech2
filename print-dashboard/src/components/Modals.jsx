@@ -1375,6 +1375,27 @@ export function ConfirmModal({ isOpen, onClose, onConfirm, title = 'Are you sure
   );
 }
 
+/* ═══════════════════════════════════════ MODAL: Client Match ("Did you mean X?") ═══════════════════════════════════════
+   Item 6 (build decisions): when a typed client name is close to, but not
+   an exact match for, an existing client (see utils/clientMatch.js), this
+   prompt asks before silently creating a duplicate. Two real choices, not
+   a plain confirm - "Yes, use it" links the existing Client; "No, it's a
+   different client" proceeds to create a new one with the name as typed.
+═══════════════════════════════════════ */
+export function ClientMatchModal({ isOpen, onClose, onUseExisting, onCreateNew, typedName, suggestedClient }) {
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title="Did you mean an existing client?" footer={<>
+      <button onClick={onCreateNew} style={cancelButton}>No, it&apos;s a different client</button>
+      <button onClick={onUseExisting} style={createButton}>Yes, use {suggestedClient?.name}</button>
+    </>}>
+      <div style={{ padding: '20px', fontSize: '12px', color: 'var(--text-body)', lineHeight: 1.5 }}>
+        You typed <strong>&ldquo;{typedName}&rdquo;</strong> — this looks close to an existing client,
+        {' '}<strong>{suggestedClient?.name}</strong>. Use the existing client, or create a new, separate one?
+      </div>
+    </ModalWrapper>
+  );
+}
+
 /* ═══════════════════════════════════════ MODAL: Mark Paid (date entry) ═══════════════════════════════════════
    Replaces Expenses.jsx's window.prompt('Date paid (YYYY-MM-DD):', ...) -
    a raw browser dialog (shows the page URL/host, native OS chrome), same

@@ -1,0 +1,469 @@
+diff --git a/print-dashboard/src/utils/clientMatch.js b/print-dashboard/src/utils/clientMatch.js
+new file mode 100644
+index 0000000..7d244a5
+--- /dev/null
++++ b/print-dashboard/src/utils/clientMatch.js
+@@ -0,0 +1,93 @@
++// path: src/utils/clientMatch.js
++//
++// Item 6 (build decisions): clients typed on a Job/Proposal should become
++// real Client records automatically, not stay as plain text - matching
++// close-enough spellings to an existing client instead of creating a
++// duplicate every time. This is the matching logic only; the interactive
++// "Did you mean X?" prompt lives in components/Modals.jsx's
++// ClientMatchModal, and the actual create/link call happens in the two
++// callers (Jobs.jsx, Proposals.jsx) via resolveClientForSave() below.
++
++/** Trim + collapse internal whitespace + lowercase, for comparison only -
++ * never used as the value actually saved. "John Banda" and
++ * "john  banda" both normalize to "john banda". */
++export function normalizeClientName(name) {
++  return (name || '').trim().replace(/\s+/g, ' ').toLowerCase();
++}
++
++// Plain Levenshtein distance - no dependency needed for this. Only ever
++// called on short client-name strings, so the O(n*m) cost is negligible.
++function levenshtein(a, b) {
++  const m = a.length;
++  const n = b.length;
++  if (m === 0) return n;
++  if (n === 0) return m;
++  const prev = new Array(n + 1);
++  const curr = new Array(n + 1);
++  for (let j = 0; j <= n; j += 1) prev[j] = j;
++  for (let i = 1; i <= m; i += 1) {
++    curr[0] = i;
++    for (let j = 1; j <= n; j += 1) {
++      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
++      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
++    }
++    for (let j = 0; j <= n; j += 1) prev[j] = curr[j];
++  }
++  return prev[n];
++}
++
++/** 0..1, where 1 is an exact match (after normalization) and 0 is
++ * completely different. Used only to decide whether to show a "Did you
++ * mean X?" suggestion - never used to auto-link, since that's reserved
++ * for a true exact match after cleanup. */
++function similarity(a, b) {
++  const normA = normalizeClientName(a);
++  const normB = normalizeClientName(b);
++  if (!normA || !normB) return 0;
++  if (normA === normB) return 1;
++  const distance = levenshtein(normA, normB);
++  return 1 - distance / Math.max(normA.length, normB.length);
++}
++
++// Close enough to suggest ("Did you mean X?") but not close enough to be
++// the same normalized string - e.g. one typo, a missing/extra letter.
++// Deliberately conservative: "John" vs "Joan" (0.75) suggests; "John" vs
++// "Jane" (0.5) does not, since that's plausibly two different people.
++const SUGGEST_THRESHOLD = 0.7;
++
++/**
++ * Given the raw typed client name and the list of existing clients (as
++ * returned by GET /clients), decides what should happen before saving a
++ * Job/Proposal:
++ *   - { status: 'empty' }            - nothing typed, caller should fall
++ *                                       back to "Walk-in Client" as today.
++ *   - { status: 'exact', client }    - normalized match found; link
++ *                                       silently, no prompt.
++ *   - { status: 'suggest', client }  - close but not exact; caller should
++ *                                       show ClientMatchModal before
++ *                                       proceeding.
++ *   - { status: 'new' }              - no match close enough; caller
++ *                                       should create a new Client.
++ */
++export function resolveClientMatch(typedName, clients) {
++  const cleaned = (typedName || '').trim();
++  if (!cleaned) return { status: 'empty' };
++
++  const normalizedTyped = normalizeClientName(cleaned);
++  const exact = clients.find(c => normalizeClientName(c.name) === normalizedTyped);
++  if (exact) return { status: 'exact', client: exact };
++
++  let best = null;
++  let bestScore = 0;
++  for (const client of clients) {
++    const score = similarity(cleaned, client.name);
++    if (score > bestScore) {
++      bestScore = score;
++      best = client;
++    }
++  }
++  if (best && bestScore >= SUGGEST_THRESHOLD) {
++    return { status: 'suggest', client: best };
++  }
++  return { status: 'new' };
++}
+diff --git a/print-dashboard/backend/app/routes/jobs.py b/print-dashboard/backend/app/routes/jobs.py
+index 0462f15..2fb45bf 100644
+--- a/print-dashboard/backend/app/routes/jobs.py
++++ b/print-dashboard/backend/app/routes/jobs.py
+@@ -102,7 +102,7 @@ def update_job(job_id):
+     except IncompatibleMachineError as error:
+         return jsonify({"error": str(error)}), 400
+ 
+-    for field in ["machine_id", "service_category", "required_capability_id", "client_name", "title", "status", "priority", "pages", "copies", "progress", "completed_count", "total_count", "assigned_staff_id", "notes"]:
++    for field in ["machine_id", "service_category", "required_capability_id", "client_id", "client_name", "title", "status", "priority", "pages", "copies", "progress", "completed_count", "total_count", "assigned_staff_id", "notes"]:
+         if field in data:
+             setattr(job, field, normalise_job_status(data[field]) if field == "status" else data[field])
+     if "due_date" in data:
+@@ -115,6 +115,7 @@ def update_job(job_id):
+         if "currency" in data:
+             job.invoice.currency = data.get("currency") or job.invoice.currency
+         job.invoice.client_name = job.client_name
++        job.invoice.client_id = job.client_id
+         job.invoice.title = job.title
+         job.invoice.due_on = job.due_date
+         job.invoice.notes = job.notes
+diff --git a/print-dashboard/backend/app/routes/proposals.py b/print-dashboard/backend/app/routes/proposals.py
+index 201542e..dedb6f5 100644
+--- a/print-dashboard/backend/app/routes/proposals.py
++++ b/print-dashboard/backend/app/routes/proposals.py
+@@ -62,7 +62,7 @@ def get_proposal(proposal_id):
+ def update_proposal(proposal_id):
+     proposal = Proposal.query.get_or_404(proposal_id)
+     data = request.get_json() or {}
+-    for field in ["client_name", "title", "status", "discount_amount", "currency", "contact", "priority", "assigned_staff_id", "machine_id", "required_capability_id", "prepared_by", "notes"]:
++    for field in ["client_id", "client_name", "title", "status", "discount_amount", "currency", "contact", "priority", "assigned_staff_id", "machine_id", "required_capability_id", "prepared_by", "notes"]:
+         if field in data:
+             setattr(proposal, field, data[field])
+     if "valid_until" in data:
+diff --git a/print-dashboard/src/Jobs.jsx b/print-dashboard/src/Jobs.jsx
+index a339c9c..c42aeb4 100644
+--- a/print-dashboard/src/Jobs.jsx
++++ b/print-dashboard/src/Jobs.jsx
+@@ -1,11 +1,12 @@
+ import React, { useEffect, useState } from 'react';
+ import './styles.css';
+ import { PrintPreviewModal } from './components/PrintLayouts';
+-import { NewJobModal, RecordPaymentModal, JobProgressModal, ConfirmModal } from './components/Modals';
++import { NewJobModal, RecordPaymentModal, JobProgressModal, ConfirmModal, ClientMatchModal } from './components/Modals';
+ import { downloadTablePDF } from './components/TablePDF';
+ import { api } from './api/client';
+ import { shortDate } from './utils/format';
+ import { friendlyError } from './utils/errors';
++import { resolveClientMatch } from './utils/clientMatch';
+ import {
+   Icon,
+   ModuleHeader,
+@@ -79,7 +80,7 @@ const mapJob = job => ({
+   paymentStatus: job.invoice?.status || (Number(job.totals?.balance) > 0 ? 'not_paid' : job.totals ? 'paid' : 'not_paid'),
+ });
+ 
+-function jobPayload(form, fallback = {}) {
++function jobPayload(form, fallback = {}, clientId = null) {
+   const lineItems = (form.items || []).map((item, index) => ({
+     position: index + 1,
+     description: item.desc || item.description || form.title || 'Print service',
+@@ -96,6 +97,11 @@ function jobPayload(form, fallback = {}) {
+ 
+   return {
+     client_name: form.client || fallback.client || 'Walk-in Client',
++    // Item 6: real Client link, resolved (exact match / confirmed
++    // suggestion / newly created) by handleSave below before this
++    // function is called. null just means "no client typed" (falls back
++    // to plain 'Walk-in Client' text above, same as before this item).
++    client_id: clientId ?? fallback.client_id ?? null,
+     title: form.title || fallback.title || 'New print job',
+     priority: form.priority || fallback.priority || 'medium',
+     due_date: form.due || fallback.due_date || null,
+@@ -242,6 +248,10 @@ export default function Jobs() {
+   // Cancel Job now goes through an in-app ConfirmModal instead of the
+   // browser's native window.confirm() (see build-decisions follow-up).
+   const [cancelTarget, setCancelTarget] = useState(null);
++  // Item 6: holds { form, match } while a "Did you mean X?" prompt is
++  // shown mid-save - null the rest of the time. See handleSave/
++  // resolveAndSaveJob below.
++  const [clientMatch, setClientMatch] = useState(null);
+   const [jobs, setJobs] = useState([]);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState(null);
+@@ -284,13 +294,18 @@ export default function Jobs() {
+     { label: 'Avg. Turnaround', value: '4.2h', sub: 'Last 7 days', icon: D.jobs, color: 'secondary' },
+   ];
+ 
+-  const handleSave = async form => {
++  // Item 6: does the actual create/update call once a client_id has been
++  // decided (or is null, for "Walk-in Client"/unmatched-skip cases).
++  // Split out from handleSave so ClientMatchModal's two buttons can call
++  // straight into it without re-running the matching step.
++  const commitJobSave = async (form, clientId) => {
+     try {
+       const saved = editRecord?.backendId
+-        ? await api.updateJob(editRecord.backendId, jobPayload(form, editRecord))
+-        : await api.createJob(jobPayload(form));
++        ? await api.updateJob(editRecord.backendId, jobPayload(form, editRecord, clientId))
++        : await api.createJob(jobPayload(form, {}, clientId));
+       setShowEntry(false);
+       setEditRecord(null);
++      setClientMatch(null);
+       setPreview(mapJob(saved));
+       notify(editRecord ? 'Job updated' : 'Job created');
+       loadJobs();
+@@ -299,6 +314,39 @@ export default function Jobs() {
+     }
+   };
+ 
++  const handleSave = async form => {
++    const typedName = (form.client || '').trim();
++    // No client typed: same as before this item, falls back to "Walk-in
++    // Client" text with no linked Client record.
++    if (!typedName) {
++      commitJobSave(form, null);
++      return;
++    }
++    try {
++      const { items: clients } = await api.clients('?per_page=500');
++      const result = resolveClientMatch(typedName, clients || []);
++      if (result.status === 'exact') {
++        commitJobSave(form, result.client.id);
++        return;
++      }
++      if (result.status === 'suggest') {
++        // Pause here - ClientMatchModal's buttons resume the save.
++        setClientMatch({ form, match: result.client });
++        return;
++      }
++      // No close-enough match: create the client fresh, then save with it.
++      const created = await api.createClient({ name: typedName });
++      commitJobSave(form, created.id);
++    } catch (matchError) {
++      // Non-fatal by design: client matching is a convenience layer over
++      // the plain client_name text field that already worked before this
++      // item. If lookup/create fails for any reason, still save the job
++      // with just the typed name, same as pre-item-6 behavior, rather
++      // than blocking the save entirely.
++      commitJobSave(form, null);
++    }
++  };
++
+   const handlePayment = async form => {
+     if (!paymentRecord?.backendId) return;
+     const payload = {
+@@ -524,6 +572,22 @@ export default function Jobs() {
+         confirmLabel="Cancel Job"
+         danger
+       />
++      <ClientMatchModal
++        isOpen={Boolean(clientMatch)}
++        typedName={clientMatch?.form?.client}
++        suggestedClient={clientMatch?.match}
++        onClose={() => setClientMatch(null)}
++        onUseExisting={() => clientMatch && commitJobSave(clientMatch.form, clientMatch.match.id)}
++        onCreateNew={async () => {
++          if (!clientMatch) return;
++          try {
++            const created = await api.createClient({ name: clientMatch.form.client.trim() });
++            commitJobSave(clientMatch.form, created.id);
++          } catch (createError) {
++            notify(friendlyError(createError, 'Could not create client'), 'error');
++          }
++        }}
++      />
+       <ModuleToast toast={toast} />
+     </main>
+   );
+diff --git a/print-dashboard/src/Proposals.jsx b/print-dashboard/src/Proposals.jsx
+index c658940..5bc472b 100644
+--- a/print-dashboard/src/Proposals.jsx
++++ b/print-dashboard/src/Proposals.jsx
+@@ -4,9 +4,10 @@ import React, { useEffect, useState } from 'react';
+ import './styles.css';
+ import { api } from './api/client';
+ import { PrintPreviewModal } from './components/PrintLayouts';
+-import { NewProposalModal } from './components/Modals';
++import { NewProposalModal, ClientMatchModal } from './components/Modals';
+ import { Icon, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
+ import { downloadProposalPDF } from './components/InvoicePDF';
++import { resolveClientMatch } from './utils/clientMatch';
+ 
+ const D = {
+   ...STANDARD_ICONS,
+@@ -80,6 +81,9 @@ export default function Proposals() {
+   const [proposals, setProposals] = useState([]);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState(null);
++  // Item 6: mirrors Jobs.jsx's clientMatch state - holds { form, match }
++  // while a "Did you mean X?" prompt is shown mid-save, null otherwise.
++  const [clientMatch, setClientMatch] = useState(null);
+   const { toast, notify } = useModuleToast();
+ 
+   const loadProposals = () => {
+@@ -109,38 +113,46 @@ export default function Proposals() {
+     { label: 'Avg. Value', value: `MK ${Math.round(totalValue / Math.max(proposals.length, 1)).toLocaleString()}`, sub: 'Per proposal', icon: D.proposals, color: 'secondary' },
+   ];
+ 
+-  const handleSave = form => {
+-    const payload = {
+-      client_name: form.client || 'Walk-in Client',
+-      title: form.title || 'New proposal draft',
+-      line_items: (form.items || []).map((item, index) => ({
+-        position: index + 1,
+-        description: item.desc || item.description || 'Print service',
+-        quantity: Number(item.qty ?? item.quantity ?? 1) || 1,
+-        unit_price: Number(item.rate ?? item.unit_price ?? item.amount ?? 0) || 0,
+-        unit: item.unit || 'item',
+-        // Build decision #5: each line carries its own machine, set
+-        // by Modals.jsx's handleServiceSelect from the picked
+-        // service's category (matched against ProductionMachine.
+-        // category) -- carried onto the converted Job's invoice by
+-        // accept_proposal() in routes/proposals.py.
+-        machine_id: item.machineId || item.machine_id || null,
+-      })),
+-      valid_until: form.validUntil || null,
+-      contact: form.contact,
+-      notes: form.notes,
+-      status: editRecord?.status || 'draft',
+-      discount_amount: Number(form.discount || 0),
+-      // Internal-only fields (Job/Proposal parity) -- accept_proposal()
+-      // carries all of these onto the Job it creates.
+-      priority: form.priority,
+-      assigned_staff_id: form.assignedStaffId || null,
+-      // Build decision #5: "Proposals currently have no machine field
+-      // at all, so this is also adding that concept there for the
+-      // first time." Job-level summary field, derived from whichever
+-      // service line most recently set form.machineId.
+-      machine_id: form.machineId || null,
+-    };
++  // Item 6: pulled out of handleSave so it can be called with a resolved
++  // client_id, same split as Jobs.jsx's jobPayload/commitJobSave.
++  const buildProposalPayload = (form, clientId) => ({
++    client_name: form.client || 'Walk-in Client',
++    // Item 6: real Client link, resolved by handleSave below before this
++    // is called. null means no client typed / lookup skipped, same as
++    // plain-text-only behavior before this item.
++    client_id: clientId,
++    title: form.title || 'New proposal draft',
++    line_items: (form.items || []).map((item, index) => ({
++      position: index + 1,
++      description: item.desc || item.description || 'Print service',
++      quantity: Number(item.qty ?? item.quantity ?? 1) || 1,
++      unit_price: Number(item.rate ?? item.unit_price ?? item.amount ?? 0) || 0,
++      unit: item.unit || 'item',
++      // Build decision #5: each line carries its own machine, set
++      // by Modals.jsx's handleServiceSelect from the picked
++      // service's category (matched against ProductionMachine.
++      // category) -- carried onto the converted Job's invoice by
++      // accept_proposal() in routes/proposals.py.
++      machine_id: item.machineId || item.machine_id || null,
++    })),
++    valid_until: form.validUntil || null,
++    contact: form.contact,
++    notes: form.notes,
++    status: editRecord?.status || 'draft',
++    discount_amount: Number(form.discount || 0),
++    // Internal-only fields (Job/Proposal parity) -- accept_proposal()
++    // carries all of these onto the Job it creates.
++    priority: form.priority,
++    assigned_staff_id: form.assignedStaffId || null,
++    // Build decision #5: "Proposals currently have no machine field
++    // at all, so this is also adding that concept there for the
++    // first time." Job-level summary field, derived from whichever
++    // service line most recently set form.machineId.
++    machine_id: form.machineId || null,
++  });
++
++  const commitProposalSave = (form, clientId) => {
++    const payload = buildProposalPayload(form, clientId);
+     const request = editRecord?.id
+       ? api.updateProposal(editRecord.id, payload)
+       : api.createProposal(payload);
+@@ -148,6 +160,7 @@ export default function Proposals() {
+       .then(saved => {
+         setShowEntry(false);
+         setEditRecord(null);
++        setClientMatch(null);
+         setPreview(saved);
+         notify(editRecord ? 'Proposal updated' : 'Proposal draft added');
+         loadProposals();
+@@ -155,6 +168,32 @@ export default function Proposals() {
+       .catch(() => notify(editRecord ? 'Could not update proposal.' : 'Could not save proposal. Check the backend connection.'));
+   };
+ 
++  const handleSave = async form => {
++    const typedName = (form.client || '').trim();
++    if (!typedName) {
++      commitProposalSave(form, null);
++      return;
++    }
++    try {
++      const { items: clients } = await api.clients('?per_page=500');
++      const result = resolveClientMatch(typedName, clients || []);
++      if (result.status === 'exact') {
++        commitProposalSave(form, result.client.id);
++        return;
++      }
++      if (result.status === 'suggest') {
++        setClientMatch({ form, match: result.client });
++        return;
++      }
++      const created = await api.createClient({ name: typedName });
++      commitProposalSave(form, created.id);
++    } catch (matchError) {
++      // Non-fatal, same reasoning as Jobs.jsx: client matching is a
++      // convenience layer, not a requirement for saving the proposal.
++      commitProposalSave(form, null);
++    }
++  };
++
+   const handleAccept = prop => {
+     api.acceptProposal(prop.id)
+       .then(() => {
+@@ -197,6 +236,22 @@ export default function Proposals() {
+         onSave={handleSave}
+       />
+       <PrintPreviewModal type="proposal" title={preview ? `Proposal Preview: ${preview.proposal_ref}` : ''} data={preview} onClose={() => setPreview(null)} />
++      <ClientMatchModal
++        isOpen={Boolean(clientMatch)}
++        typedName={clientMatch?.form?.client}
++        suggestedClient={clientMatch?.match}
++        onClose={() => setClientMatch(null)}
++        onUseExisting={() => clientMatch && commitProposalSave(clientMatch.form, clientMatch.match.id)}
++        onCreateNew={async () => {
++          if (!clientMatch) return;
++          try {
++            const created = await api.createClient({ name: clientMatch.form.client.trim() });
++            commitProposalSave(clientMatch.form, created.id);
++          } catch (createError) {
++            notify('Could not create client.');
++          }
++        }}
++      />
+       <ModuleToast toast={toast} />
+     </main>
+   );
+diff --git a/print-dashboard/src/components/Modals.jsx b/print-dashboard/src/components/Modals.jsx
+index a9452cb..db68542 100644
+--- a/print-dashboard/src/components/Modals.jsx
++++ b/print-dashboard/src/components/Modals.jsx
+@@ -1375,6 +1375,27 @@ export function ConfirmModal({ isOpen, onClose, onConfirm, title = 'Are you sure
+   );
+ }
+ 
++/* ═══════════════════════════════════════ MODAL: Client Match ("Did you mean X?") ═══════════════════════════════════════
++   Item 6 (build decisions): when a typed client name is close to, but not
++   an exact match for, an existing client (see utils/clientMatch.js), this
++   prompt asks before silently creating a duplicate. Two real choices, not
++   a plain confirm - "Yes, use it" links the existing Client; "No, it's a
++   different client" proceeds to create a new one with the name as typed.
++═══════════════════════════════════════ */
++export function ClientMatchModal({ isOpen, onClose, onUseExisting, onCreateNew, typedName, suggestedClient }) {
++  return (
++    <ModalWrapper isOpen={isOpen} onClose={onClose} title="Did you mean an existing client?" footer={<>
++      <button onClick={onCreateNew} style={cancelButton}>No, it&apos;s a different client</button>
++      <button onClick={onUseExisting} style={createButton}>Yes, use {suggestedClient?.name}</button>
++    </>}>
++      <div style={{ padding: '20px', fontSize: '12px', color: 'var(--text-body)', lineHeight: 1.5 }}>
++        You typed <strong>&ldquo;{typedName}&rdquo;</strong> — this looks close to an existing client,
++        {' '}<strong>{suggestedClient?.name}</strong>. Use the existing client, or create a new, separate one?
++      </div>
++    </ModalWrapper>
++  );
++}
++
+ /* ═══════════════════════════════════════ MODAL: Mark Paid (date entry) ═══════════════════════════════════════
+    Replaces Expenses.jsx's window.prompt('Date paid (YYYY-MM-DD):', ...) -
+    a raw browser dialog (shows the page URL/host, native OS chrome), same

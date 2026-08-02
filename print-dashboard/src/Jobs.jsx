@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { PrintPreviewModal } from './components/PrintLayouts';
-import { NewJobModal, RecordPaymentModal, JobProgressModal, ConfirmModal } from './components/Modals';
+import { NewJobModal, RecordPaymentModal, JobProgressModal, ConfirmModal, ClientMatchModal } from './components/Modals';
 import { downloadTablePDF } from './components/TablePDF';
 import { api } from './api/client';
 import { shortDate } from './utils/format';
 import { friendlyError } from './utils/errors';
+import { resolveClientMatch } from './utils/clientMatch';
 import {
   Icon,
   ModuleHeader,
@@ -79,7 +80,7 @@ const mapJob = job => ({
   paymentStatus: job.invoice?.status || (Number(job.totals?.balance) > 0 ? 'not_paid' : job.totals ? 'paid' : 'not_paid'),
 });
 
-function jobPayload(form, fallback = {}) {
+function jobPayload(form, fallback = {}, clientId = null) {
   const lineItems = (form.items || []).map((item, index) => ({
     position: index + 1,
     description: item.desc || item.description || form.title || 'Print service',
@@ -96,6 +97,11 @@ function jobPayload(form, fallback = {}) {
 
   return {
     client_name: form.client || fallback.client || 'Walk-in Client',
+    // Item 6: real Client link, resolved (exact match / confirmed
+    // suggestion / newly created) by handleSave below before this
+    // function is called. null just means "no client typed" (falls back
+    // to plain 'Walk-in Client' text above, same as before this item).
+    client_id: clientId ?? fallback.client_id ?? null,
     title: form.title || fallback.title || 'New print job',
     priority: form.priority || fallback.priority || 'medium',
     due_date: form.due || fallback.due_date || null,
@@ -242,6 +248,10 @@ export default function Jobs() {
   // Cancel Job now goes through an in-app ConfirmModal instead of the
   // browser's native window.confirm() (see build-decisions follow-up).
   const [cancelTarget, setCancelTarget] = useState(null);
+  // Item 6: holds { form, match } while a "Did you mean X?" prompt is
+  // shown mid-save - null the rest of the time. See handleSave/
+  // resolveAndSaveJob below.
+  const [clientMatch, setClientMatch] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -284,18 +294,56 @@ export default function Jobs() {
     { label: 'Avg. Turnaround', value: '4.2h', sub: 'Last 7 days', icon: D.jobs, color: 'secondary' },
   ];
 
-  const handleSave = async form => {
+  // Item 6: does the actual create/update call once a client_id has been
+  // decided (or is null, for "Walk-in Client"/unmatched-skip cases).
+  // Split out from handleSave so ClientMatchModal's two buttons can call
+  // straight into it without re-running the matching step.
+  const commitJobSave = async (form, clientId) => {
     try {
       const saved = editRecord?.backendId
-        ? await api.updateJob(editRecord.backendId, jobPayload(form, editRecord))
-        : await api.createJob(jobPayload(form));
+        ? await api.updateJob(editRecord.backendId, jobPayload(form, editRecord, clientId))
+        : await api.createJob(jobPayload(form, {}, clientId));
       setShowEntry(false);
       setEditRecord(null);
+      setClientMatch(null);
       setPreview(mapJob(saved));
       notify(editRecord ? 'Job updated' : 'Job created');
       loadJobs();
     } catch (saveError) {
       notify(friendlyError(saveError, 'Could not save job'), 'error');
+    }
+  };
+
+  const handleSave = async form => {
+    const typedName = (form.client || '').trim();
+    // No client typed: same as before this item, falls back to "Walk-in
+    // Client" text with no linked Client record.
+    if (!typedName) {
+      commitJobSave(form, null);
+      return;
+    }
+    try {
+      const { items: clients } = await api.clients('?per_page=500');
+      const result = resolveClientMatch(typedName, clients || []);
+      if (result.status === 'exact') {
+        commitJobSave(form, result.client.id);
+        return;
+      }
+      if (result.status === 'suggest') {
+        // Pause here - ClientMatchModal's buttons resume the save.
+        setClientMatch({ form, match: result.client });
+        return;
+      }
+      // No close-enough match: create the client fresh, then save with it.
+      const created = await api.createClient({ name: typedName });
+      commitJobSave(form, created.id);
+    } catch (matchError) {
+      // Non-fatal by design: client matching is a convenience layer over
+      // the plain client_name text field that already worked before this
+      // item. If lookup/create fails for any reason, still save the job
+      // with just the typed name, same as pre-item-6 behavior, rather
+      // than blocking the save entirely.
+      commitJobSave(form, null);
     }
   };
 
@@ -523,6 +571,22 @@ export default function Jobs() {
         message={cancelTarget ? `Cancel job ${cancelTarget.id}? This keeps it in history, marked as cancelled.` : ''}
         confirmLabel="Cancel Job"
         danger
+      />
+      <ClientMatchModal
+        isOpen={Boolean(clientMatch)}
+        typedName={clientMatch?.form?.client}
+        suggestedClient={clientMatch?.match}
+        onClose={() => setClientMatch(null)}
+        onUseExisting={() => clientMatch && commitJobSave(clientMatch.form, clientMatch.match.id)}
+        onCreateNew={async () => {
+          if (!clientMatch) return;
+          try {
+            const created = await api.createClient({ name: clientMatch.form.client.trim() });
+            commitJobSave(clientMatch.form, created.id);
+          } catch (createError) {
+            notify(friendlyError(createError, 'Could not create client'), 'error');
+          }
+        }}
       />
       <ModuleToast toast={toast} />
     </main>

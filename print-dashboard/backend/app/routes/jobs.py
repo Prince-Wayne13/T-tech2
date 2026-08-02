@@ -102,7 +102,7 @@ def update_job(job_id):
     except IncompatibleMachineError as error:
         return jsonify({"error": str(error)}), 400
 
-    for field in ["machine_id", "service_category", "required_capability_id", "client_name", "title", "status", "priority", "pages", "copies", "progress", "completed_count", "total_count", "assigned_staff_id", "notes"]:
+    for field in ["machine_id", "service_category", "required_capability_id", "client_id", "client_name", "title", "status", "priority", "pages", "copies", "progress", "completed_count", "total_count", "assigned_staff_id", "notes"]:
         if field in data:
             setattr(job, field, normalise_job_status(data[field]) if field == "status" else data[field])
     if "due_date" in data:
@@ -115,6 +115,7 @@ def update_job(job_id):
         if "currency" in data:
             job.invoice.currency = data.get("currency") or job.invoice.currency
         job.invoice.client_name = job.client_name
+        job.invoice.client_id = job.client_id
         job.invoice.title = job.title
         job.invoice.due_on = job.due_date
         job.invoice.notes = job.notes

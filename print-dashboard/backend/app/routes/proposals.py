@@ -62,7 +62,7 @@ def get_proposal(proposal_id):
 def update_proposal(proposal_id):
     proposal = Proposal.query.get_or_404(proposal_id)
     data = request.get_json() or {}
-    for field in ["client_name", "title", "status", "discount_amount", "currency", "contact", "priority", "assigned_staff_id", "machine_id", "required_capability_id", "prepared_by", "notes"]:
+    for field in ["client_id", "client_name", "title", "status", "discount_amount", "currency", "contact", "priority", "assigned_staff_id", "machine_id", "required_capability_id", "prepared_by", "notes"]:
         if field in data:
             setattr(proposal, field, data[field])
     if "valid_until" in data:

@@ -4,9 +4,10 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
 import { PrintPreviewModal } from './components/PrintLayouts';
-import { NewProposalModal } from './components/Modals';
+import { NewProposalModal, ClientMatchModal } from './components/Modals';
 import { Icon, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
 import { downloadProposalPDF } from './components/InvoicePDF';
+import { resolveClientMatch } from './utils/clientMatch';
 
 const D = {
   ...STANDARD_ICONS,
@@ -80,6 +81,9 @@ export default function Proposals() {
   const [proposals, setProposals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Item 6: mirrors Jobs.jsx's clientMatch state - holds { form, match }
+  // while a "Did you mean X?" prompt is shown mid-save, null otherwise.
+  const [clientMatch, setClientMatch] = useState(null);
   const { toast, notify } = useModuleToast();
 
   const loadProposals = () => {
@@ -109,38 +113,46 @@ export default function Proposals() {
     { label: 'Avg. Value', value: `MK ${Math.round(totalValue / Math.max(proposals.length, 1)).toLocaleString()}`, sub: 'Per proposal', icon: D.proposals, color: 'secondary' },
   ];
 
-  const handleSave = form => {
-    const payload = {
-      client_name: form.client || 'Walk-in Client',
-      title: form.title || 'New proposal draft',
-      line_items: (form.items || []).map((item, index) => ({
-        position: index + 1,
-        description: item.desc || item.description || 'Print service',
-        quantity: Number(item.qty ?? item.quantity ?? 1) || 1,
-        unit_price: Number(item.rate ?? item.unit_price ?? item.amount ?? 0) || 0,
-        unit: item.unit || 'item',
-        // Build decision #5: each line carries its own machine, set
-        // by Modals.jsx's handleServiceSelect from the picked
-        // service's category (matched against ProductionMachine.
-        // category) -- carried onto the converted Job's invoice by
-        // accept_proposal() in routes/proposals.py.
-        machine_id: item.machineId || item.machine_id || null,
-      })),
-      valid_until: form.validUntil || null,
-      contact: form.contact,
-      notes: form.notes,
-      status: editRecord?.status || 'draft',
-      discount_amount: Number(form.discount || 0),
-      // Internal-only fields (Job/Proposal parity) -- accept_proposal()
-      // carries all of these onto the Job it creates.
-      priority: form.priority,
-      assigned_staff_id: form.assignedStaffId || null,
-      // Build decision #5: "Proposals currently have no machine field
-      // at all, so this is also adding that concept there for the
-      // first time." Job-level summary field, derived from whichever
-      // service line most recently set form.machineId.
-      machine_id: form.machineId || null,
-    };
+  // Item 6: pulled out of handleSave so it can be called with a resolved
+  // client_id, same split as Jobs.jsx's jobPayload/commitJobSave.
+  const buildProposalPayload = (form, clientId) => ({
+    client_name: form.client || 'Walk-in Client',
+    // Item 6: real Client link, resolved by handleSave below before this
+    // is called. null means no client typed / lookup skipped, same as
+    // plain-text-only behavior before this item.
+    client_id: clientId,
+    title: form.title || 'New proposal draft',
+    line_items: (form.items || []).map((item, index) => ({
+      position: index + 1,
+      description: item.desc || item.description || 'Print service',
+      quantity: Number(item.qty ?? item.quantity ?? 1) || 1,
+      unit_price: Number(item.rate ?? item.unit_price ?? item.amount ?? 0) || 0,
+      unit: item.unit || 'item',
+      // Build decision #5: each line carries its own machine, set
+      // by Modals.jsx's handleServiceSelect from the picked
+      // service's category (matched against ProductionMachine.
+      // category) -- carried onto the converted Job's invoice by
+      // accept_proposal() in routes/proposals.py.
+      machine_id: item.machineId || item.machine_id || null,
+    })),
+    valid_until: form.validUntil || null,
+    contact: form.contact,
+    notes: form.notes,
+    status: editRecord?.status || 'draft',
+    discount_amount: Number(form.discount || 0),
+    // Internal-only fields (Job/Proposal parity) -- accept_proposal()
+    // carries all of these onto the Job it creates.
+    priority: form.priority,
+    assigned_staff_id: form.assignedStaffId || null,
+    // Build decision #5: "Proposals currently have no machine field
+    // at all, so this is also adding that concept there for the
+    // first time." Job-level summary field, derived from whichever
+    // service line most recently set form.machineId.
+    machine_id: form.machineId || null,
+  });
+
+  const commitProposalSave = (form, clientId) => {
+    const payload = buildProposalPayload(form, clientId);
     const request = editRecord?.id
       ? api.updateProposal(editRecord.id, payload)
       : api.createProposal(payload);
@@ -148,11 +160,38 @@ export default function Proposals() {
       .then(saved => {
         setShowEntry(false);
         setEditRecord(null);
+        setClientMatch(null);
         setPreview(saved);
         notify(editRecord ? 'Proposal updated' : 'Proposal draft added');
         loadProposals();
       })
       .catch(() => notify(editRecord ? 'Could not update proposal.' : 'Could not save proposal. Check the backend connection.'));
+  };
+
+  const handleSave = async form => {
+    const typedName = (form.client || '').trim();
+    if (!typedName) {
+      commitProposalSave(form, null);
+      return;
+    }
+    try {
+      const { items: clients } = await api.clients('?per_page=500');
+      const result = resolveClientMatch(typedName, clients || []);
+      if (result.status === 'exact') {
+        commitProposalSave(form, result.client.id);
+        return;
+      }
+      if (result.status === 'suggest') {
+        setClientMatch({ form, match: result.client });
+        return;
+      }
+      const created = await api.createClient({ name: typedName });
+      commitProposalSave(form, created.id);
+    } catch (matchError) {
+      // Non-fatal, same reasoning as Jobs.jsx: client matching is a
+      // convenience layer, not a requirement for saving the proposal.
+      commitProposalSave(form, null);
+    }
   };
 
   const handleAccept = prop => {
@@ -197,6 +236,22 @@ export default function Proposals() {
         onSave={handleSave}
       />
       <PrintPreviewModal type="proposal" title={preview ? `Proposal Preview: ${preview.proposal_ref}` : ''} data={preview} onClose={() => setPreview(null)} />
+      <ClientMatchModal
+        isOpen={Boolean(clientMatch)}
+        typedName={clientMatch?.form?.client}
+        suggestedClient={clientMatch?.match}
+        onClose={() => setClientMatch(null)}
+        onUseExisting={() => clientMatch && commitProposalSave(clientMatch.form, clientMatch.match.id)}
+        onCreateNew={async () => {
+          if (!clientMatch) return;
+          try {
+            const created = await api.createClient({ name: clientMatch.form.client.trim() });
+            commitProposalSave(clientMatch.form, created.id);
+          } catch (createError) {
+            notify('Could not create client.');
+          }
+        }}
+      />
       <ModuleToast toast={toast} />
     </main>
   );
