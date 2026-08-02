@@ -16,6 +16,7 @@ import Archive from './Archive';
 import ExportData from './ExportData';
 import Settings from './Settings';
 import { api } from './api/client';
+import { useBackupWatch } from './hooks/useBackupWatch';
 import { compactDate, money } from './utils/format';
 import { friendlyError } from './utils/errors';
 import PreviewModal from './components/PreviewModal';
@@ -307,7 +308,8 @@ function PulseChart({ financials }) {
 /* ═══════════════════════════════════════
    COMPONENT: TopBar — WITH HAMBURGER MENU
 ═══════════════════════════════════════ */
-function TopBar({ onMenuToggle, search, setSearch, onSearchOpen }) {
+function TopBar({ onMenuToggle, search, setSearch, onSearchOpen, hasNewBackup, newBackups, onMarkSeen, onGoToSettings }) {
+  const [bellOpen, setBellOpen] = useState(false);
   return (
     <header className="topbar">
       {/* Hamburger Menu Button (Mobile Only) */}
@@ -336,9 +338,47 @@ function TopBar({ onMenuToggle, search, setSearch, onSearchOpen }) {
       </div>
 
       <div className="topbar-right">
-        <div className="notif-btn">
-          <Icon d={D.bell} size={14} />
-          <span className="notif-dot" />
+        {/* Build decision #7 (piece C): a real bell instead of the old
+            static decoration -- only shows the dot when a backup has
+            genuinely landed on another device, not always-on. Opening
+            it marks everything currently queued as seen. */}
+        <div style={{ position: 'relative' }}>
+          <div className="notif-btn" onClick={() => setBellOpen(open => !open)} title="Backup notifications">
+            <Icon d={D.bell} size={14} />
+            {hasNewBackup && <span className="notif-dot" />}
+          </div>
+          {bellOpen && (
+            <div
+              style={{
+                position: 'absolute', top: '38px', right: 0, width: '260px',
+                background: 'var(--bg-card)', border: '1px solid var(--border-faint)',
+                borderRadius: 'var(--r-sm)', boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                zIndex: 50, padding: '10px', fontSize: '11px',
+              }}
+              onMouseLeave={() => setBellOpen(false)}
+            >
+              {newBackups.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', padding: '6px 4px' }}>No new backups from other devices.</div>
+              ) : (
+                <>
+                  <div style={{ fontWeight: 700, marginBottom: '6px', color: 'var(--text-head)' }}>New backups available</div>
+                  {newBackups.map(entry => (
+                    <div key={entry.device_id} style={{ padding: '6px 4px', borderTop: '1px solid var(--border-faint)' }}>
+                      <div style={{ fontWeight: 600 }}>{entry.device_id}</div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{new Date(entry.modified_at).toLocaleString()}</div>
+                    </div>
+                  ))}
+                  <button
+                    className="filter-btn"
+                    style={{ width: '100%', marginTop: '8px', background: '#3A506B', color: '#fff', border: 'none' }}
+                    onClick={() => { onMarkSeen(); setBellOpen(false); onGoToSettings(); }}
+                  >
+                    Go to Sync Settings
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
         <div className="topbar-avatar">W</div>
       </div>
@@ -663,6 +703,27 @@ export default function App() {
   const [searchResults, setSearchResults] = useState(null);
   const [dashboardStaff, setDashboardStaff] = useState([]);
 
+  // Build decision #7 (pieces C + D): backup notification bell + safe
+  // live refresh. See useBackupWatch's own comment for why this
+  // deliberately does NOT force-remount whatever page is currently on
+  // screen (would risk wiping an unsaved, half-typed form the instant
+  // a backup lands elsewhere). Instead: pageKey only changes when the
+  // person actually navigates to a NEW page while a not-yet-seen
+  // backup exists -- keying <Page /> by pageKey forces React to
+  // remount it (a fresh mount re-runs that page's own loadX() effect,
+  // so it picks up anything a merge/restore may have changed) at
+  // exactly the one moment that's genuinely safe: the person wasn't
+  // looking at that page's data a second ago, so there's nothing
+  // in-progress on it to lose.
+  const { hasNewBackup, newBackups, markSeen } = useBackupWatch();
+  const [pageKey, setPageKey] = useState(0);
+  const navigate = (page) => {
+    if (page !== active && hasNewBackup) {
+      setPageKey(k => k + 1);
+    }
+    setActive(page);
+  };
+
   useEffect(() => {
     // Only needed for the "Add Petty Cash" quick action's staff picker
     // (staff_expense entries can optionally attribute to a staff member).
@@ -756,14 +817,25 @@ export default function App() {
 
   return (
     <div className="app">
-      <TopBar onMenuToggle={() => setSidebarOpen(!sidebarOpen)} search={globalSearch} setSearch={setGlobalSearch} onSearchOpen={openSearch} />
+      <TopBar
+        onMenuToggle={() => setSidebarOpen(!sidebarOpen)}
+        search={globalSearch}
+        setSearch={setGlobalSearch}
+        onSearchOpen={openSearch}
+        hasNewBackup={hasNewBackup}
+        newBackups={newBackups}
+        onMarkSeen={markSeen}
+        onGoToSettings={() => navigate('Settings')}
+      />
       <Sidebar 
         active={active} 
-        setActive={setActive} 
+        setActive={navigate} 
         isOpen={sidebarOpen} 
         onClose={() => setSidebarOpen(false)} 
       />
-      {renderPage()}
+      <React.Fragment key={pageKey}>
+        {renderPage()}
+      </React.Fragment>
       <NewJobModal isOpen={actionModal === 'New Job'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('New Job', values)} />
       <NewProposalModal isOpen={actionModal === 'New Proposal'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('New Proposal', values)} />
       <AddExpenseModal isOpen={actionModal === 'Add Expense'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('Add Expense', values)} />
