@@ -5,6 +5,7 @@ import React, { useEffect, useState, useLayoutEffect, useRef } from 'react';
 import { calculateLineTotal, calculateTotal, calculateDiscountedTotal } from '../utils/calculateTotal';
 import { api } from '../api/client';
 import { friendlyError } from '../utils/errors';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 /* ═══════════════════════════════════════
    ICON SYSTEM
@@ -73,6 +74,9 @@ const labelStyle = { display: 'block', fontSize: '10px', fontWeight: 600, color:
 const pillBtnStyle = active => ({ padding: '5px 10px', borderRadius: '50px', border: 'none', fontSize: '10px', fontWeight: active ? 600 : 500, background: active ? 'var(--primary)' : 'var(--bg-canvas)', color: active ? '#fff' : 'var(--text-body)', cursor: 'pointer', transition: 'all var(--ease)' });
 const cancelButton = { padding: '6px 14px', borderRadius: '6px', border: '1px solid var(--border-faint)', background: 'transparent', color: 'var(--text-muted)', fontSize: '10px', fontWeight: 600, cursor: 'pointer' };
 const createButton = { padding: '6px 14px', borderRadius: '6px', border: 'none', background: 'var(--primary)', color: '#fff', fontSize: '10px', fontWeight: 600, cursor: 'pointer' };
+// Build decision #8: same base style, dimmed and non-interactive while a
+// save/create/apply request from this button is already in flight.
+const createButtonBusy = { ...createButton, opacity: 0.6, cursor: 'not-allowed' };
 
 /* ═══════════════════════════════════════
    MOBILE DETECTION HOOK
@@ -458,6 +462,7 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
   const [qty, setQty] = useState('1');
   const [rate, setRate] = useState('');
   const [showPreview, setShowPreview] = useState(false);
+  const { submitting, guard } = useSubmitGuard();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -485,7 +490,7 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title={initialData ? 'Edit Invoice' : 'New Invoice'} wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>{initialData ? 'Update' : 'Create'}</button>
+      <button onClick={() => guard(() => onSave(form))} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Saving...' : (initialData ? 'Update' : 'Create')}</button>
     </>}>
       <SplitPane showGrid showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={<>
@@ -545,6 +550,7 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
   const [clients, setClients] = useState([]);
   const [staffList, setStaffList] = useState([]);
   const [machineList, setMachineList] = useState([]);
+  const { submitting, guard } = useSubmitGuard();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -668,15 +674,15 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
   const subtotal = calculateTotal(form.items);
   const total = Math.max(subtotal - Number(form.discount || 0), 0);
 
-  const handleSave = () => {
+  const handleSave = () => guard(async () => {
     persistContactIfChanged();
-    onSave(form);
-  };
+    await onSave(form);
+  });
 
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="New Proposal" wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={handleSave} style={createButton}>Create</button>
+      <button onClick={handleSave} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Saving...' : 'Create'}</button>
     </>}>
       <SplitPane showGrid showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={<>
@@ -794,6 +800,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
   const [clients, setClients] = useState([]);
   const [staffList, setStaffList] = useState([]);
   const [machineList, setMachineList] = useState([]);
+  const { submitting, guard } = useSubmitGuard();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -896,7 +903,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title={initialData ? 'Edit Job' : 'New Job'} wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>{initialData ? 'Update' : 'Create'}</button>
+      <button onClick={() => guard(() => onSave(form))} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Saving...' : (initialData ? 'Update' : 'Create')}</button>
     </>}>
       <SplitPane showGrid showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={<>
@@ -1053,6 +1060,7 @@ export function AddExpenseModal({ isOpen, onClose, onSave, initialData = null })
   const [showPreview, setShowPreview] = useState(false);
   const [categories, setCategories] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const { submitting, guard } = useSubmitGuard();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -1078,7 +1086,7 @@ export function AddExpenseModal({ isOpen, onClose, onSave, initialData = null })
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="Add Expense" wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>Create</button>
+      <button onClick={() => guard(() => onSave(form))} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Saving...' : 'Create'}</button>
     </>}>
       <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={
@@ -1115,11 +1123,12 @@ export function AddExpenseModal({ isOpen, onClose, onSave, initialData = null })
 export function NewAdvanceModal({ isOpen, onClose, onSave }) {
   const [form, setForm] = useState({ recipient: '', amount: '', issued_on: new Date().toISOString().split('T')[0], status: 'open', notes: '' });
   const [showPreview, setShowPreview] = useState(false);
+  const { submitting, guard } = useSubmitGuard();
   useEffect(() => { if (!isOpen) return; setForm({ recipient: '', amount: '', issued_on: new Date().toISOString().split('T')[0], status: 'open', notes: '' }); setShowPreview(false); }, [isOpen]);
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="New Advance" wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>Create</button>
+      <button onClick={() => guard(() => onSave(form))} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Saving...' : 'Create'}</button>
     </>}>
       <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={
@@ -1141,6 +1150,7 @@ export function NewAdvanceModal({ isOpen, onClose, onSave }) {
 export function NewVendorModal({ isOpen, onClose, onSave, initialData = null }) {
   const [form, setForm] = useState({ name: '', category: 'Paper & Supplies', contact: '', phone: '', email: '', location: '', notes: '' });
   const [showPreview, setShowPreview] = useState(false);
+  const { submitting, guard } = useSubmitGuard();
   useEffect(() => {
     if (!isOpen) return;
     setForm({ name: initialData?.name || '', category: initialData?.category || 'Paper & Supplies', contact: initialData?.contact || '', phone: initialData?.phone || '', email: initialData?.email || '', location: initialData?.location || '', notes: initialData?.notes || '' });
@@ -1149,7 +1159,7 @@ export function NewVendorModal({ isOpen, onClose, onSave, initialData = null }) 
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title={initialData ? 'Edit Vendor' : 'New Vendor'} wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>{initialData ? 'Update' : 'Create'}</button>
+      <button onClick={() => guard(() => onSave(form))} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Saving...' : (initialData ? 'Update' : 'Create')}</button>
     </>}>
       <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={
@@ -1170,6 +1180,7 @@ export function NewVendorModal({ isOpen, onClose, onSave, initialData = null }) 
 export function NewMaterialModal({ isOpen, onClose, onSave, initialData = null }) {
   const [form, setForm] = useState({ name: '', category: '', unit: 'unit', unit_cost: '', reorder_point: '', notes: '' });
   const [showPreview, setShowPreview] = useState(false);
+  const { submitting, guard } = useSubmitGuard();
   useEffect(() => {
     if (!isOpen) return;
     setForm({
@@ -1185,7 +1196,7 @@ export function NewMaterialModal({ isOpen, onClose, onSave, initialData = null }
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title={initialData ? 'Edit Material' : 'New Material'} wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>{initialData ? 'Update' : 'Create'}</button>
+      <button onClick={() => guard(() => onSave(form))} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Saving...' : (initialData ? 'Update' : 'Create')}</button>
     </>}>
       <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={
@@ -1237,6 +1248,7 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
     notes: '',
   });
   const [showPreview, setShowPreview] = useState(false);
+  const { submitting, guard } = useSubmitGuard();
   useEffect(() => {
     if (!isOpen) return;
     if (editRecord) {
@@ -1300,7 +1312,7 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title={material ? `${editRecord ? 'Edit' : 'Log'} Transaction: ${material.name}` : `${editRecord ? 'Edit' : 'Log'} Transaction`} wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>{editRecord ? 'Save Changes' : 'Save'}</button>
+      <button onClick={() => guard(() => onSave(form))} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Saving...' : (editRecord ? 'Save Changes' : 'Save')}</button>
     </>}>
       <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={
@@ -1365,10 +1377,12 @@ export function RecordMaterialTransactionModal({ isOpen, onClose, onSave, materi
    app (Jobs Cancel, Petty Cash delete, Materials transaction delete).
 ═══════════════════════════════════════ */
 export function ConfirmModal({ isOpen, onClose, onConfirm, title = 'Are you sure?', message, confirmLabel = 'Confirm', danger = false }) {
+  const { submitting, guard } = useSubmitGuard();
+  const baseStyle = danger ? { ...createButton, background: 'var(--red, #c0392b)' } : createButton;
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title={title} footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={onConfirm} style={danger ? { ...createButton, background: 'var(--red, #c0392b)' } : createButton}>{confirmLabel}</button>
+      <button onClick={() => guard(() => onConfirm())} disabled={submitting} style={submitting ? { ...baseStyle, opacity: 0.6, cursor: 'not-allowed' } : baseStyle}>{submitting ? 'Working...' : confirmLabel}</button>
     </>}>
       <div style={{ padding: '20px', fontSize: '12px', color: 'var(--text-body)', lineHeight: 1.5 }}>{message}</div>
     </ModalWrapper>
@@ -1383,10 +1397,11 @@ export function ConfirmModal({ isOpen, onClose, onConfirm, title = 'Are you sure
    different client" proceeds to create a new one with the name as typed.
 ═══════════════════════════════════════ */
 export function ClientMatchModal({ isOpen, onClose, onUseExisting, onCreateNew, typedName, suggestedClient }) {
+  const { submitting, guard } = useSubmitGuard();
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="Did you mean an existing client?" footer={<>
-      <button onClick={onCreateNew} style={cancelButton}>No, it&apos;s a different client</button>
-      <button onClick={onUseExisting} style={createButton}>Yes, use {suggestedClient?.name}</button>
+      <button onClick={() => guard(() => onCreateNew())} disabled={submitting} style={submitting ? { ...cancelButton, opacity: 0.6, cursor: 'not-allowed' } : cancelButton}>No, it&apos;s a different client</button>
+      <button onClick={() => guard(() => onUseExisting())} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Working...' : `Yes, use ${suggestedClient?.name}`}</button>
     </>}>
       <div style={{ padding: '20px', fontSize: '12px', color: 'var(--text-body)', lineHeight: 1.5 }}>
         You typed <strong>&ldquo;{typedName}&rdquo;</strong> — this looks close to an existing client,
@@ -1437,6 +1452,7 @@ export function MarkPaidModal({ isOpen, onClose, onConfirm, defaultDate }) {
 export function RecordPaymentModal({ isOpen, onClose, onSave, initialData = null, editingPayment = null }) {
   const [form, setForm] = useState({ job: '', amount: '', date: new Date().toISOString().split('T')[0], method: 'bank', ref: '', notes: '' });
   const [showPreview, setShowPreview] = useState(false);
+  const { submitting, guard } = useSubmitGuard();
   useEffect(() => {
     if (!isOpen) return;
     setForm({
@@ -1452,7 +1468,7 @@ export function RecordPaymentModal({ isOpen, onClose, onSave, initialData = null
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title={editingPayment ? 'Edit Payment' : 'Record Payment'} wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>{editingPayment ? 'Save Changes' : 'Create'}</button>
+      <button onClick={() => guard(() => onSave(form))} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Saving...' : (editingPayment ? 'Save Changes' : 'Create')}</button>
     </>}>
       <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={
@@ -1482,6 +1498,7 @@ export function RecordPaymentModal({ isOpen, onClose, onSave, initialData = null
 ═══════════════════════════════════════ */
 export function JobProgressModal({ isOpen, onClose, onSave, job }) {
   const [completed, setCompleted] = useState(0);
+  const { submitting, guard } = useSubmitGuard();
 
   useEffect(() => {
     if (!isOpen || !job) return;
@@ -1507,7 +1524,7 @@ export function JobProgressModal({ isOpen, onClose, onSave, job }) {
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="Update Progress" footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(job, Number(completed) || 0, total)} style={createButton}>Save</button>
+      <button onClick={() => guard(() => onSave(job, Number(completed) || 0, total))} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Saving...' : 'Save'}</button>
     </>}>
       <div style={{ padding: '20px', display: 'grid', gap: '14px' }}>
         <div style={{ padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px', border: '1px solid var(--border-faint)' }}>
@@ -1554,11 +1571,12 @@ export function JobProgressModal({ isOpen, onClose, onSave, job }) {
 export function QuickEntryModal({ isOpen, onClose, onSave }) {
   const [form, setForm] = useState({ note: '', amount: '', tags: [] });
   const [showPreview, setShowPreview] = useState(false);
+  const { submitting, guard } = useSubmitGuard();
   const toggleTag = t => setForm(p => ({ ...p, tags: p.tags.includes(t) ? p.tags.filter(x => x !== t) : [...p.tags, t] }));
   return (
     <ModalWrapper isOpen={isOpen} onClose={onClose} title="Quick Entry" wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
-      <button onClick={() => onSave(form)} style={createButton}>Create</button>
+      <button onClick={() => guard(() => onSave(form))} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Saving...' : 'Create'}</button>
     </>}>
       <SplitPane showGrid={false} showPreview={showPreview} setShowPreview={setShowPreview}
         formChildren={

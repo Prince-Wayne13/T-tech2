@@ -11,7 +11,7 @@ from flask import Blueprint, jsonify, request
 
 from ..extensions import db
 from ..models import AuditLog, Client
-from .common import apply_search, list_response
+from .common import apply_search, list_response, require_fields, MissingFieldError
 
 bp = Blueprint("clients", __name__)
 
@@ -28,6 +28,10 @@ def create_client():
     from ..services.ref_generator import next_client_ref
 
     data = request.get_json() or {}
+    try:
+        require_fields(data, [("name", "Name")])
+    except MissingFieldError as error:
+        return jsonify({"error": str(error)}), 400
     client = Client(
         client_ref=next_client_ref(),
         name=data["name"],
@@ -52,6 +56,13 @@ def update_client(client_id):
     # row instead of a new table.
     client = Client.query.get_or_404(client_id)
     data = request.get_json() or {}
+    try:
+        require_fields(
+            {k: v for k, v in data.items() if k == "name"},
+            [("name", "Name")] if "name" in data else [],
+        )
+    except MissingFieldError as error:
+        return jsonify({"error": str(error)}), 400
     for field in ["name", "phone", "email", "address", "notes"]:
         if field in data:
             setattr(client, field, data[field])

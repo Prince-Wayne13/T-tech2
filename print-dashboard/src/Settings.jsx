@@ -260,6 +260,10 @@ export default function Settings() {
   const [newItem, setNewItem] = useState({ name: '', value: '', category: 'Digital Print', unit: 'unit', cost: '' });
 
   const [loadError, setLoadError] = useState(null);
+  // Build decision #8: guard the pricing item "Save Item" button the same
+  // way the rest of the app's create/save actions are guarded.
+  const [savingItem, setSavingItem] = useState(false);
+  const [addItemError, setAddItemError] = useState(null);
 
   // Backup / Reports-to-Drive status
   const [backupStatus, setBackupStatus] = useState(null);
@@ -406,11 +410,15 @@ export default function Settings() {
 
   const openAddModal = () => {
     setNewItem({ name: '', value: '', category: 'Digital Print', unit: 'unit', cost: '' });
+    setAddItemError(null);
     setShowAddModal(true);
   };
 
   const confirmAdd = async () => {
-    if (newItem.name && newItem.value) {
+    if (!(newItem.name && newItem.value) || savingItem) return;
+    setSavingItem(true);
+    setAddItemError(null);
+    try {
       await api.createPricingItem({
         code: `${newItem.category.slice(0, 3).toUpperCase()}-${Date.now()}`,
         name: newItem.name,
@@ -421,6 +429,10 @@ export default function Settings() {
       });
       await loadPricing();
       setShowAddModal(false);
+    } catch (error) {
+      setAddItemError(friendlyError(error, 'Could not save this item.'));
+    } finally {
+      setSavingItem(false);
     }
   };
 
@@ -980,7 +992,10 @@ export default function Settings() {
               <label style={{ display: 'block', fontSize: '10px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '4px' }}>Fixed Cost Estimate (MK)</label>
               <input type="text" style={inputStyle} placeholder="0" value={newItem.cost} onChange={e => setNewItem({...newItem, cost: e.target.value})} />
             </div>
-            
+            {addItemError && (
+              <div style={{ marginBottom: '12px', fontSize: '10px', color: 'var(--red, #c0392b)' }}>{addItemError}</div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button 
                 onClick={() => setShowAddModal(false)}
@@ -990,9 +1005,10 @@ export default function Settings() {
               </button>
               <button 
                 onClick={confirmAdd}
-                style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--primary)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}
+                disabled={savingItem}
+                style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: savingItem ? 'var(--text-muted)' : 'var(--primary)', color: '#fff', fontSize: '10px', fontWeight: '600', cursor: savingItem ? 'not-allowed' : 'pointer' }}
               >
-                Save Item
+                {savingItem ? 'Saving...' : 'Save Item'}
               </button>
             </div>
           </div>

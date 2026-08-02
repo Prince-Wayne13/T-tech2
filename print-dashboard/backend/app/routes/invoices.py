@@ -7,7 +7,7 @@ from ..models import AuditLog, Invoice
 from ..services.invoices import apply_line_items, apply_payments, serialize_invoice, sync_invoice_amount, update_payment as update_invoice_payment
 from ..services.ref_generator import next_invoice_ref
 from ..utils import parse_date
-from .common import apply_search, list_response
+from .common import apply_search, list_response, require_fields, MissingFieldError
 
 bp = Blueprint("invoices", __name__)
 
@@ -25,6 +25,10 @@ def list_invoices():
 @bp.post("")
 def create_invoice():
     data = request.get_json() or {}
+    try:
+        require_fields(data, [("client_name", "Client"), ("title", "Title")])
+    except MissingFieldError as error:
+        return jsonify({"error": str(error)}), 400
     invoice = Invoice(
         invoice_ref=data.get("invoice_ref") or next_invoice_ref(),
         client_id=data.get("client_id"),
@@ -77,6 +81,13 @@ def get_invoice(invoice_id):
 def update_invoice(invoice_id):
     invoice = Invoice.query.get_or_404(invoice_id)
     data = request.get_json() or {}
+    try:
+        require_fields(
+            {k: v for k, v in data.items() if k in ("client_name", "title")},
+            [(k, label) for k, label in [("client_name", "Client"), ("title", "Title")] if k in data],
+        )
+    except MissingFieldError as error:
+        return jsonify({"error": str(error)}), 400
     for field in ["client_name", "title", "status", "amount", "discount_amount", "tax_rate", "currency", "purchase_order", "payment_terms", "notes"]:
         if field in data:
             setattr(invoice, field, data[field])

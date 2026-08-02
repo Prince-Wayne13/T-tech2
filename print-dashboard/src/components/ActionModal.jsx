@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useSubmitGuard } from '../hooks/useSubmitGuard';
 
 function Icon({ d, size = 14 }) {
   return (
@@ -18,6 +19,10 @@ const D = {
 export default function ActionModal({ isOpen, onClose, title, children, buttons, type = 'default' }) {
   const [inputValue, setInputValue] = useState('');
   const [dateValue, setDateValue] = useState('');
+  // Build decision #8: only the primary (Save/Submit/Apply) button needs a
+  // double-submit guard — Cancel-style buttons stay clickable so the person
+  // can still back out while a save is in flight.
+  const { submitting, guard } = useSubmitGuard();
 
   if (!isOpen) return null;
 
@@ -178,51 +183,66 @@ export default function ActionModal({ isOpen, onClose, title, children, buttons,
             borderTop: '1px solid var(--border-faint)',
             justifyContent: 'flex-end',
           }}>
-            {buttons.map((btn, idx) => (
-              <button
-                key={idx}
-                onClick={() => {
-                  if (type === 'input' && btn.getInputValue) {
-                    btn.onClick(inputValue);
-                  } else if (type === 'date' && btn.getDateValue) {
-                    btn.onClick(dateValue);
-                  } else {
-                    btn.onClick();
-                  }
-                }}
-                style={{
-                  padding: '8px 16px',
-                  fontSize: '11px',
-                  fontWeight: '600',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  transition: 'all var(--ease)',
-                  background: btn.variant === 'primary' ? 'var(--primary)' : 'var(--bg-canvas)',
-                  color: btn.variant === 'primary' ? '#fff' : 'var(--text-body)',
-                  borderColor: 'var(--border-faint)',
-                  borderWidth: btn.variant !== 'primary' ? '1px' : '0',
-                }}
-                onMouseEnter={(e) => {
-                  if (btn.variant === 'primary') {
-                    e.currentTarget.style.transform = 'translateY(-1px)';
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(58,80,107,0.25)';
-                  } else {
-                    e.currentTarget.style.background = 'rgba(0,0,0,0.02)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (btn.variant === 'primary') {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = 'none';
-                  } else {
-                    e.currentTarget.style.background = 'var(--bg-canvas)';
-                  }
-                }}
-              >
-                {btn.label}
-              </button>
-            ))}
+            {buttons.map((btn, idx) => {
+              const isPrimary = btn.variant === 'primary';
+              const disabled = isPrimary && submitting;
+              return (
+                <button
+                  key={idx}
+                  disabled={disabled}
+                  onClick={() => {
+                    const fire = () => {
+                      if (type === 'input' && btn.getInputValue) {
+                        return btn.onClick(inputValue);
+                      } else if (type === 'date' && btn.getDateValue) {
+                        return btn.onClick(dateValue);
+                      } else {
+                        return btn.onClick();
+                      }
+                    };
+                    // Only the primary action is guarded against double
+                    // clicks -- Cancel-style buttons should still respond
+                    // immediately even while a save from elsewhere is in
+                    // flight.
+                    if (isPrimary) guard(fire); else fire();
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                    opacity: disabled ? 0.6 : 1,
+                    transition: 'all var(--ease)',
+                    background: isPrimary ? 'var(--primary)' : 'var(--bg-canvas)',
+                    color: isPrimary ? '#fff' : 'var(--text-body)',
+                    borderColor: 'var(--border-faint)',
+                    borderWidth: !isPrimary ? '1px' : '0',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (disabled) return;
+                    if (isPrimary) {
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(58,80,107,0.25)';
+                    } else {
+                      e.currentTarget.style.background = 'rgba(0,0,0,0.02)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (disabled) return;
+                    if (isPrimary) {
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow = 'none';
+                    } else {
+                      e.currentTarget.style.background = 'var(--bg-canvas)';
+                    }
+                  }}
+                >
+                  {isPrimary && submitting ? 'Saving...' : btn.label}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

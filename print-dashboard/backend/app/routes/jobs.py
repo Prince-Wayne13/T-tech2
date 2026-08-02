@@ -20,7 +20,7 @@ from ..services.invoices import apply_line_items, serialize_invoice, sync_invoic
 from ..services.ref_generator import next_job_ref, next_invoice_ref
 from ..services.sales import serialize_sale
 from ..utils import parse_date
-from .common import apply_search, list_response
+from .common import apply_search, list_response, require_fields, MissingFieldError
 
 bp = Blueprint("jobs", __name__)
 
@@ -39,7 +39,10 @@ def list_jobs():
 def create_job():
     data = request.get_json() or {}
     try:
+        require_fields(data, [("client_name", "Client"), ("title", "Title")])
         validate_job_machine_assignment(data.get("machine_id"), data.get("required_capability_id"))
+    except MissingFieldError as error:
+        return jsonify({"error": str(error)}), 400
     except IncompatibleMachineError as error:
         return jsonify({"error": str(error)}), 400
 
@@ -100,6 +103,18 @@ def update_job(job_id):
     try:
         validate_job_machine_assignment(effective_machine_id, effective_capability_id)
     except IncompatibleMachineError as error:
+        return jsonify({"error": str(error)}), 400
+
+    # Build decision #9: same required-field rule as create, applied to
+    # editing -- only checked for fields actually present in this request,
+    # so an edit that doesn't touch client_name/title at all isn't blocked
+    # by whatever the job already has.
+    try:
+        require_fields(
+            {k: v for k, v in data.items() if k in ("client_name", "title")},
+            [(k, label) for k, label in [("client_name", "Client"), ("title", "Title")] if k in data],
+        )
+    except MissingFieldError as error:
         return jsonify({"error": str(error)}), 400
 
     for field in ["machine_id", "service_category", "required_capability_id", "client_id", "client_name", "title", "status", "priority", "pages", "copies", "progress", "completed_count", "total_count", "assigned_staff_id", "notes"]:

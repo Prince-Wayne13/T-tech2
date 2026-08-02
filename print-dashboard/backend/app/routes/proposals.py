@@ -8,7 +8,7 @@ from ..services.invoices import serialize_invoice
 from ..services.proposals import apply_proposal_line_items, serialize_proposal
 from ..services.ref_generator import next_proposal_ref, next_invoice_ref, next_job_ref
 from ..utils import parse_date
-from .common import apply_search, list_response
+from .common import apply_search, list_response, require_fields, MissingFieldError
 
 bp = Blueprint("proposals", __name__)
 
@@ -26,6 +26,10 @@ def list_proposals():
 @bp.post("")
 def create_proposal():
     data = request.get_json() or {}
+    try:
+        require_fields(data, [("client_name", "Client"), ("title", "Title")])
+    except MissingFieldError as error:
+        return jsonify({"error": str(error)}), 400
     proposal = Proposal(
         proposal_ref=data.get("proposal_ref") or next_proposal_ref(),
         client_id=data.get("client_id"),
@@ -62,6 +66,13 @@ def get_proposal(proposal_id):
 def update_proposal(proposal_id):
     proposal = Proposal.query.get_or_404(proposal_id)
     data = request.get_json() or {}
+    try:
+        require_fields(
+            {k: v for k, v in data.items() if k in ("client_name", "title")},
+            [(k, label) for k, label in [("client_name", "Client"), ("title", "Title")] if k in data],
+        )
+    except MissingFieldError as error:
+        return jsonify({"error": str(error)}), 400
     for field in ["client_id", "client_name", "title", "status", "discount_amount", "currency", "contact", "priority", "assigned_staff_id", "machine_id", "required_capability_id", "prepared_by", "notes"]:
         if field in data:
             setattr(proposal, field, data[field])
