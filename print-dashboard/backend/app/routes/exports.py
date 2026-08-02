@@ -16,10 +16,14 @@ def list_exports():
 @bp.post("")
 def create_export():
     data = request.get_json() or {}
+    # generated_by intentionally omitted unless the frontend explicitly
+    # sends one -- create_export_file() (services/exports.py) defaults to
+    # this machine's real device_id when it's None, rather than this route
+    # re-hardcoding "Wayne" as its own separate fallback on top of that.
     export_job = create_export_file(
         dataset=data.get("dataset", "financials"),
         file_format=data.get("format", "csv"),
-        generated_by=data.get("generated_by", "Wayne"),
+        generated_by=data.get("generated_by"),
     )
     db.session.add(export_job)
     db.session.commit()

@@ -284,3 +284,54 @@ def build_analytics_pdf(dashboard: dict, financials: dict, quantity_produced: di
     r.add(_kv_table(list(financials["product_mix"].items()), money_keys=set(financials["product_mix"].keys())))
 
     r.write(path)
+
+
+def build_audit_log_pdf(audit_data: dict, path: Path):
+    """
+    audit_data: services/reports.py's build_audit_log_entries() return
+    shape - {"entries": [...], "total_count": int, "shown_count": int}.
+    entries are AuditLog.to_dict() rows: id, actor, action, entity_type,
+    entity_id, created_at (ISO string).
+    """
+    r = ReportBuilder("Audit Log")
+
+    total_count = audit_data.get("total_count", 0)
+    shown_count = audit_data.get("shown_count", 0)
+    note = None
+    if total_count > shown_count:
+        note = f"Showing the {shown_count:,} most recent entries out of {total_count:,} total on record."
+    r.section("Recent Activity", note=note)
+
+    entries = audit_data.get("entries", [])
+    rows = [
+        {
+            "created_at": _format_audit_timestamp(entry.get("created_at")),
+            "actor": entry.get("actor") or "system",
+            "action": entry.get("action") or "",
+            "entity_type": entry.get("entity_type") or "-",
+        }
+        for entry in entries
+    ]
+    r.add(_list_of_dict_table(
+        rows,
+        columns=[
+            ("created_at", "Date/Time"), ("actor", "Actor"),
+            ("action", "Action"), ("entity_type", "Entity"),
+        ],
+        col_widths=[32 * mm, 26 * mm, 92 * mm, 20 * mm],
+        wrap_cols={2},
+    ))
+
+    r.write(path)
+
+
+def _format_audit_timestamp(value) -> str:
+    """AuditLog.to_dict() stores created_at as an ISO string (models.py) -
+    reformatted here to something readable in a printed report rather than
+    the raw 'YYYY-MM-DDTHH:MM:SS.ffffff' form."""
+    if not value:
+        return ""
+    try:
+        return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return str(value)

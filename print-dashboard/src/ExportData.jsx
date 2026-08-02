@@ -102,7 +102,10 @@ export default function ExportData() {
 
   const createExport = async () => {
     try {
-      await api.createExport({ dataset: 'invoices', format: 'csv', generated_by: 'Wayne' });
+      // generated_by intentionally omitted here - routes/exports.py's
+      // create_export_file() defaults to this machine's real device_id
+      // rather than a hardcoded person's name.
+      await api.createExport({ dataset: 'invoices', format: 'csv' });
       notify('Export created');
       loadExports();
     } catch (saveError) {

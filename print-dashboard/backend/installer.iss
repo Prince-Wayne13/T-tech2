@@ -15,9 +15,9 @@
 ; backend\dist\TTechStudio\TTechStudio.exe exists.
 
 #define MyAppName "T-Tech Studio"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "3.0.0"
 #define MyAppPublisher "T-Tech Suppliers & General Dealers Ltd"
-#define MyAppExeName "TTechStudio.exe"
+#define MyAppExeName "TTechManagement.exe"
 #define MyBuildOutputDir "dist\TTechStudio"
 
 [Setup]

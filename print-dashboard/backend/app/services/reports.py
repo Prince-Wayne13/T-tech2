@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
-from ..models import Expense, Invoice, Job, ProductionMachine
+from ..models import AuditLog, Expense, Invoice, Job, ProductionMachine
 from .invoices import invoice_status_from_totals, invoice_totals
 from .vendors import PAID_STATUSES
 
@@ -400,3 +400,27 @@ def build_report_library():
             "metrics": {"machine_revenue": financials["machine_revenue"]},
         },
     ]
+
+
+# Cap for the audit log PDF sent to Drive each week - AuditLog rows accrue
+# forever (every job/expense/invoice/payment edit adds one), so an all-time
+# dump would make this one report grow without bound over the life of the
+# business, unlike the other three reports here which summarize into
+# month-by-month totals rather than listing every underlying row. Most
+# recent 500 entries, newest first, is a judgment call for "enough to be
+# useful in one weekly PDF" - flagged here rather than silently picked, in
+# case the real business wants a different cutoff (a date range instead of
+# a row count, for instance) once real usage patterns are known.
+AUDIT_LOG_PDF_ROW_LIMIT = 500
+
+
+def build_audit_log_entries(limit=AUDIT_LOG_PDF_ROW_LIMIT):
+    entries = (
+        AuditLog.query.order_by(AuditLog.created_at.desc()).limit(limit).all()
+    )
+    total_count = AuditLog.query.count()
+    return {
+        "entries": [entry.to_dict() for entry in entries],
+        "total_count": total_count,
+        "shown_count": len(entries),
+    }

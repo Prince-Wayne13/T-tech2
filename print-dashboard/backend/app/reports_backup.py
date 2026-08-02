@@ -58,11 +58,15 @@ def build_report_pdf_files(tmp_dir: Path) -> list[Path]:
     """
     Pulls the real analytics already used elsewhere in the app (same
     functions the on-screen Reports page calls) and writes each one out
-    as its own HTML file inside tmp_dir. Returns the list of file paths
-    written, ready to be zipped.
+    as its own real PDF (report_pdf.py, reportlab) inside tmp_dir. Returns
+    the list of file paths written, ready to be zipped.
     """
-    from .report_pdf import build_analytics_pdf, build_cashflow_pdf, build_income_statement_pdf
+    from .report_pdf import (
+        build_analytics_pdf, build_audit_log_pdf, build_cashflow_pdf,
+        build_income_statement_pdf,
+    )
     from .services.reports import (
+        build_audit_log_entries,
         build_dashboard_summary,
         build_financial_report,
         build_job_throughput,
@@ -73,6 +77,7 @@ def build_report_pdf_files(tmp_dir: Path) -> list[Path]:
     dashboard = build_dashboard_summary()
     quantity_produced = build_quantity_produced()
     job_throughput = build_job_throughput()
+    audit_log = build_audit_log_entries()
 
     files_written = []
 
@@ -86,6 +91,10 @@ def build_report_pdf_files(tmp_dir: Path) -> list[Path]:
 
     path = tmp_dir / "analytics.pdf"
     build_analytics_pdf(dashboard, financials, quantity_produced, job_throughput, path)
+    files_written.append(path)
+
+    path = tmp_dir / "audit-log.pdf"
+    build_audit_log_pdf(audit_log, path)
     files_written.append(path)
 
     return files_written

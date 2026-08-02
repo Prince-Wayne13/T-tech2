@@ -305,10 +305,20 @@ function PulseChart({ financials }) {
   );
 }
 
+// Sidebar/topbar avatar initial from this machine's real device_name
+// (device_identity.py), replacing what used to be a hardcoded "W" for
+// "Wayne". Falls back to '?' while identity is still loading (brief, on
+// first mount) or on the rare machine with no identity set yet at all -
+// an honest placeholder rather than guessing a name.
+function deviceInitial(deviceIdentity) {
+  const name = deviceIdentity?.device_name;
+  return name ? name.trim().charAt(0).toUpperCase() : '?';
+}
+
 /* ═══════════════════════════════════════
    COMPONENT: TopBar — WITH HAMBURGER MENU
 ═══════════════════════════════════════ */
-function TopBar({ onMenuToggle, search, setSearch, onSearchOpen, hasNewBackup, newBackups, onMarkSeen, onGoToSettings }) {
+function TopBar({ onMenuToggle, search, setSearch, onSearchOpen, hasNewBackup, newBackups, onMarkSeen, onGoToSettings, deviceIdentity }) {
   const [bellOpen, setBellOpen] = useState(false);
   return (
     <header className="topbar">
@@ -380,7 +390,7 @@ function TopBar({ onMenuToggle, search, setSearch, onSearchOpen, hasNewBackup, n
             </div>
           )}
         </div>
-        <div className="topbar-avatar">W</div>
+        <div className="topbar-avatar">{deviceInitial(deviceIdentity)}</div>
       </div>
     </header>
   );
@@ -389,7 +399,7 @@ function TopBar({ onMenuToggle, search, setSearch, onSearchOpen, hasNewBackup, n
 /* ═══════════════════════════════════════
    COMPONENT: Sidebar — WITH OPEN/CLOSE STATE
 ═══════════════════════════════════════ */
-function Sidebar({ active, setActive, isOpen, onClose }) {
+function Sidebar({ active, setActive, isOpen, onClose, deviceIdentity }) {
   return (
     <>
       {/* Overlay for mobile */}
@@ -402,11 +412,11 @@ function Sidebar({ active, setActive, isOpen, onClose }) {
 
         <div className="sidebar-profile">
           <div className="profile-avatar">
-            W
+            {deviceInitial(deviceIdentity)}
             <span className="profile-status" />
           </div>
           <div className="profile-info">
-            <div className="profile-name">Wayne</div>
+            <div className="profile-name">{deviceIdentity?.device_name || 'This Device'}</div>
             <div className="profile-role">Administrator</div>
           </div>
         </div>
@@ -702,6 +712,12 @@ export default function App() {
   const [globalSearch, setGlobalSearch] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [dashboardStaff, setDashboardStaff] = useState([]);
+  // Sidebar/topbar avatar + name were hardcoded to "Wayne"/"W" (one
+  // specific person, permanently) - now sourced from this machine's real
+  // device identity (device_identity.py, same info Settings' sync screen
+  // already shows), so a different device/install shows its own name
+  // instead of everyone seeing the same one person's name.
+  const [deviceIdentity, setDeviceIdentity] = useState(null);
 
   // Build decision #7 (pieces C + D): backup notification bell + safe
   // live refresh. See useBackupWatch's own comment for why this
@@ -728,6 +744,10 @@ export default function App() {
     // Only needed for the "Add Petty Cash" quick action's staff picker
     // (staff_expense entries can optionally attribute to a staff member).
     api.staff('?active=true').then(data => setDashboardStaff(data.items || [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.deviceIdentity().then(setDeviceIdentity).catch(() => {});
   }, []);
 
   const openSearch = () => {
@@ -826,12 +846,14 @@ export default function App() {
         newBackups={newBackups}
         onMarkSeen={markSeen}
         onGoToSettings={() => navigate('Settings')}
+        deviceIdentity={deviceIdentity}
       />
       <Sidebar 
         active={active} 
         setActive={navigate} 
         isOpen={sidebarOpen} 
-        onClose={() => setSidebarOpen(false)} 
+        onClose={() => setSidebarOpen(false)}
+        deviceIdentity={deviceIdentity}
       />
       <React.Fragment key={pageKey}>
         {renderPage()}
