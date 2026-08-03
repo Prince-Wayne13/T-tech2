@@ -7,8 +7,13 @@ import Invoices from './Invoices';
 import Expenses from './Expenses';
 import Vendors from './Vendors';
 import Materials from './Materials';
+import Advances from './Advances';
 import Sales from './sales';
 import PettyCash, { AddPettyCashModal } from './pettycash';
+import Reports from './Reports';
+import AuditLog from './AuditLog';
+import Archive from './Archive';
+import ExportData from './ExportData';
 import Settings from './Settings';
 import { api } from './api/client';
 import { useBackupWatch } from './hooks/useBackupWatch';
@@ -83,6 +88,7 @@ const NAV_GROUPS = [
   {
     label: 'Primary',
     items: [
+      { id: 'Dashboard',   icon: 'dashboard'  },
       { id: 'Jobs',        icon: 'jobs'       },
       { id: 'Proposals',   icon: 'proposals'  },
       { id: 'Invoices',    icon: 'invoices'   },
@@ -92,17 +98,24 @@ const NAV_GROUPS = [
     ],
   },
   {
+    label: 'Reports',
+    items: [
+      { id: 'Reports', icon: 'reports' },
+    ],
+  },
+  {
     label: 'More',
     items: [
       { id: 'Vendors',     icon: 'vendors'    },
       { id: 'Materials',   icon: 'materials'  },
+      { id: 'Advances',    icon: 'advances'   },
+      { id: 'Audit Log',   icon: 'reports'    },
+      { id: 'Archive',     icon: 'reports'    },
+      { id: 'Export Data', icon: 'reports'    },
       { id: 'Settings',    icon: 'settings'   },
     ],
   },
 ];
-
-// Disabled pages: not shown in nav, and blocked from direct render below.
-const DISABLED_PAGES = ['Dashboard', 'Reports', 'Audit Log', 'Archive', 'Export Data', 'Advances'];
 
 const FIN_CARDS = [
   { title: 'Cash Balance',  value: '$12,450', change: '+8.2%',  up: true,  color: 'primary',   sub: 'vs last month',     fill: 82, icon: 'ar'       },
@@ -690,7 +703,7 @@ function MainCanvas({ onAction, onPreview }) {
    ROOT COMPONENT — WITH MOBILE STATE
 ═══════════════════════════════════════ */
 export default function App() {
-  const [active, setActive] = useState('Jobs');
+  const [active, setActive] = useState('Dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [actionModal, setActionModal] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -802,21 +815,23 @@ export default function App() {
   };
 
   const renderPage = () => {
-    // Disabled pages (Dashboard, Reports, Audit Log, Archive, Export Data,
-    // Advances) fall through to the default case below regardless of what
-    // `active` is set to, so they can never be rendered even if reached
-    // by a stale state value or direct navigate() call.
-    switch (DISABLED_PAGES.includes(active) ? '__disabled__' : active) {
+    switch(active) {
       case 'Jobs': return <Jobs />;
       case 'Proposals': return <Proposals />;
       case 'Invoices': return <Invoices />;
       case 'Expenses': return <Expenses />;
       case 'Vendors': return <Vendors />;
       case 'Materials': return <Materials />;
+      case 'Advances': return <Advances />;
       case 'Sales': return <Sales />;
       case 'Petty Cash': return <PettyCash />;
+      case 'Reports': return <Reports />;
+      case 'Audit Log': return <AuditLog />;
+      case 'Archive': return <Archive />;
+      case 'Export Data': return <ExportData />;
       case 'Settings': return <Settings />;
-      default: return <Jobs />;
+      case 'Dashboard':
+      default: return <MainCanvas onAction={setActionModal} onPreview={(title, data) => setActivityPreview({ title, data })} />;
     }
   };
 
