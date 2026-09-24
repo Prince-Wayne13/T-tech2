@@ -227,6 +227,8 @@ def bootstrap_app(config_name: str = "production", device_name: str | None = Non
     with flask_app.app_context():
         db.create_all()
         run_full_upgrade()
+        from .services.defaults import ensure_startup_defaults
+        ensure_startup_defaults()
 
     scheduler = build_backup_scheduler(data_dir, log_path, device_id=identity.device_id)
     flask_app.config["BACKUP_SCHEDULER"] = scheduler

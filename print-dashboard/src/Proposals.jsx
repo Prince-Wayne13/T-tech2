@@ -133,19 +133,25 @@ export default function Proposals() {
     // plain-text-only behavior before this item.
     client_id: clientId,
     title: form.title || 'New proposal draft',
-    line_items: (form.items || []).map((item, index) => ({
-      position: index + 1,
-      description: item.desc || item.description || 'Print service',
-      quantity: Number(item.qty ?? item.quantity ?? 1) || 1,
-      unit_price: Number(item.rate ?? item.unit_price ?? item.amount ?? 0) || 0,
-      unit: item.unit || 'item',
-      // Build decision #5: each line carries its own machine, set
-      // by Modals.jsx's handleServiceSelect from the picked
-      // service's category (matched against ProductionMachine.
-      // category) -- carried onto the converted Job's invoice by
-      // accept_proposal() in routes/proposals.py.
-      machine_id: item.machineId || item.machine_id || null,
-    })),
+    line_items: (form.items || []).map((item, index) => {
+      const quantity = Number(item.qty ?? item.quantity ?? 1) || 1;
+      const rate = Number(item.rate ?? item.unit_price ?? 0) || 0;
+      const amount = Number(item.amount ?? item.line_total ?? 0) || 0;
+      const amountDerivedRate = amount > 0 && quantity > 0 ? amount / quantity : 0;
+      return {
+        position: index + 1,
+        description: item.desc || item.description || 'Print service',
+        quantity,
+        unit_price: rate || amountDerivedRate,
+        unit: item.unit || 'item',
+        // Build decision #5: each line carries its own machine, set
+        // by Modals.jsx's handleServiceSelect from the picked
+        // service's category (matched against ProductionMachine.
+        // category) -- carried onto the converted Job's invoice by
+        // accept_proposal() in routes/proposals.py.
+        machine_id: item.machineId || item.machine_id || null,
+      };
+    }),
     valid_until: form.validUntil || null,
     contact: form.contact,
     notes: form.notes,

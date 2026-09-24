@@ -46,6 +46,24 @@ def invoice_totals(invoice):
     }
 
 
+def invoice_line_consistency(invoice):
+    line_subtotal = sum((item.line_total() for item in invoice.line_items), Decimal("0.00"))
+    discount = decimal_money(invoice.discount_amount)
+    line_total = max(line_subtotal - discount, Decimal("0.00"))
+    stored_amount = decimal_money(invoice.amount)
+    has_line_items = bool(invoice.line_items)
+    difference = stored_amount - line_total
+    consistent = (not has_line_items and stored_amount >= 0) or abs(difference) <= Decimal("0.03")
+    return {
+        "has_line_items": has_line_items,
+        "line_subtotal": float(line_subtotal),
+        "line_total": float(line_total),
+        "stored_amount": float(stored_amount),
+        "difference": float(difference),
+        "consistent": consistent,
+    }
+
+
 def invoice_status_from_totals(totals):
     paid = Decimal(str(totals["paid"]))
     total = Decimal(str(totals["total"]))
@@ -62,6 +80,7 @@ def serialize_invoice(invoice, include_document=False):
     payment_rows = invoice.job.payments if invoice.job else invoice.payments
     data["payments"] = [payment.to_dict() for payment in payment_rows]
     data["totals"] = invoice_totals(invoice)
+    data["line_consistency"] = invoice_line_consistency(invoice)
     if invoice.job_id:
         # A cancelled invoice (set when its linked job is cancelled - see
         # routes/jobs.py::update_job()) keeps that status as-is. Every other

@@ -112,6 +112,7 @@ function InvoiceRow({ inv, onPreview, onOutstandingTab, currentDeviceId }) {
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '110px' }}>
         <div className="activity-amount">{inv.amount}</div>
+        <div className="activity-time" style={{ color: 'var(--teal)', fontWeight: 600 }}>Paid: {inv.paidLabel}</div>
         {/* Item 4 (Prompt 7): show what's still owed alongside the total,
             distinct from "Paid" status badges — a partially-paid invoice
             should visibly show its remaining balance, not just its total. */}

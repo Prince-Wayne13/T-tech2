@@ -13,7 +13,7 @@ Ports the proven, already-tested logic from:
      the uploading)
 
 New in this pass, per explicit user decisions:
-  - Fixed backup times: 09:00, 11:00, 15:00, 18:00 (testing config,
+  - Fixed backup times: 09:00, 11:00, 14:00 (testing config,
     easy to change -- see BACKUP_TIMES below). NOT a rolling 24h timer.
   - A slot missed while the app is closed is logged, not retried.
   - 3 consecutive failures/misses raises a flagged log entry.
@@ -48,15 +48,11 @@ logger = logging.getLogger("ttech.backup")
 # Config
 # ---------------------------------------------------------------------------
 
-# Fixed daily backup times (24h clock). Testing config per user request
-# -- set close together (00:35 / 00:45 / 00:55) so you can watch backups
-# actually fire during a normal testing session without waiting hours.
-# Change back to the real daily times (e.g. 09:00 / 11:00 / 15:00 / 18:00)
-# before the office install.
+# Fixed daily backup times (24h clock), per user request.
 BACKUP_TIMES = [
-    dtime(0, 35),
-    dtime(0, 45),
-    dtime(0, 55),
+    dtime(9, 0),
+    dtime(11, 0),
+    dtime(14, 0),
 ]
 
 BACKUP_SUBFOLDER = "TTechStudio-Backups"

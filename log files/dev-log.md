@@ -2416,4 +2416,160 @@ The .patch-based approach (git apply) was tried twice this session and abandoned
 
 Not yet done, worth a follow-up once the user is ready: rebuilding the frontend forward from this point (the original stated goal — "we will rebuild the frontend") hasn't started yet; this session only got the starting point confirmed and checked out. The z-index/layering fixes made earlier today (styles.css token reordering, ModuleStandard.jsx + PrintLayouts.jsx token migration) are not present in this reverted state, by design — those were exactly what didn't visually work for the user and prompted the revert. If/when the frontend rebuild reaches modals again, that work should be redone deliberately rather than reapplied blind from today's now-reverted commits.
 
+2026-09-24 - Startup defaults plus clearer paid/booked/owed money display
+
+Author: Codex
+Scope: User clarified product/accounting decisions: no default service price for now, machine auto-assignment is acceptable, machines/categories should initialize automatically on startup, and payment history must visibly drive Jobs/Invoices/Sales money displays.
+
+Changes made:
+
+- Added `backend/app/services/defaults.py` with idempotent default machines and default expense categories.
+- Wired startup defaults into `lifecycle.bootstrap_app()` after migrations. Missing standard machines/categories are created automatically on app startup; existing rows are not overwritten.
+- Reused the backend default category list in `routes/expenses.py` so manual category seeding and startup seeding share one source.
+- Updated `routes/sales.py` so `list_sales()` resyncs each sale amount from linked job/invoice payments before returning. This prevents stale collected amounts when payment records already exist.
+- Updated Jobs row UI to show total, paid, and owed.
+- Updated Invoices row UI to show total, paid, and owed.
+- Updated Sales page to separate:
+  - Cash Collected,
+  - Booked Value,
+  - Still Owed.
+  Sales rows now show collected amount, invoice total, and owed balance.
+- Updated `DIAGNOSTICS_FINDINGS.md` to defer service default pricing, mark machine auto-assignment as watch-only, and document startup defaults/payment visibility as implemented product decisions.
+
+Verification:
+
+- Ran focused Python syntax parse for `services/defaults.py`, `lifecycle.py`, `routes/expenses.py`, and `routes/sales.py`; syntax OK.
+- Ran `npm.cmd run build`; build passed. Existing Vite large chunk warning remains.
+
+2026-09-24 - Cleaned diagnostics tracker into fixed / discuss / meh buckets
+
+Author: Codex
+Scope: User said some diagnostics findings felt "meeh" and asked to update the findings file before discussing what remains.
+
+Change made:
+
+- `DIAGNOSTICS_FINDINGS.md` now starts with a status summary:
+  - fixed/implemented items,
+  - still-worth-discussing items,
+  - probably-meh/watch-only items.
+- Moved fixed findings 1, 2, 3, 4, 5, 6, and 9 into a fixed/implemented section.
+- Added the new automatic backup schedule (`09:00`, `11:00`, `14:00`) to the fixed summary.
+- Reframed remaining items:
+  - 7 as a real reporting-basis clarity issue,
+  - 8 as mostly pending real sync verification,
+  - 10 as UX friction rather than corruption,
+  - 11 as traceability-related but not money-total critical,
+  - 13 as something to verify before changing code,
+  - 12 as meh/watch because frontend PDFs are the live path.
+- Trimmed stale suggested diagnostics that were already addressed by Findings 1/2/3/9 work.
+
+2026-09-24 - Changed automatic backup schedule to 09:00, 11:00, 14:00
+
+Author: Codex
+Scope: User asked to change the automatic backup times to 9am, 11am, and 2pm.
+
+Change made:
+
+- `backend/app/backup_scheduler.py`: replaced the temporary close-together test schedule (`00:35`, `00:45`, `00:55`) with daily fixed backup slots at `09:00`, `11:00`, and `14:00`.
+- Updated nearby scheduler comments/docstring to match the active schedule.
+
+Verification:
+
+- Parsed `backend/app/backup_scheduler.py` with Python `ast.parse`; syntax OK.
+- Grepped the scheduler file to confirm the old test times and old 15:00/18:00 references are gone.
+
+2026-09-24 - Fixed Findings 4 and 9: invoice consistency signal and proposal accept amount conversion
+
+Author: Codex
+Scope: User asked to work on Findings 4 and 9.
+
+Changes made:
+
+- `backend/app/routes/proposals.py`: fixed proposal accept conversion. If a proposal line has missing/zero `unit_price` but has a stored line `amount`, the invoice line now derives unit price as `amount / quantity` instead of treating the full line amount as the unit price. This fixes the reproduced quantity 10 / amount MK 50,000 case converting into MK 500,000.
+- `backend/app/services/invoices.py`: added `invoice_line_consistency()` and included its result in `serialize_invoice()` as `line_consistency`. It reports whether an invoice has line items, the line subtotal, line total after discount, stored header amount, difference, and whether the values are within tolerance.
+- `DIAGNOSTICS_FINDINGS.md`: marked Finding 4 guarded/pending real sync verification, marked Finding 9 fixed for the accept-path multiplier, and corrected stale Finding 8 wording now that invoice line items merge.
+
+Verification:
+
+- Ran focused Python syntax parse for `routes/proposals.py` and `services/invoices.py`; syntax OK.
+- Ran `npm.cmd run build`; build passed. Existing Vite large chunk warning remains.
+
+Still required:
+
+- Real cross-device sync verification remains needed for Findings 3/4/8: apply another device backup with invoice line items and confirm line rows arrive, money cards balance, and machine revenue/product mix populate.
+- The broader proposal redundancy issue still exists structurally (`amount`, `quantity`, and `unit_price` are all stored), but the dangerous accept-path multiplier is fixed.
+
+2026-09-24 - Backup/sync pass: proposals and line items now merge, imported-dot language clarified
+
+Author: Codex
+Scope: User revisited backup/sync behavior and asked to update findings, then start immediately on the two urgent pieces: complete data sync for money/detail traceability and visible markers for new synced records.
+
+Changes made:
+
+- `backend/app/merge_preview.py`: added preview support for dependent line item tables. Since `invoice_line_items` and `proposal_line_items` do not have their own stable refs, preview now identifies them by parent ref plus line position:
+  - `invoices.invoice_ref + position`
+  - `proposals.proposal_ref + position`
+- `backend/app/merge_apply.py`: moved `proposals` into the safe apply set. Client, converted invoice, machine, and capability FKs are translated through stable refs/names. Staff assignment remains intentionally local and is not copied.
+- `backend/app/merge_apply.py`: added a dependent line-item apply pass after parent rows have been applied. It inserts/updates invoice and proposal line items by parent ref plus position, and translates per-line `machine_id` and `pricing_item_id` before writing.
+- `src/components/ModuleStandard.jsx`: clarified the existing imported-dot tooltip from "New from backup/device ..." to "New from sync (...)".
+- `DIAGNOSTICS_FINDINGS.md`: updated Finding 3 to implemented/pending real verification, and added a Sync/Backup UX section covering new synced record markers, apply summaries, post-sync reconciliation, dashboard refresh expectations, and conflict handling.
+
+Verification:
+
+- Ran focused Python syntax parse for `merge_apply.py`, `merge_preview.py`, and `services/proposals.py`; syntax OK.
+- Ran `npm.cmd run build` after backend merge changes and again after the dot tooltip change; both builds passed. Existing Vite large chunk warning remains.
+
+Still required before calling this complete in production:
+
+- Run a real two-device merge with an invoice that has multiple service rows and a proposal that has multiple line rows. Confirm invoice/proposal detail rows arrive, machine revenue/product mix populate, and dashboard/report money totals balance.
+- The current dot remains an origin marker based on `device_id != currentDeviceId`. It is not yet a true unread/acknowledged state that clears after opening the synced record.
+
+2026-09-24 - Fixed diagnostics Findings 1 and 2: quotation date fallback and proposal edit rate drift
+
+Author: Codex
+Scope: User asked to start working on Findings 1 and 2 from DIAGNOSTICS_FINDINGS.md.
+
+Changes made:
+
+- Fixed the quotation PDF date path in `src/components/InvoicePDF.jsx`. `QuotationDocument` now uses `proposal.created_at` / `createdAt` when invoice-style `issued_on` / `issued` fields are absent, with today's date only as a final fallback for unsaved preview-like data.
+- Updated the dormant backend proposal document helper in `backend/app/services/proposals.py` to include `created_at` in the billing payload, so that path will not preserve the same missing-date issue if it becomes active later.
+- Fixed proposal edit initialization in `src/components/Modals.jsx`. Existing proposal lines no longer treat stored line `amount` as the unit rate. If a legacy/imported row has `amount` but missing/zero `unit_price`, the UI derives the rate as `amount / quantity`, preserving the original line total without multiplying it.
+- Applied the same amount-only guard in `src/Proposals.jsx` when building the save payload: `unit_price` is now `rate` / `unit_price` first, then `amount / quantity` only when needed.
+- Updated `DIAGNOSTICS_FINDINGS.md` to mark Findings 1 and 2 fixed and document the exact behavior.
+
+Verification:
+
+- Ran `npm.cmd run build` successfully. Vite built the frontend; the existing large chunk warning remains.
+- Parsed `backend/app/services/proposals.py` with Python `ast.parse`; syntax OK.
+
+Still open:
+
+- Finding 9 remains separate: the backend proposal accept path can still multiply malformed proposal lines if `unit_price` is zero and `amount` is present. This session fixed the frontend edit/save paths for Finding 2, not the backend accept conversion path.
+
+2026-09-24 - Diagnostics findings recheck: merge line-items, proposal accept totals, expense basis, machine carryover, debug-log backup
+
+Author: Codex
+Scope: User asked to verify a set of proposed corrections to DIAGNOSTICS_FINDINGS.md before making code changes. No code was changed in this verification pass; documentation only.
+
+Verified and gave extra weight:
+
+- Finding 3 is stronger than the original diagnostic. `merge_apply.py` applies jobs, invoices, payments, expenses, sales, etc., but leaves `proposals`, `invoice_line_items`, and `proposal_line_items` outside the safe apply set. A reproduced merge from another device can therefore bring over the invoice, payment, and job while losing all service rows. This explains the specific symptom where top-level revenue still shows MK 116,000, but machine revenue is empty and product mix is `{}`. The loss can also be silent because preview/apply results are driven by ref/name-keyed tables; raw line-item tables may not be named in results even though they are the missing data.
+- Finding 9 is specifically an accept-path bug, not just a generic redundancy concern. `accept_proposal()` uses `float(item.unit_price or item.amount or 0)` as the invoice unit price. If a malformed/API/imported proposal line has quantity 10, amount MK 50,000, and missing/zero unit_price, the proposal totals MK 50,000 but accepting it creates a MK 500,000 invoice. Normal UI creation currently sends `unit_price` via `buildProposalPayload()`, so this needs an API/script/import/legacy-corrupt row to trigger.
+- Finding 7 is stronger than originally written. Top-level `expenses` in reports is paid-only, but `expense_totals_by_category` includes every expense, including rejected rows. The `basis.expenses` label says `"booked"` even though the value is paid-only. A reproduced case had category totals of MK 470,000 while the top-level expenses figure was MK 100,000.
+- Finding 11 is not only an async race. Both NewJobModal and NewProposalModal store draft machine assignment in shared `form.machineId`. `machineId` is not cleared on service selection. If the next service has no available machine, the new line can deterministically inherit the previous line's machine with no timing race.
+
+Verified but lower urgency / corrected:
+
+- Finding 10's missing default price/rate is real. The stale-rate-carries-over part is not supported in the normal add flow because `addItem()` clears `rate` after adding.
+- Finding 12 is accurate: proposal routes serialize without `include_document=True`; no current proposal route uses `build_proposal_document()`, so that backend proposal document builder is effectively dead code for live PDF output.
+- Finding 5's fixes are real, but there are caveats: converting amount to unit_price can introduce a few tambala of rounding drift when amount does not divide evenly by quantity, and the frontend display repair is a heuristic that does not truly fix jobs with two or more zero-priced/missing service lines.
+- Finding 6 was checked and confirmed done: `backup_scheduler.py` exports `debug_events` to a readable `TTechStudio-terminal-debug-YYYY-MM-DD-HHMM.log`, includes it in the backup zip, copies it to `TTechStudio-Logs/<device_id>/`, and rotates local `debug_events` to the newest 200 rows after successful backup. The readable export is capped to newest 5000 events, while the zip's `app.db` snapshot still has the full table before rotation.
+
+Still not fully tested:
+
+- Finding 13 remains open. `list_sales()` does not resync sale amounts. `sync_sale_amount()` is called on create, single get, update, and known job-payment paths. Merge applies payments before sales and copies stored `sales.amount`, but no restore/merge data test was run in this pass to prove whether stale amounts remain after merge.
+- Exact line citations in DIAGNOSTICS_FINDINGS.md had drifted from current code. The doc was updated to rely more on file/function evidence than exact line numbers unless rechecked.
+
+Files changed this session: print-dashboard/DIAGNOSTICS_FINDINGS.md and this dev-log entry only. No backend/frontend runtime code was edited.
+
 <!-- New entries go above this line, most recent first --> <!-- New entries go above this line, most recent first -->

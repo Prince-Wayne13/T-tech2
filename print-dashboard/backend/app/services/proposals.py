@@ -81,6 +81,7 @@ def build_proposal_document(proposal):
         "billing": {
             "client_name": proposal.client_name,
             "contact": proposal.contact,
+            "created_at": proposal.created_at.isoformat() if proposal.created_at else None,
             "valid_until": proposal.valid_until.isoformat() if proposal.valid_until else None,
         },
         "line_items": [

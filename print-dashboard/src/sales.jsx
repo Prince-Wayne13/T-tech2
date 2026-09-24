@@ -27,6 +27,9 @@ function mapSale(sale) {
     notes: sale.notes,
     amount: money(sale.amount),
     amountValue: Number(sale.amount || 0),
+    invoiceTotal: Number(sale.invoice_total || 0),
+    invoiceTotalLabel: sale.invoice_total == null ? '-' : money(sale.invoice_total),
+    balanceValue: Math.max(Number(sale.invoice_total || 0) - Number(sale.amount || 0), 0),
     date: compactDate(sale.created_at),
     status,
     deviceId: sale.device_id,
@@ -53,7 +56,8 @@ function SaleRow({ sale, currentDeviceId }) {
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '100px' }}>
         <div className="activity-amount">{sale.amount}</div>
-        <div className="activity-time">Derived from job</div>
+        <div className="activity-time">Collected of {sale.invoiceTotalLabel}</div>
+        {sale.balanceValue > 0 && <div className="activity-time" style={{ color: 'var(--warning)', fontWeight: 600 }}>Owed: {money(sale.balanceValue)}</div>}
       </div>
       <span className={`status-badge ${cfg.cls}`} style={{ marginLeft: '12px' }}>{cfg.label}</span>
     </div>
@@ -116,20 +120,23 @@ export default function Sales() {
   });
 
   const total = filtered.reduce((sum, sale) => sum + sale.amountValue, 0);
+  const bookedTotal = filtered.reduce((sum, sale) => sum + sale.invoiceTotal, 0);
+  const balanceTotal = filtered.reduce((sum, sale) => sum + sale.balanceValue, 0);
   const fullCount = sales.filter(sale => sale.status === 'full').length;
   const partialCount = sales.filter(sale => sale.status === 'partial').length;
   const unpaidCount = sales.filter(sale => sale.status === 'unpaid').length;
 
   const stats = [
-    { label: 'Total Sales', value: money(total), sub: 'Filtered view', icon: D.sales, color: 'primary' },
+    { label: 'Cash Collected', value: money(total), sub: 'Payments received', icon: D.sales, color: 'primary' },
+    { label: 'Booked Value', value: money(bookedTotal), sub: 'Invoice totals', icon: D.invoices, color: 'secondary' },
+    { label: 'Still Owed', value: money(balanceTotal), sub: 'Uncollected balance', icon: D.clock, color: 'warning' },
     { label: 'Fully Paid', value: String(fullCount), sub: 'Complete sales', icon: D.check, color: 'teal' },
-    { label: 'Partial', value: String(partialCount), sub: 'Partially collected', icon: D.clock, color: 'warning' },
-    { label: 'Unpaid', value: String(unpaidCount), sub: 'No cash collected yet', icon: D.alert, color: 'red' },
+    { label: 'Partial / Unpaid', value: String(partialCount + unpaidCount), sub: 'Needs collection', icon: D.alert, color: 'red' },
   ];
 
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
-      <ModuleHeader title="Sales" subtitle="Derived from job payment status" />
+      <ModuleHeader title="Sales" subtitle="Cash collected, with booked invoice value shown separately" />
       <StatsGrid stats={stats} />
       <ModuleToolbar filters={SALE_STATUSES} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search client, description, or job ref..." />
       <RegisterCard title="Sales Register" countLabel={`${filtered.length} sale${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="SALE" emptyMessage="No sales match your filters.">

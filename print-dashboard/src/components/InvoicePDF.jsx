@@ -244,6 +244,7 @@ function QuotationDocument({ proposal }) {
   const subtotal = calculateTotal(lineItems);
   const discount = Number(proposal?.discount ?? proposal?.discount_amount ?? 0);
   const total = Math.max(subtotal - discount, 0);
+  const quotationDate = proposal?.issued_on || proposal?.issued || proposal?.created_at || proposal?.createdAt || new Date();
 
   return (
     <Document title={`${proposal?.proposal_ref || proposal?.id || 'quotation'} - T-Tech`} author="T-Tech Suppliers & General Dealers Ltd">
@@ -268,7 +269,7 @@ function QuotationDocument({ proposal }) {
             </View>
             <View style={styles.metaLine}>
               <Text style={styles.metaLabel}>Date:</Text>
-              <Text style={styles.metaValue}>{fmtDate(proposal?.issued_on || proposal?.issued)}</Text>
+              <Text style={styles.metaValue}>{fmtDate(quotationDate)}</Text>
             </View>
           </View>
         </View>

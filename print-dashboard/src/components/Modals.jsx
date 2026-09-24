@@ -573,12 +573,18 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
     setForm({
       client: initialData?.client_name || '',
       title: initialData?.title || '',
-      items: (initialData?.line_items || []).map(item => ({
-        desc: item.desc || item.description || '',
-        qty: item.qty || item.quantity || 1,
-        rate: item.rate || item.unit_price || item.amount || 0,
-        unit: item.unit || 'item',
-      })),
+      items: (initialData?.line_items || []).map(item => {
+        const quantity = Number(item.qty ?? item.quantity ?? 1) || 1;
+        const rate = Number(item.rate ?? item.unit_price ?? 0) || 0;
+        const amount = Number(item.amount ?? item.line_total ?? 0) || 0;
+        const amountDerivedRate = amount > 0 && quantity > 0 ? amount / quantity : 0;
+        return {
+          desc: item.desc || item.description || '',
+          qty: quantity,
+          rate: rate || amountDerivedRate,
+          unit: item.unit || 'item',
+        };
+      }),
       validUntil: existingValidUntil,
       validDays: derivedDays,
       contact: initialData?.contact || '',

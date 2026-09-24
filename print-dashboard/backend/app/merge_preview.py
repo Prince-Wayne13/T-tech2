@@ -92,6 +92,19 @@ NAME_KEYED_TABLES = {
 # restructuring.
 WEAK_KEY_TABLES = []
 
+DEPENDENT_LINE_ITEM_TABLES = {
+    "invoice_line_items": {
+        "parent_table": "invoices",
+        "parent_key": "invoice_ref",
+        "parent_fk": "invoice_id",
+    },
+    "proposal_line_items": {
+        "parent_table": "proposals",
+        "parent_key": "proposal_ref",
+        "parent_fk": "proposal_id",
+    },
+}
+
 
 @dataclass
 class RowChange:
@@ -255,6 +268,27 @@ def _compare(a_rows: dict, b_rows: dict) -> list:
     return changes
 
 
+def _dependent_line_item_rows_by_key(conn: sqlite3.Connection, table: str, spec: dict) -> dict:
+    """Line items do not have stable refs. For preview/apply they are
+    identified by their parent's stable ref plus the line position.
+    """
+    conn.row_factory = sqlite3.Row
+    rows = {}
+    query = (
+        f"SELECT li.*, parent.{spec['parent_key']} AS parent_ref "
+        f"FROM {table} li "
+        f"JOIN {spec['parent_table']} parent ON parent.id = li.{spec['parent_fk']}"
+    )
+    for row in conn.execute(query).fetchall():
+        d = dict(row)
+        parent_ref = d.get("parent_ref")
+        position = d.get("position")
+        if parent_ref is None or position is None:
+            continue
+        rows[f"{parent_ref}::{position}"] = d
+    return rows
+
+
 def preview_merge(zip_path_a: str, zip_path_b: str, expected_db_name: str = "app.db") -> dict:
     """Compares two backup zips (A = e.g. this device's latest backup,
     B = another device's backup) and returns a dry-run report of what a
@@ -301,6 +335,22 @@ def preview_merge(zip_path_a: str, zip_path_b: str, expected_db_name: str = "app
                         table=table,
                         match_strategy="(device_id, id) -- no stable business key exists yet",
                         weak_key_warning=True,
+                        changes=changes,
+                    )
+                )
+
+            for table, spec in DEPENDENT_LINE_ITEM_TABLES.items():
+                required_tables = {table, spec["parent_table"]}
+                if not required_tables.issubset(existing_a) or not required_tables.issubset(existing_b):
+                    continue
+                a_rows = _dependent_line_item_rows_by_key(conn_a, table, spec)
+                b_rows = _dependent_line_item_rows_by_key(conn_b, table, spec)
+                changes = _compare(a_rows, b_rows)
+                table_previews.append(
+                    TableMergePreview(
+                        table=table,
+                        match_strategy=f"{spec['parent_table']}.{spec['parent_key']} + line position",
+                        weak_key_warning=False,
                         changes=changes,
                     )
                 )

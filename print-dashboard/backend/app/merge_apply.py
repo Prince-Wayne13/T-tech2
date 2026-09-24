@@ -80,8 +80,9 @@ from datetime import date, datetime
 from .extensions import db
 from .models import (
     Advance, Capability, Client, Expense, ExpenseCategory, ExportJob,
-    Invoice, Job, Material, MaterialTransaction, Payment, PettyCash,
-    PricingItem, ProductionMachine, Sale, Staff, SyncConflict, Vendor,
+    Invoice, InvoiceLineItem, Job, Material, MaterialTransaction, Payment,
+    PettyCash, PricingItem, ProductionMachine, Proposal, ProposalLineItem,
+    Sale, Staff, SyncConflict, Vendor,
 )
 from .merge_preview import preview_merge
 
@@ -226,6 +227,23 @@ SAFE_TO_WRITE_TABLES = {
             "client_id": ("clients", "client_ref"),
         },
     },
+    "proposals": {
+        "model": Proposal,
+        "key_column": "proposal_ref",
+        "columns": [
+            "proposal_ref", "client_id", "client_name", "title", "status",
+            "discount_amount", "currency", "valid_until", "contact",
+            "priority", "machine_id", "required_capability_id",
+            "prepared_by", "notes", "converted_invoice_id",
+            "device_id", "created_at", "updated_at",
+        ],
+        "fk_translations": {
+            "client_id": ("clients", "client_ref"),
+            "machine_id": ("production_machines", "machine_ref"),
+            "required_capability_id": ("capabilities", "name"),
+            "converted_invoice_id": ("invoices", "invoice_ref"),
+        },
+    },
     "expenses": {
         "model": Expense,
         "key_column": "expense_ref",
@@ -302,7 +320,7 @@ SAFE_TO_WRITE_TABLES = {
 APPLY_ORDER = [
     "production_machines", "capabilities", "vendors",
     "expense_categories", "advances", "export_jobs",
-    "clients", "pricing_items", "jobs", "invoices", "payments",
+    "clients", "pricing_items", "jobs", "invoices", "proposals", "payments",
     "expenses", "sales", "petty_cash_entries", "material_transactions",
 ]
 
@@ -313,10 +331,7 @@ if _missing_from_apply_order:
         "but missing from APPLY_ORDER -- would be silently never applied."
     )
 
-NOT_YET_SAFE_TABLES = [
-    "proposals",
-    "invoice_line_items", "proposal_line_items",
-]
+NOT_YET_SAFE_TABLES = []
 
 
 @dataclass
@@ -457,8 +472,10 @@ def _translate_fk(column: str, raw_value, referenced_table: str, referenced_key:
         "staff": Staff,
         "capabilities": Capability,
         "jobs": Job,
+        "invoices": Invoice,
         "expenses": Expense,
         "expense_categories": ExpenseCategory,
+        "pricing_items": PricingItem,
     }[referenced_table]
     match = model.query.filter_by(**{referenced_key: natural_key_value}).first()
     if match is None:
@@ -532,6 +549,144 @@ def _resolve_material_fk(conn_b, raw_b_material_id, notes: list):
         "to attach to."
     )
     return new_material.id, True
+
+
+LINE_ITEM_SPECS = {
+    "invoice_line_items": {
+        "model": InvoiceLineItem,
+        "parent_table": "invoices",
+        "parent_key": "invoice_ref",
+        "parent_fk": "invoice_id",
+        "parent_model": Invoice,
+        "columns": [
+            "position", "description", "product_type", "machine_id",
+            "pricing_item_id", "quantity", "unit", "unit_price",
+            "production_notes", "device_id", "created_at", "updated_at",
+        ],
+    },
+    "proposal_line_items": {
+        "model": ProposalLineItem,
+        "parent_table": "proposals",
+        "parent_key": "proposal_ref",
+        "parent_fk": "proposal_id",
+        "parent_model": Proposal,
+        "columns": [
+            "position", "description", "quantity", "unit", "unit_price",
+            "amount", "pricing_item_id", "machine_id",
+            "device_id", "created_at", "updated_at",
+        ],
+    },
+}
+
+
+def _line_item_identity(conn_b, spec: dict, b_row) -> tuple[str | None, int | None, str | None]:
+    """Returns (parent_ref, position, error). Line items have no stable
+    ref of their own, so cross-device identity is parent ref + position.
+    """
+    raw_parent_id = b_row[spec["parent_fk"]]
+    parent = conn_b.execute(
+        f"SELECT {spec['parent_key']} FROM {spec['parent_table']} WHERE id = ?",
+        (raw_parent_id,),
+    ).fetchone()
+    if parent is None:
+        return None, None, (
+            f"{spec['parent_fk']}: B's parent row id={raw_parent_id} was not "
+            "found in B's backup -- line skipped."
+        )
+    return parent[spec["parent_key"]], b_row["position"], None
+
+
+def _translate_optional_line_item_fk(conn_b, row_data: dict, column: str, ref_table: str, ref_key: str, errors: list):
+    raw_b_id = row_data.get(column)
+    if raw_b_id is None:
+        return
+    b_ref_row = conn_b.execute(
+        f"SELECT {ref_key} FROM {ref_table} WHERE id = ?", (raw_b_id,)
+    ).fetchone()
+    if b_ref_row is None:
+        errors.append(
+            f"{column}: B's own {ref_table} row (id={raw_b_id}) not found in "
+            "B's backup -- can't translate, line skipped."
+        )
+        return
+    resolved_id, ok = _translate_fk(column, b_ref_row[ref_key], ref_table, ref_key, errors)
+    if ok:
+        row_data[column] = resolved_id
+
+
+def _apply_dependent_line_items(conn_b, table: str, dry_run_only: bool) -> TableApplyResult:
+    """Merges invoice/proposal line items after parent rows have been
+    applied. These tables lack *_ref columns, so they are matched by
+    parent ref + position.
+    """
+    spec = LINE_ITEM_SPECS[table]
+    model = spec["model"]
+    parent_model = spec["parent_model"]
+    result = TableApplyResult(table=table, applied=True)
+
+    existing_tables = {
+        row[0]
+        for row in conn_b.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if table not in existing_tables:
+        result.skipped_reason = "table not found in source backup"
+        return result
+
+    b_rows = conn_b.execute(f"SELECT * FROM {table} ORDER BY {spec['parent_fk']}, position").fetchall()
+
+    for b_row in b_rows:
+        parent_ref, position, identity_error = _line_item_identity(conn_b, spec, b_row)
+        if identity_error:
+            result.errors.append(identity_error)
+            continue
+
+        local_parent = parent_model.query.filter_by(**{spec["parent_key"]: parent_ref}).first()
+        if local_parent is None:
+            result.errors.append(
+                f"{parent_ref} position {position}: parent not found on this device after merge -- line skipped."
+            )
+            continue
+
+        row_data = _coerce_row(spec["columns"], b_row)
+        row_data[spec["parent_fk"]] = local_parent.id
+
+        row_errors = []
+        _translate_optional_line_item_fk(
+            conn_b, row_data, "machine_id", "production_machines", "machine_ref", row_errors
+        )
+        _translate_optional_line_item_fk(
+            conn_b, row_data, "pricing_item_id", "pricing_items", "pricing_item_ref", row_errors
+        )
+        if row_errors:
+            result.errors.extend([f"{parent_ref} position {position}: {err}" for err in row_errors])
+            continue
+
+        existing = model.query.filter_by(**{
+            spec["parent_fk"]: local_parent.id,
+            "position": position,
+        }).first()
+
+        if existing is None:
+            if not dry_run_only:
+                db.session.add(model(**row_data))
+                db.session.flush()
+            result.added += 1
+            continue
+
+        changed = False
+        for col, value in row_data.items():
+            if col in (spec["parent_fk"], "position"):
+                continue
+            if getattr(existing, col) != value:
+                changed = True
+                if not dry_run_only:
+                    setattr(existing, col, value)
+        if changed:
+            if not dry_run_only:
+                db.session.flush()
+            result.updated += 1
+
+    return result
 
 
 def _snapshot_live_db_as_zip(tmpdir: str, expected_db_name: str = "app.db") -> str:
@@ -793,6 +948,9 @@ def apply_merge(zip_path_a: str | None, zip_path_b: str, dry_run_only: bool = Tr
                             result.updated += 1
 
                     results.append(result)
+
+                for table in LINE_ITEM_SPECS:
+                    results.append(_apply_dependent_line_items(conn_b, table, dry_run_only=dry_run_only))
 
                 has_errors = any(r.errors for r in results)
 

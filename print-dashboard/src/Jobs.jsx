@@ -173,6 +173,8 @@ function JobRow({ job, onPreview, onEdit, onPayment, onOpenProgress, onMarkFinis
   };
   const cfg = statusConfig[job.status] || statusConfig.in_session;
   const balance = Number(job.totals?.balance || 0);
+  const total = Number(job.totals?.total || 0);
+  const paid = Number(job.totals?.paid || 0);
 
   return (
     <div className="vendor-item" style={{ position: 'relative', paddingLeft: '14px', flexWrap: 'wrap', rowGap: '8px' }}>
@@ -207,7 +209,13 @@ function JobRow({ job, onPreview, onEdit, onPayment, onOpenProgress, onMarkFinis
       {/* Q4: Can we release it? Payment status + remaining balance. */}
       <div style={{ textAlign: 'right', minWidth: '110px', flexShrink: 0 }}>
         <PaymentStatusBadge status={job.paymentStatus} />
-        <div style={{ fontSize: '10px', color: balance > 0 ? 'var(--red)' : 'var(--teal)', marginTop: '4px', fontWeight: 600 }}>
+        <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '4px' }}>
+          Total MK {total.toLocaleString()}
+        </div>
+        <div style={{ fontSize: '10px', color: 'var(--teal)', fontWeight: 600 }}>
+          Paid MK {paid.toLocaleString()}
+        </div>
+        <div style={{ fontSize: '10px', color: balance > 0 ? 'var(--red)' : 'var(--teal)', fontWeight: 600 }}>
           {balance > 0 ? `MK ${balance.toLocaleString()} owed` : 'Fully paid'}
         </div>
       </div>

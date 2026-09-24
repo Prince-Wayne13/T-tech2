@@ -14,6 +14,9 @@ bp = Blueprint("sales", __name__)
 def list_sales():
     query = Sale.query
     query = apply_search(query, Sale, ["sale_ref", "description"])
+    for sale in query.all():
+        sync_sale_amount(sale)
+    db.session.commit()
     return jsonify(list_response(query.order_by(Sale.created_at.desc()), serialize_sale))
 
 

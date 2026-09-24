@@ -133,7 +133,10 @@ def accept_proposal(proposal_id):
                 "description": item.description,
                 "quantity": float(item.quantity or 1),
                 "unit": item.unit or "item",
-                "unit_price": float(item.unit_price or item.amount or 0),
+                "unit_price": float(
+                    item.unit_price
+                    or ((item.amount or 0) / (item.quantity or 1) if (item.amount or 0) > 0 else 0)
+                ),
                 # Same carry-over, at the per-line-item level -- build
                 # decision #5's "one job can need several machines"
                 # (InvoiceLineItem already supports this per-line).

@@ -31,7 +31,7 @@ export function ImportedDot({ recordDeviceId, currentDeviceId }) {
   if (!recordDeviceId || !currentDeviceId || recordDeviceId === currentDeviceId) return null;
   return (
     <span
-      title={`New from backup/device ${recordDeviceId}`}
+      title={`New from sync (${recordDeviceId})`}
       style={{
         display: 'inline-block',
         width: '7px',
