@@ -1,26 +1,78 @@
 // path: src/api/client.js
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '/api');
 const cache = new Map();
 const CACHE_TTL = 30000;
+const DEBUG_LOG_LIMIT = 2500;
+
+function clipDebug(value) {
+  if (value == null) return null;
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  return text.length > DEBUG_LOG_LIMIT ? `${text.slice(0, DEBUG_LOG_LIMIT)}... [truncated]` : text;
+}
+
+function writeDebugEvent(event) {
+  if (event.path?.startsWith('/audit/debug')) return;
+  const payload = JSON.stringify({
+    source: 'frontend',
+    event: 'api',
+    ...event,
+  });
+  const url = `${API_BASE_URL}/audit/debug`;
+  if (navigator.sendBeacon) {
+    const blob = new Blob([payload], { type: 'application/json' });
+    navigator.sendBeacon(url, blob);
+    return;
+  }
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: payload,
+    keepalive: true,
+  }).catch(() => {});
+}
 
 async function request(path, options = {}) {
   const method = options.method || 'GET';
   const cacheKey = `${method}:${path}`;
+  const started = performance.now();
   if (method === 'GET') {
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.time < CACHE_TTL) {
+      writeDebugEvent({
+        level: 'debug',
+        method,
+        path,
+        status_code: 200,
+        duration_ms: 0,
+        message: `CACHE HIT ${method} ${path}`,
+        response_body: clipDebug(cached.data),
+      });
       return cached.data;
     }
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+      ...options,
+    });
+  } catch (error) {
+    writeDebugEvent({
+      level: 'error',
+      method,
+      path,
+      duration_ms: Math.round(performance.now() - started),
+      message: `NETWORK ERROR ${method} ${path}`,
+      request_body: clipDebug(options.body),
+      error: error?.message || String(error),
+    });
+    throw error;
+  }
 
   if (!response.ok) {
     const bodyText = await response.text();
@@ -40,10 +92,31 @@ async function request(path, options = {}) {
     } catch {
       // Not JSON - keep the raw text, friendlyError() will sanitize it.
     }
+    writeDebugEvent({
+      level: 'error',
+      method,
+      path,
+      status_code: response.status,
+      duration_ms: Math.round(performance.now() - started),
+      message: `${method} ${path} -> ${response.status}`,
+      request_body: clipDebug(options.body),
+      response_body: clipDebug(bodyText),
+      error: message || `Request failed with ${response.status}`,
+    });
     throw new Error(message || `Request failed with ${response.status}`);
   }
 
   const data = await response.json();
+  writeDebugEvent({
+    level: 'info',
+    method,
+    path,
+    status_code: response.status,
+    duration_ms: Math.round(performance.now() - started),
+    message: `${method} ${path} -> ${response.status}`,
+    request_body: clipDebug(options.body),
+    response_body: clipDebug(data),
+  });
   if (method === 'GET') {
     cache.set(cacheKey, { data, time: Date.now() });
   } else {
@@ -55,6 +128,7 @@ async function request(path, options = {}) {
 export const api = {
   health: () => request('/health'),
   dashboardReport: () => request('/reports/dashboard'),
+  dashboardBreakdown: () => request('/reports/dashboard/breakdown'),
   reports: () => request('/reports'),
   financialReport: (period = 'month') => request(`/reports/financials?period=${period}`),
   machineRevenue: () => request('/reports/machines/revenue'),
@@ -164,6 +238,7 @@ export const api = {
     body: JSON.stringify(payload),
   }),
   audit: (params = '') => request(`/audit${params}`),
+  debugEvents: (params = '') => request(`/audit/debug${params}`),
   search: (query) => request(`/search?q=${encodeURIComponent(query)}`),
   machines: (params = '') => request(`/machines${params}`),
   createMachine: (payload) => request('/machines', {

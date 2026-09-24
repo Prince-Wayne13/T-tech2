@@ -33,6 +33,7 @@ import {
   SearchResultsModal,
 } from './components/Modals';
 import { PrintPreviewModal } from './components/PrintLayouts';
+import { DetailBreakdownModal } from './components/ModuleStandard';
 
 
 
@@ -450,9 +451,20 @@ function Sidebar({ active, setActive, isOpen, onClose, deviceIdentity }) {
    COMPONENT: FinCard, QuickActions, ActivityFeed, VendorList
    (Keeping your existing implementations unchanged)
 ═══════════════════════════════════════ */
-function FinCard({ title, value, change, up, color, sub, fill, icon }) {
+function FinCard({ title, value, change, up, color, sub, fill, icon, details, onOpenDetails }) {
+  const clickable = Boolean(details && onOpenDetails);
   return (
-    <div className="card fin-card">
+    <div
+      className="card fin-card"
+      onClick={clickable ? () => onOpenDetails(details) : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? event => {
+        if (event.key === 'Enter' || event.key === ' ') onOpenDetails(details);
+      } : undefined}
+      title={clickable ? 'Show breakdown' : undefined}
+      style={clickable ? { cursor: 'pointer' } : undefined}
+    >
       <div className="fin-top">
         <div className="fin-label">{title}</div>
         <div className={`fin-icon ${color}`}><Icon d={D[icon]} size={15} /></div>
@@ -641,6 +653,8 @@ function ActionModal({ action, onClose, onSubmit }) {
 function MainCanvas({ onAction, onPreview }) {
   const [summary, setSummary] = useState(null);
   const [financials, setFinancials] = useState(null);
+  const [breakdown, setBreakdown] = useState(null);
+  const [cardDetail, setCardDetail] = useState(null);
   const [activity, setActivity] = useState([]);
   const [vendors, setVendors] = useState(VENDORS);
   const [expenses, setExpenses] = useState([]);
@@ -650,14 +664,16 @@ function MainCanvas({ onAction, onPreview }) {
     Promise.all([
       api.dashboardReport(),
       api.financialReport('month'),
+      api.dashboardBreakdown(),
       api.audit('?per_page=6'),
       api.expenses('?per_page=3'),
       api.vendors('?per_page=5'),
     ])
-      .then(([dashboard, financialReport, auditResponse, expenseResponse, vendorResponse]) => {
+      .then(([dashboard, financialReport, dashboardBreakdown, auditResponse, expenseResponse, vendorResponse]) => {
         if (!active) return;
         setSummary(dashboard);
         setFinancials(financialReport);
+        setBreakdown(dashboardBreakdown);
         setActivity((auditResponse.items || []).map(mapRecentActivity));
         setVendors((vendorResponse.items || []).map(vendor => ({
           name: vendor.name,
@@ -677,10 +693,10 @@ function MainCanvas({ onAction, onPreview }) {
   }, []);
 
   const liveCards = summary ? [
-    { title: 'Cash Balance', value: money(summary.cash_balance), change: 'Live', up: summary.cash_balance >= 0, color: 'primary', sub: 'from backend', fill: 82, icon: 'ar' },
-    { title: 'Receivables', value: money(summary.receivables), change: `${summary.overdue_invoices} overdue`, up: summary.overdue_invoices === 0, color: 'secondary', sub: 'open balances', fill: 45, icon: 'invoices' },
-    { title: 'Expenses', value: money(summary.expenses), change: 'Live', up: false, color: 'warning', sub: 'approved spend', fill: 38, icon: 'expenses' },
-    { title: 'Gross Profit', value: money(summary.gross_profit), change: `${summary.active_jobs} jobs`, up: summary.gross_profit >= 0, color: 'teal', sub: 'active production', fill: 68, icon: 'jobs' },
+    { title: 'Cash Balance', value: money(summary.cash_balance), change: 'Live', up: summary.cash_balance >= 0, color: 'primary', sub: 'from backend', fill: 82, icon: 'ar', details: breakdown?.cash_balance },
+    { title: 'Receivables', value: money(summary.receivables), change: `${summary.overdue_invoices} overdue`, up: summary.overdue_invoices === 0, color: 'secondary', sub: 'open balances', fill: 45, icon: 'invoices', details: breakdown?.receivables },
+    { title: 'Expenses', value: money(summary.expenses), change: 'Live', up: false, color: 'warning', sub: 'approved spend', fill: 38, icon: 'expenses', details: breakdown?.expenses },
+    { title: 'Gross Profit', value: money(summary.gross_profit), change: `${summary.active_jobs} jobs`, up: summary.gross_profit >= 0, color: 'teal', sub: 'active production', fill: 68, icon: 'jobs', details: breakdown?.gross_profit },
   ] : [
     { title: 'Cash Balance', value: money(0), change: 'Loading', up: true, color: 'primary', sub: 'from backend', fill: 0, icon: 'ar' },
     { title: 'Receivables', value: money(0), change: 'Loading', up: true, color: 'secondary', sub: 'open balances', fill: 0, icon: 'invoices' },
@@ -690,11 +706,12 @@ function MainCanvas({ onAction, onPreview }) {
 
   return (
     <main className="main-canvas">
-      {liveCards.map(c => <FinCard key={c.title} {...c} />)}
+      {liveCards.map(c => <FinCard key={c.title} {...c} onOpenDetails={setCardDetail} />)}
       <PulseChart financials={financials} />
       <QuickActions onAction={onAction} />
       <ActivityFeed items={activity} onSeeAll={() => onPreview('Recent Activity', activity)} />
       <VendorList vendors={vendors} expenses={expenses} />
+      <DetailBreakdownModal detail={cardDetail} onClose={() => setCardDetail(null)} />
     </main>
   );
 }

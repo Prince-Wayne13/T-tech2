@@ -3,7 +3,7 @@
 from flask import Blueprint, jsonify, request
 
 from ..services.materials import build_materials_reconciliation
-from ..services.reports import build_dashboard_summary, build_financial_report, build_machine_revenue, build_report_library
+from ..services.reports import build_dashboard_breakdown, build_dashboard_summary, build_financial_report, build_machine_revenue, build_report_library
 
 bp = Blueprint("reports", __name__)
 
@@ -11,6 +11,11 @@ bp = Blueprint("reports", __name__)
 @bp.get("/dashboard")
 def dashboard():
     return jsonify(build_dashboard_summary())
+
+
+@bp.get("/dashboard/breakdown")
+def dashboard_breakdown():
+    return jsonify(build_dashboard_breakdown())
 
 
 @bp.get("/financials")

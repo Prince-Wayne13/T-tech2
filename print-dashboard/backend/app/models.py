@@ -563,6 +563,41 @@ class AuditLog(db.Model):
         }
 
 
+class DebugEvent(db.Model):
+    __tablename__ = "debug_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    level = db.Column(db.String(20), default="info", nullable=False, index=True)
+    source = db.Column(db.String(40), default="frontend", nullable=False, index=True)
+    event = db.Column(db.String(80), default="api", nullable=False, index=True)
+    method = db.Column(db.String(12))
+    path = db.Column(db.String(255), index=True)
+    status_code = db.Column(db.Integer, index=True)
+    duration_ms = db.Column(db.Integer)
+    message = db.Column(db.String(255), nullable=False)
+    request_body = db.Column(db.Text)
+    response_body = db.Column(db.Text)
+    error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "level": self.level,
+            "source": self.source,
+            "event": self.event,
+            "method": self.method,
+            "path": self.path,
+            "status_code": self.status_code,
+            "duration_ms": self.duration_ms,
+            "message": self.message,
+            "request_body": self.request_body,
+            "response_body": self.response_body,
+            "error": self.error,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
 class SyncConflict(db.Model):
     __tablename__ = "sync_conflicts"
 

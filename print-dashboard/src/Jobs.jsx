@@ -7,8 +7,11 @@ import { api } from './api/client';
 import { shortDate } from './utils/format';
 import { friendlyError } from './utils/errors';
 import { resolveClientMatch } from './utils/clientMatch';
+import { useDeviceIdentity } from './hooks/useDeviceIdentity';
 import {
   Icon,
+  DetailBreakdownModal,
+  ImportedDot,
   ModuleHeader,
   ModuleToast,
   ModuleToolbar,
@@ -78,6 +81,7 @@ const mapJob = job => ({
   // than recomputed here from totals — invoice_status_from_totals() in
   // services/invoices.py is the single source of truth for this label.
   paymentStatus: job.invoice?.status || (Number(job.totals?.balance) > 0 ? 'not_paid' : job.totals ? 'paid' : 'not_paid'),
+  deviceId: job.device_id,
 });
 
 function jobPayload(form, fallback = {}, clientId = null) {
@@ -161,7 +165,7 @@ function PaymentStatusBadge({ status }) {
 // left to right: what we're making, what's happening, who it's for, and
 // (Can we release it?) payment status + balance. "What can I do next?"
 // stays as the action buttons at the end, unchanged in spirit from before.
-function JobRow({ job, onPreview, onEdit, onPayment, onOpenProgress, onMarkFinished, onCancel }) {
+function JobRow({ job, onPreview, onEdit, onPayment, onOpenProgress, onMarkFinished, onCancel, currentDeviceId }) {
   const statusConfig = {
     in_session: { label: 'In Session', cls: 'active', accent: 'var(--primary)' },
     finished: { label: 'Finished', cls: 'paid', accent: 'var(--teal)' },
@@ -177,7 +181,7 @@ function JobRow({ job, onPreview, onEdit, onPayment, onOpenProgress, onMarkFinis
 
       {/* Q1: What are we making? Services / quantity / notes indicator. */}
       <div className="vendor-info">
-        <div className="vendor-name">{job.title}</div>
+        <div className="vendor-name">{job.title}<ImportedDot recordDeviceId={job.deviceId} currentDeviceId={currentDeviceId} /></div>
         <div className="vendor-cat">
           {job.totalCount > 0 ? `${job.totalCount} units` : `${job.pages}pp x ${job.copies}`}
           {job.notes ? ' - has notes' : ''}
@@ -235,6 +239,7 @@ function JobRow({ job, onPreview, onEdit, onPayment, onOpenProgress, onMarkFinis
 export default function Jobs() {
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
+  const [statDetail, setStatDetail] = useState(null);
   const [sortBy, setSortBy] = useState('none');
   const [preview, setPreview] = useState(null);
   const [showEntry, setShowEntry] = useState(false);
@@ -256,6 +261,7 @@ export default function Jobs() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { toast, notify } = useModuleToast();
+  const deviceIdentity = useDeviceIdentity();
 
   const loadJobs = () => {
     setLoading(true);
@@ -287,11 +293,22 @@ export default function Jobs() {
         return sortBy === 'priority_desc' ? -diff : diff;
       });
 
+  const jobRows = list => list.map(job => ({
+    ref: job.id,
+    title: job.title,
+    party: job.client,
+    amount: Number(job.totals?.balance || job.totals?.total || 0),
+    date: job.due_date,
+    status: job.status,
+  }));
+  const activeJobs = jobs.filter(job => job.status === 'in_session');
+  const finishedJobs = jobs.filter(job => job.status === 'finished');
+  const balanceJobs = jobs.filter(job => Number(job.totals?.balance || 0) > 0);
   const stats = [
-    { label: 'Active Jobs', value: jobs.filter(job => job.status === 'in_session').length, sub: 'Currently processing', icon: D.printer, color: 'primary' },
-    { label: 'Outstanding', value: `MK ${jobs.reduce((sum, job) => sum + Number(job.totals?.balance || 0), 0).toLocaleString()}`, sub: 'Job balances', icon: D.clock, color: 'warning' },
-    { label: 'Completed', value: jobs.filter(job => job.status === 'finished').length, sub: 'Ready for pickup', icon: D.check, color: 'teal' },
-    { label: 'Avg. Turnaround', value: '4.2h', sub: 'Last 7 days', icon: D.jobs, color: 'secondary' },
+    { label: 'Active Jobs', value: activeJobs.length, sub: 'Currently processing', icon: D.printer, color: 'primary', details: { title: 'Active Jobs', sections: [{ title: 'Currently Processing', rows: jobRows(activeJobs) }] } },
+    { label: 'Outstanding', value: `MK ${jobs.reduce((sum, job) => sum + Number(job.totals?.balance || 0), 0).toLocaleString()}`, sub: 'Job balances', icon: D.clock, color: 'warning', details: { title: 'Outstanding Job Balances', sections: [{ title: 'Jobs With Balance', rows: jobRows(balanceJobs) }] } },
+    { label: 'Completed', value: finishedJobs.length, sub: 'Ready for pickup', icon: D.check, color: 'teal', details: { title: 'Completed Jobs', sections: [{ title: 'Ready / Finished', rows: jobRows(finishedJobs) }] } },
+    { label: 'Avg. Turnaround', value: '4.2h', sub: 'Last 7 days', icon: D.jobs, color: 'secondary', details: { title: 'Turnaround Source', sections: [{ title: 'Recent Finished Jobs', rows: jobRows(finishedJobs.slice(0, 20)) }] } },
   ];
 
   // Item 6: does the actual create/update call once a client_id has been
@@ -464,7 +481,7 @@ export default function Jobs() {
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
       <ModuleHeader title="Jobs" subtitle="Manage print production queue" actionLabel="New Job" onAction={() => setShowEntry(true)} />
-      <StatsGrid stats={stats} />
+      <StatsGrid stats={stats} onOpenDetails={setStatDetail} />
       <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
         <button className="notif-btn" style={{ width: 'auto', padding: '0 12px', height: '30px', gap: '6px', display: 'flex', alignItems: 'center', fontSize: '10px', fontWeight: 600 }} title="Download Today's To-Do List" onClick={downloadTodoList}>
           <Icon d={D.download} size={12} /> Download Today's To-Do List
@@ -496,6 +513,7 @@ export default function Jobs() {
             onOpenProgress={setProgressJob}
             onMarkFinished={handleMarkFinished}
             onCancel={handleCancelJob}
+            currentDeviceId={deviceIdentity?.device_id}
           />
         ))}
       </RegisterCard>
@@ -588,6 +606,7 @@ export default function Jobs() {
           }
         }}
       />
+      <DetailBreakdownModal detail={statDetail} onClose={() => setStatDetail(null)} />
       <ModuleToast toast={toast} />
     </main>
   );

@@ -22,7 +22,7 @@ def next_payment_ref():
 
 def invoice_totals(invoice):
     subtotal = sum((item.line_total() for item in invoice.line_items), Decimal("0.00"))
-    if not invoice.line_items:
+    if not invoice.line_items or (subtotal == 0 and decimal_money(invoice.amount) > 0):
         subtotal = decimal_money(invoice.amount)
 
     discount = decimal_money(invoice.discount_amount)
@@ -92,6 +92,11 @@ def serialize_invoice(invoice, include_document=False):
 def apply_line_items(invoice, line_items):
     invoice.line_items.clear()
     for index, item in enumerate(line_items or [], start=1):
+        quantity = decimal_money(item.get("quantity", 1))
+        unit_price = decimal_money(item.get("unit_price", item.get("rate", 0)))
+        line_amount = decimal_money(item.get("amount", item.get("line_total", 0)))
+        if unit_price == 0 and line_amount > 0 and quantity > 0:
+            unit_price = (line_amount / quantity).quantize(Decimal("0.01"))
         invoice.line_items.append(
             InvoiceLineItem(
                 position=item.get("position", index),
@@ -99,9 +104,9 @@ def apply_line_items(invoice, line_items):
                 product_type=item.get("product_type"),
                 machine_id=item.get("machine_id"),
                 pricing_item_id=item.get("pricing_item_id"),
-                quantity=decimal_money(item.get("quantity", 1)),
+                quantity=quantity,
                 unit=item.get("unit", "item"),
-                unit_price=decimal_money(item.get("unit_price", item.get("rate", 0))),
+                unit_price=unit_price,
                 production_notes=item.get("production_notes"),
             )
         )

@@ -3,10 +3,11 @@ import './styles.css';
 import { api } from './api/client';
 import { compactDate, money } from './utils/format';
 import { friendlyError } from './utils/errors';
+import { useDeviceIdentity } from './hooks/useDeviceIdentity';
 import PreviewModal from './components/PreviewModal';
 import { NewAdvanceModal } from './components/Modals';
 import { downloadInvoicePDF } from './components/InvoicePDF';
-import { Icon, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
+import { Icon, ImportedDot, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
 
 const D = {
   ...STANDARD_ICONS,
@@ -30,10 +31,11 @@ const mapAdvance = advance => {
     status,
     remaining: status === 'settled' ? money(0) : money(advance.amount),
     notes: advance.notes || 'Backend advance record',
+    deviceId: advance.device_id,
   };
 };
 
-function AdvanceRow({ adv, onPreview }) {
+function AdvanceRow({ adv, onPreview, currentDeviceId }) {
   const statusConfig = {
     active: { label: 'Active', cls: 'active', accent: 'var(--primary)' },
     settled: { label: 'Settled', cls: 'paid', accent: 'var(--teal)' },
@@ -47,7 +49,7 @@ function AdvanceRow({ adv, onPreview }) {
       <div style={{ position: 'absolute', left: 0, top: '10px', bottom: '10px', width: '2px', background: cfg.accent, borderRadius: '2px' }} />
       <div className="vendor-avatar" style={{ background: 'var(--purple-dim)', color: 'var(--purple)' }}>{String(adv.id).split('-')[1] || 'ADV'}</div>
       <div className="vendor-info">
-        <div className="vendor-name">{adv.title}</div>
+        <div className="vendor-name">{adv.title}<ImportedDot recordDeviceId={adv.deviceId} currentDeviceId={currentDeviceId} /></div>
         <div className="vendor-cat">{adv.party} - {adv.date || '-'}</div>
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '100px' }}>
@@ -76,6 +78,7 @@ export default function Advances() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { toast, notify } = useModuleToast();
+  const deviceIdentity = useDeviceIdentity();
 
   const loadAdvances = () => {
     setLoading(true);
@@ -132,7 +135,7 @@ export default function Advances() {
       <StatsGrid stats={stats} />
       <ModuleToolbar filters={ADVANCE_STATUSES} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search party, title, or ID..." />
       <RegisterCard title="Advance Register" countLabel={`${filtered.length} advance${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="ADV" emptyMessage="No advances match your filters.">
-        {filtered.map(adv => <AdvanceRow key={adv.id} adv={adv} onPreview={setPreview} />)}
+        {filtered.map(adv => <AdvanceRow key={adv.id} adv={adv} onPreview={setPreview} currentDeviceId={deviceIdentity?.device_id} />)}
       </RegisterCard>
       <NewAdvanceModal isOpen={showEntry} onClose={() => setShowEntry(false)} onSave={handleSave} />
       <PreviewModal title={preview ? `Advance Preview: ${preview.advance_ref || preview.id || 'Draft'}` : ''} data={preview} onClose={() => setPreview(null)} />

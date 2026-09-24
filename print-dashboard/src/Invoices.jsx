@@ -6,11 +6,14 @@ import { PrintPreviewModal } from './components/PrintLayouts';
 import { downloadInvoicePDF } from './components/InvoicePDF';
 import { shareText } from './utils/downloads';
 import { calculateTotal } from './utils/calculateTotal';
+import { useDeviceIdentity } from './hooks/useDeviceIdentity';
 import {
   Icon,
+  ImportedDot,
   ModuleHeader,
   ModuleToast,
   ModuleToolbar,
+  DetailBreakdownModal,
   RegisterCard,
   STANDARD_ICONS,
   StatsGrid,
@@ -74,6 +77,7 @@ function mapInvoice(invoice) {
     notes: invoice.notes,
     sourceProposalRef: invoice.source_proposal_ref || null,
     discount_amount: Number(invoice.discount_amount || 0),
+    deviceId: invoice.device_id,
   };
 }
 
@@ -81,7 +85,7 @@ function mapInvoice(invoice) {
 // relabeling (sent -> "Due") so it only applies where that framing made
 // sense — it stays off on the "All" tab where showing the true status
 // ("Sent") is more accurate for a full-history view.
-function InvoiceRow({ inv, onPreview, onOutstandingTab }) {
+function InvoiceRow({ inv, onPreview, onOutstandingTab, currentDeviceId }) {
   const statusConfig = {
     draft: { label: 'Draft', cls: 'pending', accent: 'var(--warning)' },
     not_paid: { label: onOutstandingTab ? 'Due' : 'Not Paid', cls: 'current', accent: 'var(--secondary)' },
@@ -100,7 +104,7 @@ function InvoiceRow({ inv, onPreview, onOutstandingTab }) {
         {String(inv.id).split('-')[1] || 'INV'}
       </div>
       <div className="vendor-info">
-        <div className="vendor-name">{inv.title}</div>
+        <div className="vendor-name">{inv.title}<ImportedDot recordDeviceId={inv.deviceId} currentDeviceId={currentDeviceId} /></div>
         <div className="vendor-cat">{inv.client} - Due: {inv.due || '-'}</div>
         {inv.sourceProposalRef && (
           <div className="activity-time" style={{ marginTop: '2px' }}>Converted from {inv.sourceProposalRef}</div>
@@ -137,14 +141,16 @@ function InvoiceRow({ inv, onPreview, onOutstandingTab }) {
 export default function Invoices() {
   // Default tab is "Outstanding" (Option C) — matches the owner's daily
   // use pattern of checking what's unpaid, not browsing full history.
-  const [tab, setTab] = useState('Outstanding');
+  const [tab, setTab] = useState('All');
   const [search, setSearch] = useState('');
+  const [statDetail, setStatDetail] = useState(null);
   const [invoices, setInvoices] = useState([]);
   const [invoiceStats, setInvoiceStats] = useState(null);
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { toast } = useModuleToast();
+  const deviceIdentity = useDeviceIdentity();
 
   const loadInvoices = () => {
     setLoading(true);
@@ -183,19 +189,27 @@ export default function Invoices() {
   const paidTotal = invoices.filter(i => i.status === 'paid').reduce((sum, i) => sum + i.amountValue, 0);
   const allTotal = invoices.reduce((sum, i) => sum + i.amountValue, 0);
   const allOwed = invoices.reduce((sum, i) => sum + i.balanceValue, 0);
+  const invoiceRows = list => list.map(invoice => ({
+    ref: invoice.id,
+    title: invoice.title,
+    party: invoice.client,
+    amount: invoice.balanceValue > 0 ? invoice.balanceValue : invoice.amountValue,
+    date: invoice.due_on || invoice.issued_on,
+    status: invoice.status,
+  }));
 
   const statsByTab = {
     Outstanding: [
-      { label: 'Total Outstanding', value: money(invoiceStats?.outstanding ?? outstandingTotal), sub: 'Unpaid invoices', icon: D.invoices, color: 'warning' },
-      { label: 'Overdue', value: String(invoiceStats?.overdue_count ?? overdueList.length), sub: 'Past due invoices', icon: D.alert, color: 'red' },
-      { label: 'Due Amount', value: money(outstandingTotal), sub: `${filtered.length} invoices`, icon: D.clock, color: 'secondary' },
-      { label: 'Paid This Month', value: money(invoiceStats?.paid), sub: 'Cash collected', icon: D.check, color: 'teal' },
+      { label: 'Total Outstanding', value: money(invoiceStats?.outstanding ?? outstandingTotal), sub: 'Unpaid invoices', icon: D.invoices, color: 'warning', details: { title: 'Total Outstanding', sections: [{ title: 'Unpaid / Partial Invoices', rows: invoiceRows(invoices.filter(i => ['not_paid', 'partial', 'sent', 'overdue'].includes(i.status))) }] } },
+      { label: 'Overdue', value: String(invoiceStats?.overdue_count ?? overdueList.length), sub: 'Past due invoices', icon: D.alert, color: 'red', details: { title: 'Overdue Invoices', sections: [{ title: 'Past Due', rows: invoiceRows(overdueList) }] } },
+      { label: 'Due Amount', value: money(outstandingTotal), sub: `${filtered.length} invoices`, icon: D.clock, color: 'secondary', details: { title: 'Due Amount', sections: [{ title: 'Current Filter', rows: invoiceRows(filtered) }] } },
+      { label: 'Paid This Month', value: money(invoiceStats?.paid), sub: 'Cash collected', icon: D.check, color: 'teal', details: { title: 'Paid Invoices', sections: [{ title: 'Paid', rows: invoiceRows(invoices.filter(i => i.status === 'paid')) }] } },
     ],
     All: [
-      { label: 'Total Invoiced', value: money(allTotal), sub: 'All statuses', icon: D.invoices, color: 'primary' },
-      { label: 'Total Owed', value: money(allOwed), sub: 'Total minus payments received', icon: D.clock, color: 'warning' },
-      { label: 'Overdue', value: String(overdueList.length), sub: 'Past due invoices', icon: D.alert, color: 'red' },
-      { label: 'Invoice Count', value: String(invoices.length), sub: 'All records', icon: D.invoices, color: 'secondary' },
+      { label: 'Total Invoiced', value: money(allTotal), sub: 'All statuses', icon: D.invoices, color: 'primary', details: { title: 'Total Invoiced', sections: [{ title: 'All Invoices', rows: invoiceRows(invoices) }] } },
+      { label: 'Total Owed', value: money(allOwed), sub: 'Total minus payments received', icon: D.clock, color: 'warning', details: { title: 'Total Owed', sections: [{ title: 'Invoices With Balance', rows: invoiceRows(invoices.filter(i => i.balanceValue > 0)) }] } },
+      { label: 'Overdue', value: String(overdueList.length), sub: 'Past due invoices', icon: D.alert, color: 'red', details: { title: 'Overdue Invoices', sections: [{ title: 'Past Due', rows: invoiceRows(overdueList) }] } },
+      { label: 'Invoice Count', value: String(invoices.length), sub: 'All records', icon: D.invoices, color: 'secondary', details: { title: 'Invoice Count', sections: [{ title: 'All Invoices', rows: invoiceRows(invoices) }] } },
     ],
     Paid: [
       { label: 'Total Paid', value: money(paidTotal), sub: 'Collected', icon: D.check, color: 'teal' },
@@ -215,12 +229,13 @@ export default function Invoices() {
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
       <ModuleHeader title="Invoices" subtitle="Derived from jobs and payment history" />
-      <StatsGrid stats={stats} />
+      <StatsGrid stats={stats} onOpenDetails={setStatDetail} />
       <ModuleToolbar filters={TABS} filter={tab} setFilter={setTab} search={search} setSearch={setSearch} placeholder="Search client, title, or ID..." />
       <RegisterCard title="Invoice Register" countLabel={`${filtered.length} invoice${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="INV" emptyMessage="No invoices match your filters.">
-        {filtered.map(inv => <InvoiceRow key={inv.id} inv={inv} onPreview={setPreview} onOutstandingTab={onOutstandingTab} />)}
+        {filtered.map(inv => <InvoiceRow key={inv.id} inv={inv} onPreview={setPreview} onOutstandingTab={onOutstandingTab} currentDeviceId={deviceIdentity?.device_id} />)}
       </RegisterCard>
       <PrintPreviewModal type="invoice" title={preview ? `Invoice Preview: ${preview.id}` : ''} data={preview} onClose={() => setPreview(null)} />
+      <DetailBreakdownModal detail={statDetail} onClose={() => setStatDetail(null)} />
       <ModuleToast toast={toast} />
     </main>
   );

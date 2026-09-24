@@ -27,6 +27,25 @@ export const STANDARD_ICONS = {
   invoices: 'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2 M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2 M9 5a2 2 0 0 0 2-2h2a2 2 0 0 0 2 2 M12 12v4 M10 14h4',
 };
 
+export function ImportedDot({ recordDeviceId, currentDeviceId }) {
+  if (!recordDeviceId || !currentDeviceId || recordDeviceId === currentDeviceId) return null;
+  return (
+    <span
+      title={`New from backup/device ${recordDeviceId}`}
+      style={{
+        display: 'inline-block',
+        width: '7px',
+        height: '7px',
+        borderRadius: '50%',
+        background: 'var(--secondary)',
+        boxShadow: '0 0 0 3px rgba(101, 139, 181, 0.16)',
+        marginLeft: '6px',
+        verticalAlign: 'middle',
+      }}
+    />
+  );
+}
+
 export const moduleStyles = {
   header: {
     display: 'flex',
@@ -163,7 +182,7 @@ export function ModuleHeader({ title, subtitle, actionLabel, onAction, actionIco
   );
 }
 
-export function StatsCard({ label, value, sub, icon, color }) {
+export function StatsCard({ label, value, sub, icon, color, details, onOpenDetails }) {
   const colorMap = {
     warning: 'var(--warning)',
     red: 'var(--red)',
@@ -171,8 +190,19 @@ export function StatsCard({ label, value, sub, icon, color }) {
     secondary: 'var(--secondary)',
     primary: 'var(--primary)',
   };
+  const clickable = Boolean(details && onOpenDetails);
   return (
-    <div className="card fin-card">
+    <div
+      className="card fin-card"
+      onClick={clickable ? () => onOpenDetails(details) : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? event => {
+        if (event.key === 'Enter' || event.key === ' ') onOpenDetails(details);
+      } : undefined}
+      style={clickable ? { cursor: 'pointer' } : undefined}
+      title={clickable ? 'Show breakdown' : undefined}
+    >
       <div className="fin-top">
         <div className="fin-label" style={{ color: '#374f6c' }}>{label}</div>
         <div className={`fin-icon ${color}`}><Icon d={icon} size={15} /></div>
@@ -183,10 +213,63 @@ export function StatsCard({ label, value, sub, icon, color }) {
   );
 }
 
-export function StatsGrid({ stats, columns = 4 }) {
+export function StatsGrid({ stats, columns = 4, onOpenDetails }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: '14px', marginBottom: '14px' }}>
-      {stats.map(stat => <StatsCard key={stat.label} {...stat} />)}
+      {stats.map(stat => <StatsCard key={stat.label} {...stat} onOpenDetails={onOpenDetails} />)}
+    </div>
+  );
+}
+
+const fmtAmount = value => `MK ${Number(value || 0).toLocaleString('en-MW', { maximumFractionDigits: 0 })}`;
+
+export function DetailBreakdownModal({ detail, onClose }) {
+  if (!detail) return null;
+  const sections = detail.sections || [];
+  const summary = detail.summary || [];
+  return (
+    <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'grid', placeItems: 'center', padding: '18px', background: 'rgba(5, 12, 18, 0.62)' }} onClick={onClose}>
+      <section className="card" style={{ width: 'min(760px, 96vw)', maxHeight: '86vh', overflow: 'auto', borderTop: '2px solid var(--primary)' }} onClick={event => event.stopPropagation()}>
+        <div className="card-header" style={{ marginBottom: '12px' }}>
+          <div>
+            <h3 className="card-title">{detail.title || 'Breakdown'}</h3>
+            <p className="card-sub">Source rows behind this value</p>
+          </div>
+          <button className="filter-btn active" onClick={onClose}>Close</button>
+        </div>
+        {summary.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(summary.length, 3)}, 1fr)`, gap: '8px', marginBottom: '14px' }}>
+            {summary.map(item => (
+              <div key={item.label} style={{ background: 'var(--bg-canvas)', border: '1px solid var(--border-faint)', borderRadius: '7px', padding: '10px' }}>
+                <div style={{ fontSize: '9px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>{item.label}</div>
+                <div style={{ fontSize: '15px', fontWeight: 800, color: Number(item.amount) < 0 ? 'var(--red)' : 'var(--text-head)', marginTop: '4px' }}>{fmtAmount(item.amount)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'grid', gap: '14px' }}>
+          {sections.map(section => (
+            <div key={section.title}>
+              <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-head)', marginBottom: '7px' }}>{section.title}</div>
+              <div style={{ border: '1px solid var(--border-faint)', borderRadius: '7px', overflow: 'hidden' }}>
+                {(section.rows || []).length === 0 ? (
+                  <div style={{ padding: '12px', color: 'var(--text-muted)', fontSize: '11px' }}>No source rows found.</div>
+                ) : section.rows.map((row, index) => (
+                  <div key={`${row.ref || section.title}-${index}`} style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.8fr 1fr 1fr', gap: '8px', alignItems: 'center', padding: '9px 10px', borderTop: index ? '1px solid var(--border-faint)' : 'none', fontSize: '10px', background: index % 2 ? 'rgba(248,249,251,0.7)' : '#fff' }}>
+                    <div style={{ fontWeight: 700, color: 'var(--text-head)' }}>{row.ref || '-'}</div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: 'var(--text-body)' }}>{row.title || '-'}</div>
+                      <div style={{ color: 'var(--text-muted)', marginTop: '2px' }}>{row.party || row.status || '-'}</div>
+                    </div>
+                    <div style={{ color: 'var(--text-muted)' }}>{row.date || '-'}</div>
+                    <div style={{ textAlign: 'right', fontWeight: 800, color: section.negative ? 'var(--red)' : 'var(--text-head)' }}>{section.negative ? '-' : ''}{fmtAmount(row.amount)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

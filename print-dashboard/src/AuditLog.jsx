@@ -1,129 +1,220 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
-import { Icon, ModuleHeader, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid } from './components/ModuleStandard';
+import { ModuleHeader, ModuleToolbar, STANDARD_ICONS } from './components/ModuleStandard';
 import { downloadTablePDF } from './components/TablePDF';
 import { shortDate } from './utils/format';
-import UnifiedPreviewModal from './components/UnifiedPreviewModal';
 
 const D = {
   ...STANDARD_ICONS,
-  reports: 'M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7',
   download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3',
-  eye: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
 };
 
-const LOG_TYPES = ['All', 'User Action', 'Financial', 'System', 'Document'];
+const LEVELS = ['All', 'Error', 'Info', 'Debug'];
 
-function mapAuditEntry(entry) {
-  const typeMap = {
-    job: 'Document',
-    invoice: 'Financial',
-    expense: 'Financial',
-    system: 'System',
-    user: 'User Action',
-  };
-  const stamp = entry.created_at || entry.timestamp;
+function formatTime(value) {
+  if (!value) return '--:--:--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function formatDateTime(value) {
+  if (!value) return 'Unknown';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function safeText(value, fallback = '') {
+  if (value == null) return fallback;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function prettyJson(value) {
+  if (!value) return '';
+  const text = safeText(value);
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+function mapDebugEvent(entry) {
   return {
-    id: entry.id || `LOG-${Math.random().toString().slice(2, 6)}`,
-    user: entry.actor || entry.user || 'System',
-    action: entry.action || entry.description || 'Action',
-    target: entry.entity_type ? `${entry.entity_type} #${entry.entity_id || '-'}` : entry.target || 'Unknown',
-    time: stamp ? new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(stamp)) : 'Unknown',
-    type: typeMap[entry.entity_type || entry.type] || 'User Action',
-    details: entry.action || entry.details || 'No details available',
+    id: entry.id,
+    level: safeText(entry.level, 'info').toLowerCase(),
+    source: safeText(entry.source, 'frontend'),
+    method: safeText(entry.method),
+    path: safeText(entry.path),
+    status: entry.status_code,
+    duration: entry.duration_ms,
+    message: safeText(entry.message, 'Debug event'),
+    request: safeText(entry.request_body),
+    response: safeText(entry.response_body),
+    error: safeText(entry.error),
+    createdAt: entry.created_at,
   };
 }
 
-function LogRow({ log, onPreview }) {
-  const typeConfig = {
-    'User Action': { label: 'User', cls: 'current', accent: 'var(--secondary)' },
-    Financial: { label: 'Financial', cls: 'active', accent: 'var(--primary)' },
-    System: { label: 'System', cls: 'paid', accent: 'var(--teal)' },
-    Document: { label: 'Document', cls: 'pending', accent: 'var(--warning)' },
-  };
-  const cfg = typeConfig[log.type] || typeConfig['User Action'];
+function TerminalLine({ event, expanded, onToggle }) {
+  const color = event.level === 'error' ? '#ff6b6b' : event.level === 'debug' ? '#8ab4f8' : '#74d99f';
+  const prompt = event.level === 'error' ? 'ERR' : event.level === 'debug' ? 'DBG' : 'OK ';
+  const status = event.status ? ` status=${event.status}` : '';
+  const duration = event.duration != null ? ` ${event.duration}ms` : '';
+
   return (
-    <div className="vendor-item" style={{ position: 'relative', paddingLeft: '14px' }}>
-      <div style={{ position: 'absolute', left: 0, top: '10px', bottom: '10px', width: '2px', background: cfg.accent, borderRadius: '2px' }} />
-      <div className="vendor-avatar" style={{ background: 'var(--bg-canvas)', color: 'var(--text-body)', fontSize: '8px' }}>{log.user.split(' ').map(word => word[0]).join('').slice(0, 2)}</div>
-      <div className="vendor-info">
-        <div className="vendor-name">{log.action}</div>
-        <div className="vendor-cat">{log.target} - {log.time}</div>
-      </div>
-      <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '100px' }}>
-        <div className="activity-amount" style={{ fontSize: '11px', fontWeight: 600 }}>{log.user}</div>
-        <div className="activity-time">{log.type}</div>
-      </div>
-      <span className={`status-badge ${cfg.cls}`} style={{ marginLeft: '12px' }}>{cfg.label}</span>
-      <button className="notif-btn" style={{ width: '24px', height: '24px', marginLeft: '8px' }} title="Preview" onClick={() => onPreview(log)}>
-        <Icon d={D.eye} size={11} />
+    <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+      <button
+        onClick={onToggle}
+        style={{
+          width: '100%',
+          border: 'none',
+          background: 'transparent',
+          color: '#d7e1ea',
+          fontFamily: 'Consolas, "Courier New", monospace',
+          fontSize: '11px',
+          lineHeight: 1.55,
+          textAlign: 'left',
+          padding: '8px 10px',
+          cursor: 'pointer',
+          display: 'block',
+        }}
+      >
+        <span style={{ color: '#8796a5' }}>{formatTime(event.createdAt)}</span>{' '}
+        <span style={{ color }}>[{prompt}]</span>{' '}
+        <span style={{ color: '#f2cc60' }}>{event.method || event.source}</span>{' '}
+        <span>{event.path || event.message}</span>
+        <span style={{ color: '#8796a5' }}>{status}{duration}</span>
       </button>
+      {expanded && (
+        <div style={{ padding: '0 10px 10px 34px', fontFamily: 'Consolas, "Courier New", monospace', fontSize: '10.5px', color: '#b9c7d3', display: 'grid', gap: '8px' }}>
+          <div><span style={{ color: '#8796a5' }}>time:</span> {formatDateTime(event.createdAt)}</div>
+          <div><span style={{ color: '#8796a5' }}>message:</span> {event.message}</div>
+          {event.error && <pre style={terminalBlockStyle('#3a1418')}>{event.error}</pre>}
+          {event.request && (
+            <div>
+              <div style={{ color: '#8796a5', marginBottom: '3px' }}>request body</div>
+              <pre style={terminalBlockStyle()}>{prettyJson(event.request)}</pre>
+            </div>
+          )}
+          {event.response && (
+            <div>
+              <div style={{ color: '#8796a5', marginBottom: '3px' }}>backend response</div>
+              <pre style={terminalBlockStyle()}>{prettyJson(event.response)}</pre>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+function terminalBlockStyle(background = 'rgba(255,255,255,0.045)') {
+  return {
+    margin: 0,
+    padding: '8px',
+    maxHeight: '220px',
+    overflow: 'auto',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    borderRadius: '6px',
+    background,
+    border: '1px solid rgba(255,255,255,0.08)',
+    color: '#d7e1ea',
+  };
 }
 
 export default function AuditLog() {
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
-  const [auditData, setAuditData] = useState([]);
-  const [preview, setPreview] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [expandedId, setExpandedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
+  const loadEvents = () => {
     setLoading(true);
     setError(null);
-    api.audit()
-      .then(data => setAuditData((data.items || data || []).map(mapAuditEntry)))
-      .catch(() => setError('Could not load audit log. Check the backend connection and try again.'))
+    api.debugEvents('?per_page=200')
+      .then(data => setEvents((data.items || []).map(mapDebugEvent)))
+      .catch(() => setError('Could not load debug log. Check the backend connection and try again.'))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadEvents();
+    const id = window.setInterval(loadEvents, 10000);
+    return () => window.clearInterval(id);
   }, []);
 
-  const filtered = auditData.filter(log => {
+  const filtered = useMemo(() => {
     const query = search.toLowerCase();
-    const matchesType = filter === 'All' || log.type === filter;
-    const matchesSearch = `${log.user} ${log.action} ${log.target}`.toLowerCase().includes(query);
-    return matchesType && matchesSearch;
-  });
-
-  const stats = [
-    { label: 'Total Entries', value: String(auditData.length), sub: 'All time', icon: D.reports, color: 'primary' },
-    { label: "Today's Activity", value: String(auditData.filter(log => log.time.includes(shortDate(new Date()))).length), sub: 'Logged actions', icon: D.clock, color: 'warning' },
-    { label: 'Critical Events', value: String(auditData.filter(log => log.type === 'Financial').length), sub: 'Financial changes', icon: D.alert, color: 'red' },
-    { label: 'Active Users', value: String(new Set(auditData.map(log => log.user)).size), sub: 'This month', icon: D.reports, color: 'teal' },
-  ];
+    return events.filter(event => {
+      const matchesLevel = filter === 'All' || event.level === filter.toLowerCase();
+      const matchesSearch = `${event.message} ${event.method} ${event.path} ${safeText(event.status)} ${event.error || ''}`.toLowerCase().includes(query);
+      return matchesLevel && matchesSearch;
+    });
+  }, [events, filter, search]);
 
   const downloadAudit = async () => {
     await downloadTablePDF({
-      title: 'Audit Log',
-      subtitle: `${shortDate(new Date())} - ${filtered.length} entr${filtered.length !== 1 ? 'ies' : 'y'}`,
+      title: 'Debug Terminal Log',
+      subtitle: `${shortDate(new Date())} - ${filtered.length} events`,
       columns: [
-        { label: 'User', key: 'user', flex: 1.2 },
-        { label: 'Action', key: 'action', flex: 2.2 },
-        { label: 'Target', key: 'target', flex: 1.3 },
-        { label: 'Type', key: 'type', flex: 1 },
-        { label: 'Time', key: 'time', flex: 1.3 },
+        { label: 'Time', key: 'createdAt', flex: 1.2, render: row => formatDateTime(row.createdAt) },
+        { label: 'Level', key: 'level', flex: 0.7 },
+        { label: 'Request', flex: 1.6, render: row => `${row.method || ''} ${row.path || ''}` },
+        { label: 'Status', key: 'status', flex: 0.7 },
+        { label: 'Message', key: 'message', flex: 2.2 },
       ],
-      rows: filtered.map(log => ({ ...log, __key: log.id })),
-      filename: `audit-log-${new Date().toISOString().split('T')[0]}.pdf`,
+      rows: filtered.map(event => ({
+        ...event,
+        __key: event.id,
+        status: safeText(event.status, '-'),
+        message: safeText(event.message, 'Debug event'),
+      })),
+      filename: `debug-terminal-log-${new Date().toISOString().split('T')[0]}.pdf`,
     });
   };
 
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
-      <ModuleHeader title="Audit Log" subtitle="Activity history & tracking" actionLabel="Download PDF" actionIcon={D.download} onAction={downloadAudit} />
-      <StatsGrid stats={stats} />
-      <ModuleToolbar filters={LOG_TYPES} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search user, action, or target..." />
-      <RegisterCard title="Activity Feed" countLabel={`${filtered.length} log${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="LOG" emptyMessage="No logs match your filters.">
-        {filtered.map(log => <LogRow key={log.id} log={log} onPreview={setPreview} />)}
-      </RegisterCard>
-      <UnifiedPreviewModal 
-  isOpen={!!preview} 
-  onClose={() => setPreview(null)} 
-  title="Audit Entry" 
-  data={preview} 
-/>
+      <ModuleHeader title="Debug Terminal" subtitle="Frontend actions, API requests, backend responses & errors" actionLabel="Download PDF" actionIcon={D.download} onAction={downloadAudit} />
+      <ModuleToolbar filters={LEVELS} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search request, response, status, or error..." />
+      <section className="card" style={{ background: '#071019', borderTop: '2px solid var(--primary)', padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#9fb0bf', fontFamily: 'Consolas, "Courier New", monospace', fontSize: '11px' }}>
+          <span>ttech-debug-console :: {filtered.length} event{filtered.length !== 1 ? 's' : ''}</span>
+          <button className="filter-btn" onClick={loadEvents}>Refresh</button>
+        </div>
+        <div style={{ maxHeight: '66vh', overflow: 'auto' }}>
+          {loading && <div style={{ color: '#9fb0bf', padding: '14px', fontFamily: 'Consolas, "Courier New", monospace', fontSize: '11px' }}>loading debug events...</div>}
+          {!loading && error && <div style={{ color: '#ff6b6b', padding: '14px', fontFamily: 'Consolas, "Courier New", monospace', fontSize: '11px' }}>{error}</div>}
+          {!loading && !error && filtered.length === 0 && <div style={{ color: '#9fb0bf', padding: '14px', fontFamily: 'Consolas, "Courier New", monospace', fontSize: '11px' }}>no debug events yet. use the app, then come back here.</div>}
+          {!loading && !error && filtered.map(event => (
+            <TerminalLine
+              key={event.id}
+              event={event}
+              expanded={expandedId === event.id}
+              onToggle={() => setExpandedId(expandedId === event.id ? null : event.id)}
+            />
+          ))}
+        </div>
+      </section>
     </main>
   );
 }

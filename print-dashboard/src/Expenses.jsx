@@ -3,10 +3,11 @@ import './styles.css';
 import { api } from './api/client';
 import { compactDate, money } from './utils/format';
 import { friendlyError } from './utils/errors';
+import { useDeviceIdentity } from './hooks/useDeviceIdentity';
 import PreviewModal from './components/PreviewModal';
 import { AddExpenseModal, MarkPaidModal } from './components/Modals';
 import { downloadInvoicePDF } from './components/InvoicePDF';
-import { Icon, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
+import { DetailBreakdownModal, Icon, ImportedDot, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
 
 const D = {
   ...STANDARD_ICONS,
@@ -53,12 +54,13 @@ const mapExpense = expense => ({
   // Edit/status buttons here so the block is visible before the click,
   // not just after a failed request.
   isPettyCashLinked: Boolean(expense.is_petty_cash_linked),
+  deviceId: expense.device_id,
 });
 
 // Shared row renderer. `onOutstandingTab` gates the Payables-style
 // relabeling (pending -> "Scheduled") and the days-overdue display that
 // only made sense in the money-owed framing.
-function ExpenseRow({ exp, onPreview, onStatus, onOutstandingTab, onEdit }) {
+function ExpenseRow({ exp, onPreview, onStatus, onOutstandingTab, onEdit, currentDeviceId }) {
   const [showMarkPaid, setShowMarkPaid] = useState(false);
   const statusConfig = {
     pending: { label: onOutstandingTab ? 'Scheduled' : 'Pending', cls: onOutstandingTab ? 'pending' : 'pending', accent: 'var(--warning)' },
@@ -76,7 +78,7 @@ function ExpenseRow({ exp, onPreview, onStatus, onOutstandingTab, onEdit }) {
         {exp.category.split(' ').map(word => word[0]).join('').slice(0, 2)}
       </div>
       <div className="vendor-info">
-        <div className="vendor-name">{exp.title}</div>
+        <div className="vendor-name">{exp.title}<ImportedDot recordDeviceId={exp.deviceId} currentDeviceId={currentDeviceId} /></div>
         <div className="vendor-cat">{onOutstandingTab ? exp.vendorName : exp.category} - {exp.date}</div>
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '100px' }}>
@@ -150,8 +152,9 @@ function ExpenseRow({ exp, onPreview, onStatus, onOutstandingTab, onEdit }) {
 export default function Expenses() {
   // Default tab is "Outstanding" (Option C) — matches the owner's daily
   // use pattern: checking what's owed, not browsing full expense history.
-  const [tab, setTab] = useState('Outstanding');
+  const [tab, setTab] = useState('All');
   const [search, setSearch] = useState('');
+  const [statDetail, setStatDetail] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [paidThisMonthExpenses, setPaidThisMonthExpenses] = useState([]);
   const [showEntry, setShowEntry] = useState(false);
@@ -160,6 +163,7 @@ export default function Expenses() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { toast, notify } = useModuleToast();
+  const deviceIdentity = useDeviceIdentity();
 
   const loadExpenses = () => {
     setLoading(true);
@@ -208,22 +212,30 @@ export default function Expenses() {
   const allTotal = expenses.reduce((sum, e) => sum + e.amountValue, 0);
   const categoryTotals = filtered.reduce((acc, expense) => ({ ...acc, [expense.category]: (acc[expense.category] || 0) + expense.amountValue }), {});
   const topCategory = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1])[0];
+  const expenseRows = list => list.map(expense => ({
+    ref: expense.id,
+    title: expense.title,
+    party: expense.vendorName || expense.category,
+    amount: expense.amountValue,
+    date: expense.paid_on || expense.expense_date,
+    status: expense.status,
+  }));
 
   // Stats reflect the ACTIVE tab. "Paid This Month" only shows prominently
   // on Outstanding/Paid tabs (per spec) — it isn't relevant framing on
   // Reimbursed (a different money flow) or All (mixed statuses).
   const statsByTab = {
     Outstanding: [
-      { label: 'Total Outstanding', value: money(outstandingTotal), sub: 'Unpaid bills', icon: D.expenses, color: 'warning' },
-      { label: 'Pending Approval', value: money(pendingTotal), sub: `${expenses.filter(e => e.status === 'pending').length} requests`, icon: D.clock, color: 'secondary' },
-      { label: 'Outstanding Count', value: String(outstandingList.length), sub: 'Awaiting payment', icon: D.alert, color: 'red' },
-      { label: 'Paid This Month', value: money(paidThisMonthTotal), sub: `${paidThisMonthExpenses.length} expenses paid`, icon: D.check, color: 'teal' },
+      { label: 'Total Outstanding', value: money(outstandingTotal), sub: 'Unpaid bills', icon: D.expenses, color: 'warning', details: { title: 'Total Outstanding', sections: [{ title: 'Unpaid Bills', rows: expenseRows(outstandingList), negative: true }] } },
+      { label: 'Pending Approval', value: money(pendingTotal), sub: `${expenses.filter(e => e.status === 'pending').length} requests`, icon: D.clock, color: 'secondary', details: { title: 'Pending Approval', sections: [{ title: 'Pending Expenses', rows: expenseRows(expenses.filter(e => e.status === 'pending')), negative: true }] } },
+      { label: 'Outstanding Count', value: String(outstandingList.length), sub: 'Awaiting payment', icon: D.alert, color: 'red', details: { title: 'Outstanding Count', sections: [{ title: 'Awaiting Payment', rows: expenseRows(outstandingList), negative: true }] } },
+      { label: 'Paid This Month', value: money(paidThisMonthTotal), sub: `${paidThisMonthExpenses.length} expenses paid`, icon: D.check, color: 'teal', details: { title: 'Paid This Month', sections: [{ title: 'Paid Expenses', rows: paidThisMonthExpenses.map(expense => ({ ref: expense.expense_ref, title: expense.title, party: expense.vendor_name || expense.category, amount: Number(expense.amount || 0), date: expense.paid_on || expense.expense_date, status: expense.status })), negative: true }] } },
     ],
     All: [
-      { label: 'Total This Month', value: money(allTotal), sub: 'All categories', icon: D.expenses, color: 'primary' },
-      { label: 'Outstanding', value: money(outstandingTotal), sub: 'Unpaid bills', icon: D.clock, color: 'warning' },
-      { label: 'Top Category', value: topCategory?.[0] || '-', sub: topCategory ? money(topCategory[1]) : 'No spend', icon: D.alert, color: 'secondary' },
-      { label: 'Expense Count', value: String(expenses.length), sub: 'All records', icon: D.expenses, color: 'teal' },
+      { label: 'Total This Month', value: money(allTotal), sub: 'All categories', icon: D.expenses, color: 'primary', details: { title: 'All Expenses', sections: [{ title: 'All Expenses', rows: expenseRows(expenses), negative: true }] } },
+      { label: 'Outstanding', value: money(outstandingTotal), sub: 'Unpaid bills', icon: D.clock, color: 'warning', details: { title: 'Outstanding Expenses', sections: [{ title: 'Unpaid Bills', rows: expenseRows(outstandingList), negative: true }] } },
+      { label: 'Top Category', value: topCategory?.[0] || '-', sub: topCategory ? money(topCategory[1]) : 'No spend', icon: D.alert, color: 'secondary', details: { title: 'Top Category', sections: [{ title: topCategory?.[0] || 'No category', rows: expenseRows(filtered.filter(e => e.category === topCategory?.[0])), negative: true }] } },
+      { label: 'Expense Count', value: String(expenses.length), sub: 'All records', icon: D.expenses, color: 'teal', details: { title: 'Expense Count', sections: [{ title: 'All Expenses', rows: expenseRows(expenses), negative: true }] } },
     ],
     Paid: [
       { label: 'Total Paid', value: money(paidTotal), sub: 'Marked paid', icon: D.check, color: 'teal' },
@@ -289,10 +301,10 @@ export default function Expenses() {
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
       <ModuleHeader title="Expenses" subtitle="Track operational costs & approvals" actionLabel="New Expense" onAction={() => setShowEntry(true)} />
-      <StatsGrid stats={stats} />
+      <StatsGrid stats={stats} onOpenDetails={setStatDetail} />
       <ModuleToolbar filters={TABS} filter={tab} setFilter={setTab} search={search} setSearch={setSearch} placeholder="Search category, title, or ID..." />
       <RegisterCard title="Expense Log" countLabel={`${filtered.length} expense${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="EXP" emptyMessage="No expenses match your filters.">
-        {filtered.map(exp => <ExpenseRow key={exp.id} exp={exp} onPreview={setPreview} onStatus={handleStatus} onOutstandingTab={onOutstandingTab} onEdit={setEditRecord} />)}
+        {filtered.map(exp => <ExpenseRow key={exp.id} exp={exp} onPreview={setPreview} onStatus={handleStatus} onOutstandingTab={onOutstandingTab} onEdit={setEditRecord} currentDeviceId={deviceIdentity?.device_id} />)}
       </RegisterCard>
       <AddExpenseModal
         isOpen={showEntry || Boolean(editRecord)}
@@ -301,6 +313,7 @@ export default function Expenses() {
         onSave={handleSave}
       />
       <PreviewModal title={preview ? `Expense Preview: ${preview.expense_ref || preview.id || 'Draft'}` : ''} data={preview} onClose={() => setPreview(null)} />
+      <DetailBreakdownModal detail={statDetail} onClose={() => setStatDetail(null)} />
       <ModuleToast toast={toast} />
     </main>
   );

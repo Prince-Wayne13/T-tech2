@@ -5,9 +5,10 @@ import './styles.css';
 import { api } from './api/client';
 import { PrintPreviewModal } from './components/PrintLayouts';
 import { NewProposalModal, ClientMatchModal } from './components/Modals';
-import { Icon, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
+import { DetailBreakdownModal, Icon, ImportedDot, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
 import { downloadProposalPDF } from './components/InvoicePDF';
 import { resolveClientMatch } from './utils/clientMatch';
+import { useDeviceIdentity } from './hooks/useDeviceIdentity';
 
 const D = {
   ...STANDARD_ICONS,
@@ -22,7 +23,7 @@ const D = {
 // this is a visible UI behavior change (filter pills, badge labels), not a pure plumbing fix.
 const PROPOSAL_STATUSES = ['All', 'Draft', 'Sent', 'Accepted', 'Declined'];
 
-function ProposalRow({ prop, onPreview, onAccept, onSend, onDecline, onEdit }) {
+function ProposalRow({ prop, onPreview, onAccept, onSend, onDecline, onEdit, currentDeviceId }) {
   const statusConfig = {
     draft: { label: 'Draft', cls: 'pending', accent: 'var(--warning)' },
     sent: { label: 'Sent', cls: 'current', accent: 'var(--secondary)' },
@@ -36,7 +37,7 @@ function ProposalRow({ prop, onPreview, onAccept, onSend, onDecline, onEdit }) {
       <div style={{ position: 'absolute', left: 0, top: '10px', bottom: '10px', width: '2px', background: cfg.accent, borderRadius: '2px' }} />
       <div className="vendor-avatar" style={{ background: 'var(--purple-dim)', color: 'var(--purple)' }}>{prop.proposal_ref?.split('-')[1] || 'PR'}</div>
       <div className="vendor-info">
-        <div className="vendor-name">{prop.title}</div>
+        <div className="vendor-name">{prop.title}<ImportedDot recordDeviceId={prop.device_id} currentDeviceId={currentDeviceId} /></div>
         <div className="vendor-cat">{prop.client_name} - Valid until {prop.valid_until || '-'}</div>
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '90px' }}>
@@ -75,6 +76,7 @@ function ProposalRow({ prop, onPreview, onAccept, onSend, onDecline, onEdit }) {
 export default function Proposals() {
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
+  const [statDetail, setStatDetail] = useState(null);
   const [preview, setPreview] = useState(null);
   const [showEntry, setShowEntry] = useState(false);
   const [editRecord, setEditRecord] = useState(null);
@@ -85,6 +87,7 @@ export default function Proposals() {
   // while a "Did you mean X?" prompt is shown mid-save, null otherwise.
   const [clientMatch, setClientMatch] = useState(null);
   const { toast, notify } = useModuleToast();
+  const deviceIdentity = useDeviceIdentity();
 
   const loadProposals = () => {
     setLoading(true);
@@ -106,11 +109,19 @@ export default function Proposals() {
   const totalValue = proposals.reduce((sum, proposal) => sum + (proposal.totals?.total ?? 0), 0);
   const accepted = proposals.filter(proposal => proposal.status === 'accepted');
   const pending = proposals.filter(proposal => ['draft', 'sent'].includes(proposal.status));
+  const proposalRows = list => list.map(proposal => ({
+    ref: proposal.proposal_ref,
+    title: proposal.title,
+    party: proposal.client_name,
+    amount: Number(proposal.totals?.total || 0),
+    date: proposal.valid_until || proposal.created_at,
+    status: proposal.status,
+  }));
   const stats = [
-    { label: 'Total Value', value: `MK ${totalValue.toLocaleString()}`, sub: 'All proposals', icon: D.proposals, color: 'primary' },
-    { label: 'Pending Review', value: String(pending.length), sub: 'Awaiting response', icon: D.clock, color: 'warning' },
-    { label: 'Win Rate', value: `${Math.round((accepted.length / Math.max(proposals.length, 1)) * 100)}%`, sub: 'Current pipeline', icon: D.check, color: 'teal' },
-    { label: 'Avg. Value', value: `MK ${Math.round(totalValue / Math.max(proposals.length, 1)).toLocaleString()}`, sub: 'Per proposal', icon: D.proposals, color: 'secondary' },
+    { label: 'Total Value', value: `MK ${totalValue.toLocaleString()}`, sub: 'All proposals', icon: D.proposals, color: 'primary', details: { title: 'Total Proposal Value', sections: [{ title: 'All Proposals', rows: proposalRows(proposals) }] } },
+    { label: 'Pending Review', value: String(pending.length), sub: 'Awaiting response', icon: D.clock, color: 'warning', details: { title: 'Pending Proposals', sections: [{ title: 'Draft / Sent', rows: proposalRows(pending) }] } },
+    { label: 'Win Rate', value: `${Math.round((accepted.length / Math.max(proposals.length, 1)) * 100)}%`, sub: 'Current pipeline', icon: D.check, color: 'teal', details: { title: 'Accepted Proposals', sections: [{ title: 'Accepted', rows: proposalRows(accepted) }, { title: 'All Proposals', rows: proposalRows(proposals) }] } },
+    { label: 'Avg. Value', value: `MK ${Math.round(totalValue / Math.max(proposals.length, 1)).toLocaleString()}`, sub: 'Per proposal', icon: D.proposals, color: 'secondary', details: { title: 'Average Proposal Value', sections: [{ title: 'All Proposals', rows: proposalRows(proposals) }] } },
   ];
 
   // Item 6: pulled out of handleSave so it can be called with a resolved
@@ -224,10 +235,10 @@ export default function Proposals() {
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
       <ModuleHeader title="Proposals" subtitle="Quotes and project proposals" actionLabel="New Proposal" onAction={() => setShowEntry(true)} />
-      <StatsGrid stats={stats} />
+      <StatsGrid stats={stats} onOpenDetails={setStatDetail} />
       <ModuleToolbar filters={PROPOSAL_STATUSES} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search client, title, or ID..." />
       <RegisterCard title="Proposal Pipeline" countLabel={`${filtered.length} proposal${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="PROP" emptyMessage="No proposals match your filters.">
-        {filtered.map(prop => <ProposalRow key={prop.id} prop={prop} onPreview={setPreview} onAccept={handleAccept} onSend={handleSend} onDecline={handleDecline} onEdit={setEditRecord} />)}
+        {filtered.map(prop => <ProposalRow key={prop.id} prop={prop} onPreview={setPreview} onAccept={handleAccept} onSend={handleSend} onDecline={handleDecline} onEdit={setEditRecord} currentDeviceId={deviceIdentity?.device_id} />)}
       </RegisterCard>
       <NewProposalModal
         isOpen={showEntry || Boolean(editRecord)}
@@ -252,6 +263,7 @@ export default function Proposals() {
           }
         }}
       />
+      <DetailBreakdownModal detail={statDetail} onClose={() => setStatDetail(null)} />
       <ModuleToast toast={toast} />
     </main>
   );

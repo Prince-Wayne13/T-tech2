@@ -56,6 +56,23 @@ const normaliseItems = data => {
   return [{ desc: data?.title || 'Print service', qty: 1, rate: 0 }];
 };
 
+const lineAmount = item => {
+  const explicit = Number(item.amount ?? item.line_total);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  return Number(item.qty || item.quantity || 1) * Number(item.rate || item.unit_price || 0);
+};
+
+const repairJobPreviewItems = (items, data) => {
+  const knownTotal = Number(data?.totals?.total ?? data?.invoice?.totals?.total ?? data?.invoice?.amount ?? 0);
+  const currentSubtotal = items.reduce((sum, item) => sum + lineAmount(item), 0);
+  if (!knownTotal || currentSubtotal > 0 || items.length !== 1) return items;
+  return items.map(item => ({
+    ...item,
+    amount: knownTotal,
+    rate: Number(item.qty || 1) ? knownTotal / Number(item.qty || 1) : knownTotal,
+  }));
+};
+
 export function InvoicePrintLayout({ data, business = businessDefault }) {
   if (!data) return null;
   const items = normaliseItems(data);
@@ -169,7 +186,7 @@ export function ProposalPrintLayout({ data, business = businessDefault }) {
 
 export function JobTicketPrintLayout({ data }) {
   if (!data) return null;
-  const items = normaliseItems(data.invoice || data);
+  const items = repairJobPreviewItems(normaliseItems(data.invoice || data), data);
   const subtotal = calculateTotal(items);
   const discount = Number(data.discount ?? data.discount_amount ?? data.invoice?.discount_amount ?? 0);
   const total = data.totals?.total ?? data.invoice?.totals?.total ?? Math.max(subtotal - discount, 0);
@@ -210,7 +227,7 @@ export function JobTicketPrintLayout({ data }) {
           </thead>
           <tbody>
             {items.map((item, index) => {
-              const amount = Number(item.amount ?? Number(item.qty || 1) * Number(item.rate || 0));
+              const amount = lineAmount(item);
               return (
                 <tr key={index}>
                   <td style={{ padding: '12px 0', borderBottom: '1px solid #F1F4F8', color: '#2D3748' }}>{item.desc || item.description || 'Service'}</td>

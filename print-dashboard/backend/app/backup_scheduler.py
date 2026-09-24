@@ -94,6 +94,7 @@ class BackupResult:
     zip_path: str | None = None
     dest_path: str | None = None
     log_copy_path: str | None = None
+    debug_log_copy_path: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
 
@@ -197,6 +198,119 @@ def copy_into_subfolder(src_path: str, sync_root: str, subfolder: str, device_su
     dest_path = os.path.join(dest_dir, os.path.basename(src_path))
     shutil.copy2(src_path, dest_path)
     return dest_path
+
+
+def export_terminal_debug_log(db_path: str, dest_path: str, limit: int = 5000) -> tuple[bool, str]:
+    """Writes the UI terminal/debug log from debug_events as a readable
+    text file. This makes the same log shown in the Audit Log screen easy
+    to open from Drive, instead of only being buried inside app.db.
+    """
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        if "debug_events" not in tables:
+            with open(dest_path, "w", encoding="utf-8") as fh:
+                fh.write("T-Tech Studio terminal debug log\n")
+                fh.write("debug_events table was not found in this database yet.\n")
+            return True, "debug_events table not found"
+
+        rows = conn.execute(
+            """
+            SELECT created_at, level, source, event, method, path, status_code,
+                   duration_ms, message, request_body, response_body, error
+            FROM debug_events
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+        with open(dest_path, "w", encoding="utf-8") as fh:
+            fh.write("T-Tech Studio terminal debug log\n")
+            fh.write(f"Generated: {datetime.now().isoformat(timespec='seconds')}\n")
+            fh.write(f"Rows exported: {len(rows)} newest first\n")
+            fh.write("=" * 96 + "\n\n")
+
+            for row in rows:
+                level = (row["level"] or "info").upper()
+                method = row["method"] or "-"
+                path = row["path"] or "-"
+                status = row["status_code"] if row["status_code"] is not None else "-"
+                duration = f"{row['duration_ms']}ms" if row["duration_ms"] is not None else "-"
+                fh.write(f"[{row['created_at']}] [{level}] {method} {path} -> {status} ({duration})\n")
+                fh.write(f"source={row['source'] or '-'} event={row['event'] or '-'}\n")
+                if row["message"]:
+                    fh.write(f"message: {row['message']}\n")
+                if row["error"]:
+                    fh.write(f"error: {row['error']}\n")
+                if row["request_body"]:
+                    fh.write("request:\n")
+                    fh.write(f"{row['request_body']}\n")
+                if row["response_body"]:
+                    fh.write("backend response:\n")
+                    fh.write(f"{row['response_body']}\n")
+                fh.write("-" * 96 + "\n\n")
+
+        return True, f"exported {len(rows)} debug events"
+    except (OSError, sqlite3.DatabaseError) as e:
+        return False, f"Could not export terminal debug log: {e}"
+    finally:
+        conn.close()
+
+
+def rotate_terminal_debug_log(db_path: str, keep_rows: int = 200) -> tuple[bool, str]:
+    """Trims the live terminal/debug log after a successful backup.
+
+    The backup has already captured the full database snapshot and exported
+    readable .log file before this runs. Keeping a small tail locally makes
+    the Audit page useful for recent debugging without letting debug_events
+    grow forever.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        if "debug_events" not in tables:
+            return True, "debug_events table not found"
+
+        before = conn.execute("SELECT COUNT(*) FROM debug_events").fetchone()[0]
+        conn.execute(
+            """
+            DELETE FROM debug_events
+            WHERE id NOT IN (
+                SELECT id
+                FROM debug_events
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+            )
+            """,
+            (keep_rows,),
+        )
+        deleted = conn.total_changes
+        conn.execute(
+            """
+            INSERT INTO debug_events
+                (level, source, event, method, path, status_code, duration_ms, message, request_body, response_body, error, created_at)
+            VALUES
+                ('info', 'system', 'backup', 'BACKUP', '/backup/run-now', 200, 0, ?, NULL, NULL, NULL, ?)
+            """,
+            (
+                f"Terminal debug log backed up and rotated. Kept newest {keep_rows} of {before} events locally.",
+                datetime.now().isoformat(),
+            ),
+        )
+        conn.commit()
+        return True, f"rotated debug_events: deleted {deleted}, kept newest {keep_rows}"
+    except (OSError, sqlite3.DatabaseError) as e:
+        return False, f"Could not rotate terminal debug log: {e}"
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -353,11 +467,19 @@ class BackupScheduler:
             timestamp = datetime.now().strftime("%Y-%m-%d-%H%M")
             snapshot_path = os.path.join(self.local_backup_dir, f"app-{timestamp}.db")
             zip_path = os.path.join(self.local_backup_dir, f"TTechStudio-backup-{timestamp}.zip")
+            debug_log_path = os.path.join(self.local_backup_dir, f"TTechStudio-terminal-debug-{timestamp}.log")
 
             safe_sqlite_snapshot(self.source_db_path, snapshot_path)
+            debug_log_ok, debug_log_message = export_terminal_debug_log(snapshot_path, debug_log_path)
+            if debug_log_ok:
+                logger.info("Terminal debug log exported: %s", debug_log_message)
+            else:
+                logger.warning(debug_log_message)
 
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                 zf.write(snapshot_path, arcname="app.db")
+                if debug_log_ok and os.path.exists(debug_log_path):
+                    zf.write(debug_log_path, arcname=os.path.basename(debug_log_path))
             os.remove(snapshot_path)
 
             ok, message = verify_backup_zip(zip_path)
@@ -394,6 +516,17 @@ class BackupScheduler:
                 log_copy_path = copy_into_subfolder(self.log_file_path, sync_folder, LOGS_SUBFOLDER, device_subfolder=self.device_id)
                 logger.info("Log file copied to synced folder: %s", log_copy_path)
 
+            debug_log_copy_path = None
+            if debug_log_ok and os.path.exists(debug_log_path):
+                debug_log_copy_path = copy_into_subfolder(debug_log_path, sync_folder, LOGS_SUBFOLDER, device_subfolder=self.device_id)
+                logger.info("Terminal debug log copied to synced folder: %s", debug_log_copy_path)
+
+            rotate_ok, rotate_message = rotate_terminal_debug_log(self.source_db_path)
+            if rotate_ok:
+                logger.info("Terminal debug log rotated after backup: %s", rotate_message)
+            else:
+                logger.warning(rotate_message)
+
             logger.info("Backup complete")
             return BackupResult(
                 ok=True,
@@ -401,6 +534,7 @@ class BackupScheduler:
                 zip_path=zip_path,
                 dest_path=dest_path,
                 log_copy_path=log_copy_path,
+                debug_log_copy_path=debug_log_copy_path,
             )
 
         except Exception as e:

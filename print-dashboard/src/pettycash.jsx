@@ -3,9 +3,10 @@ import './styles.css';
 import { api } from './api/client';
 import { compactDate, money, shortDate } from './utils/format';
 import { friendlyError } from './utils/errors';
+import { useDeviceIdentity } from './hooks/useDeviceIdentity';
 import ActionModal from './components/ActionModal';
 import { ConfirmModal } from './components/Modals';
-import { Icon, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
+import { DetailBreakdownModal, Icon, ImportedDot, ModuleHeader, ModuleToast, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid, useModuleToast } from './components/ModuleStandard';
 
 const D = {
   ...STANDARD_ICONS,
@@ -54,10 +55,11 @@ function mapEntry(entry) {
     staffName: entry.staff_name || '-',
     linkedExpenseRef: entry.linked_expense_ref,
     notes: entry.notes || '-',
+    deviceId: entry.device_id,
   };
 }
 
-function EntryRow({ entry, onDelete }) {
+function EntryRow({ entry, onDelete, currentDeviceId }) {
   const cfg = typeConfig(entry.type);
   const isNegative = entry.type === 'staff_expense';
   return (
@@ -65,7 +67,7 @@ function EntryRow({ entry, onDelete }) {
       <div style={{ position: 'absolute', left: 0, top: '10px', bottom: '10px', width: '2px', background: cfg.accent, borderRadius: '2px' }} />
       <div className="vendor-avatar" style={{ background: 'var(--bg-canvas)', color: 'var(--text-body)', fontSize: '9px' }}>{cfg.label.slice(0, 2).toUpperCase()}</div>
       <div className="vendor-info">
-        <div className="vendor-name">{entry.notes !== '-' ? entry.notes : cfg.label}</div>
+        <div className="vendor-name">{entry.notes !== '-' ? entry.notes : cfg.label}<ImportedDot recordDeviceId={entry.deviceId} currentDeviceId={currentDeviceId} /></div>
         <div className="vendor-cat">
           {entry.staffName !== '-' ? `Staff: ${entry.staffName} - ` : ''}{entry.date || '-'}
           {entry.linkedExpenseRef && ` - Linked: ${entry.linkedExpenseRef}`}
@@ -161,6 +163,7 @@ export function AddPettyCashModal({ isOpen, onClose, onSave, staffList, defaultT
 export default function PettyCash() {
   const [filter, setFilter] = useState('All');
   const [monthFilter, setMonthFilter] = useState('All');
+  const [statDetail, setStatDetail] = useState(null);
   const [entries, setEntries] = useState([]);
   const [balance, setBalance] = useState(0);
   const [staffList, setStaffList] = useState([]);
@@ -171,6 +174,7 @@ export default function PettyCash() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { toast, notify } = useModuleToast();
+  const deviceIdentity = useDeviceIdentity();
 
   const loadData = () => {
     setLoading(true);
@@ -200,12 +204,20 @@ export default function PettyCash() {
   const topUps = entries.filter(e => e.type === 'top_up').reduce((sum, e) => sum + e.amountValue, 0);
   const staffExpenses = entries.filter(e => e.type === 'staff_expense').reduce((sum, e) => sum + e.amountValue, 0);
   const salesCashUsed = entries.filter(e => e.type === 'sales_cash_used').reduce((sum, e) => sum + e.amountValue, 0);
+  const entryRows = list => list.map(entry => ({
+    ref: entry.id,
+    title: entry.notes !== '-' ? entry.notes : typeConfig(entry.type).label,
+    party: entry.staffName !== '-' ? entry.staffName : typeConfig(entry.type).label,
+    amount: entry.amountValue,
+    date: entry.date,
+    status: typeConfig(entry.type).label,
+  }));
 
   const stats = [
-    { label: 'Current Balance', value: money(balance), sub: 'Available petty cash', icon: D.cash, color: 'primary' },
-    { label: 'Total Top-ups', value: money(topUps), sub: 'All time', icon: D.check, color: 'teal' },
-    { label: 'Staff Expenses', value: money(staffExpenses), sub: 'Deducted from balance', icon: D.alert, color: 'warning' },
-    { label: 'Sales Cash Used', value: money(salesCashUsed), sub: 'Balance-neutral', icon: D.clock, color: 'secondary' },
+    { label: 'Current Balance', value: money(balance), sub: 'Available petty cash', icon: D.cash, color: 'primary', details: { title: 'Petty Cash Balance', summary: [{ label: 'Top-ups', amount: topUps }, { label: 'Staff Expenses', amount: -staffExpenses }, { label: 'Balance', amount: balance }], sections: [{ title: 'Top-ups', rows: entryRows(entries.filter(e => e.type === 'top_up')) }, { title: 'Staff Expenses', rows: entryRows(entries.filter(e => e.type === 'staff_expense')), negative: true }] } },
+    { label: 'Total Top-ups', value: money(topUps), sub: 'All time', icon: D.check, color: 'teal', details: { title: 'Total Top-ups', sections: [{ title: 'Top-ups', rows: entryRows(entries.filter(e => e.type === 'top_up')) }] } },
+    { label: 'Staff Expenses', value: money(staffExpenses), sub: 'Deducted from balance', icon: D.alert, color: 'warning', details: { title: 'Staff Expenses', sections: [{ title: 'Staff Expenses', rows: entryRows(entries.filter(e => e.type === 'staff_expense')), negative: true }] } },
+    { label: 'Sales Cash Used', value: money(salesCashUsed), sub: 'Balance-neutral', icon: D.clock, color: 'secondary', details: { title: 'Sales Cash Used', sections: [{ title: 'Balance-Neutral Entries', rows: entryRows(entries.filter(e => e.type === 'sales_cash_used')), negative: true }] } },
   ];
 
   const handleSave = async form => {
@@ -264,7 +276,7 @@ export default function PettyCash() {
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
       <ModuleHeader title="Petty Cash" subtitle="Running log of top-ups, staff expenses & sales cash use" actionLabel="Add Entry" onAction={() => setShowEntry(true)} />
-      <StatsGrid stats={stats} />
+      <StatsGrid stats={stats} onOpenDetails={setStatDetail} />
       <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: '260px' }}>
           <ModuleToolbar filters={FILTER_TYPES} filter={filter} setFilter={setFilter} search="" setSearch={() => {}} placeholder="" />
@@ -281,7 +293,7 @@ export default function PettyCash() {
         </button>
       </div>
       <RegisterCard title="Petty Cash Log" countLabel={`${filtered.length} entr${filtered.length !== 1 ? 'ies' : 'y'} found`} loading={loading} error={error} emptyIcon="PC" emptyMessage="No entries match your filters.">
-        {filtered.map(entry => <EntryRow key={entry.id} entry={entry} onDelete={handleDelete} />)}
+        {filtered.map(entry => <EntryRow key={entry.id} entry={entry} onDelete={handleDelete} currentDeviceId={deviceIdentity?.device_id} />)}
       </RegisterCard>
       <AddPettyCashModal isOpen={showEntry} onClose={() => setShowEntry(false)} onSave={handleSave} staffList={staffList} />
       <ConfirmModal
@@ -293,6 +305,7 @@ export default function PettyCash() {
         confirmLabel="Delete"
         danger
       />
+      <DetailBreakdownModal detail={statDetail} onClose={() => setStatDetail(null)} />
       <ModuleToast toast={toast} />
     </main>
   );

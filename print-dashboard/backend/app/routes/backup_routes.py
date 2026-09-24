@@ -75,6 +75,7 @@ def run_now():
         "zip_path": result.zip_path,
         "dest_path": result.dest_path,
         "log_copy_path": result.log_copy_path,
+        "debug_log_copy_path": result.debug_log_copy_path,
         "timestamp": result.timestamp.isoformat(),
     }), (200 if result.ok else 500)
 

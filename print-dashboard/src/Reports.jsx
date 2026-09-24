@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
 import { money } from './utils/format';
-import { ModuleHeader, StatsGrid } from './components/ModuleStandard';
+import { DetailBreakdownModal, ModuleHeader, StatsGrid } from './components/ModuleStandard';
 import { downloadTablePDF } from './components/TablePDF';
 
 // ── Reports rebuild (nav/reports consolidation session) ──────────────────
@@ -345,6 +345,7 @@ function useAnalyticsData(loader, deps = []) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [statDetail, setStatDetail] = useState(null);
 
   useEffect(() => {
     setLoading(true);
@@ -903,12 +904,46 @@ export default function Reports() {
   const moneyOut = activeMonth ? Number(financials.expenses_by_month?.[activeMonth] || 0) : 0;
   const netCashflow = moneyIn - moneyOut;
   const monthLabel = formatMonthLabel(activeMonth);
+  const paymentRows = jobs.flatMap(job => (job.payments || []).map(payment => ({
+    ref: payment.payment_ref,
+    title: job.title,
+    party: job.client_name,
+    amount: Number(payment.amount || 0),
+    date: payment.paid_on,
+    status: payment.method || 'paid',
+  }))).filter(row => !activeMonth || String(row.date || '').startsWith(activeMonth));
+  const paidExpenseRows = expenses
+    .filter(expense => expense.paid_on && (!activeMonth || String(expense.paid_on).startsWith(activeMonth)))
+    .map(expense => ({
+      ref: expense.expense_ref,
+      title: expense.title,
+      party: expense.vendor_name || expense.category,
+      amount: Number(expense.amount || 0),
+      date: expense.paid_on || expense.expense_date,
+      status: expense.status,
+    }));
+  const jobRows = list => list.map(job => ({
+    ref: job.job_ref,
+    title: job.title,
+    party: job.client_name,
+    amount: Number(job.totals?.balance || job.totals?.total || 0),
+    date: job.due_date,
+    status: job.status,
+  }));
+  const expenseRows = list => list.map(expense => ({
+    ref: expense.expense_ref,
+    title: expense.title,
+    party: expense.vendor_name || expense.category,
+    amount: Number(expense.amount || 0),
+    date: expense.paid_on || expense.expense_date,
+    status: expense.status,
+  }));
 
   const cashflowStats = [
-    { label: 'Money In', value: money(moneyIn), sub: 'Cash received', icon: D_CASH, color: 'teal' },
-    { label: 'Money Out', value: money(moneyOut), sub: 'Cash paid out', icon: D_EXPENSES, color: 'warning' },
-    { label: 'Net Cashflow', value: money(netCashflow), sub: netCashflow >= 0 ? 'Positive' : 'Negative', icon: D_CASH, color: netCashflow >= 0 ? 'teal' : 'red' },
-    { label: 'Months Tracked', value: String(monthKeys.length), sub: 'Trailing window', icon: D_INVOICES, color: 'secondary' },
+    { label: 'Money In', value: money(moneyIn), sub: 'Cash received', icon: D_CASH, color: 'teal', details: { title: `Money In - ${monthLabel}`, sections: [{ title: 'Payments Received', rows: paymentRows }] } },
+    { label: 'Money Out', value: money(moneyOut), sub: 'Cash paid out', icon: D_EXPENSES, color: 'warning', details: { title: `Money Out - ${monthLabel}`, sections: [{ title: 'Paid Expenses', rows: paidExpenseRows, negative: true }] } },
+    { label: 'Net Cashflow', value: money(netCashflow), sub: netCashflow >= 0 ? 'Positive' : 'Negative', icon: D_CASH, color: netCashflow >= 0 ? 'teal' : 'red', details: { title: `Net Cashflow - ${monthLabel}`, summary: [{ label: 'Money In', amount: moneyIn }, { label: 'Money Out', amount: -moneyOut }, { label: 'Net', amount: netCashflow }], sections: [{ title: 'Payments Received', rows: paymentRows }, { title: 'Paid Expenses', rows: paidExpenseRows, negative: true }] } },
+    { label: 'Months Tracked', value: String(monthKeys.length), sub: 'Trailing window', icon: D_INVOICES, color: 'secondary', details: { title: 'Months Tracked', sections: [{ title: 'Cashflow Months', rows: monthKeys.map(month => ({ ref: month, title: formatMonthLabel(month), party: 'Cash basis', amount: Number(financials.revenue_by_month[month] || 0) - Number(financials.expenses_by_month?.[month] || 0), date: month, status: 'net' })) }] } },
   ];
 
   const activeJobsCount = jobs.filter(job => ACTIVE_JOB_STATUSES.includes(job.status)).length;
@@ -921,10 +956,10 @@ export default function Reports() {
   // they deliberately do NOT change with the month selector — only the flow
   // figures (money in/out, net cashflow) do. Labels reflect that.
   const snapshotStats = [
-    { label: 'Jobs In Progress', value: String(activeJobsCount), sub: 'Queued or printing', icon: D_JOBS, color: 'primary' },
-    { label: 'Unpaid Receivables', value: money(invoiceStats?.outstanding || 0), sub: 'Owed to the business (current)', icon: D_INVOICES, color: 'warning' },
-    { label: 'Unpaid Payables', value: money(outstandingPayablesTotal), sub: 'Owed by the business (current)', icon: D_EXPENSES, color: 'red' },
-    { label: 'Net Cashflow', value: money(netCashflow), sub: netCashflow >= 0 ? 'Positive' : 'Negative', icon: D_CASH, color: netCashflow >= 0 ? 'teal' : 'red' },
+    { label: 'Jobs In Progress', value: String(activeJobsCount), sub: 'Queued or printing', icon: D_JOBS, color: 'primary', details: { title: 'Jobs In Progress', sections: [{ title: 'Active Jobs', rows: jobRows(jobs.filter(job => ACTIVE_JOB_STATUSES.includes(job.status))) }] } },
+    { label: 'Unpaid Receivables', value: money(invoiceStats?.outstanding || 0), sub: 'Owed to the business (current)', icon: D_INVOICES, color: 'warning', details: { title: 'Unpaid Receivables', sections: [{ title: 'Jobs With Balances', rows: jobRows(jobs.filter(job => Number(job.totals?.balance || 0) > 0)) }] } },
+    { label: 'Unpaid Payables', value: money(outstandingPayablesTotal), sub: 'Owed by the business (current)', icon: D_EXPENSES, color: 'red', details: { title: 'Unpaid Payables', sections: [{ title: 'Outstanding Expenses', rows: expenseRows(expenses.filter(expense => OUTSTANDING_EXPENSE_STATUSES.includes(expense.status))), negative: true }] } },
+    { label: 'Net Cashflow', value: money(netCashflow), sub: netCashflow >= 0 ? 'Positive' : 'Negative', icon: D_CASH, color: netCashflow >= 0 ? 'teal' : 'red', details: { title: `Net Cashflow - ${monthLabel}`, summary: [{ label: 'Money In', amount: moneyIn }, { label: 'Money Out', amount: -moneyOut }, { label: 'Net', amount: netCashflow }], sections: [{ title: 'Payments Received', rows: paymentRows }, { title: 'Paid Expenses', rows: paidExpenseRows, negative: true }] } },
   ];
 
   return (
@@ -943,7 +978,7 @@ export default function Reports() {
       {!loading && !error && tab === 'Cashflow' && (
         <>
           <MonthSelector monthKeys={monthKeys} selectedMonth={activeMonth} setSelectedMonth={setSelectedMonth} />
-          <StatsGrid stats={cashflowStats} />
+          <StatsGrid stats={cashflowStats} onOpenDetails={setStatDetail} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '14px' }}>
             <PulseChart financials={financials} />
           </div>
@@ -956,7 +991,7 @@ export default function Reports() {
       {!loading && !error && tab === 'Income Statement' && (
         <>
           <MonthSelector monthKeys={monthKeys} selectedMonth={activeMonth} setSelectedMonth={setSelectedMonth} />
-          <StatsGrid stats={snapshotStats} />
+          <StatsGrid stats={snapshotStats} onOpenDetails={setStatDetail} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '14px' }}>
             <PlainEnglishCard moneyIn={moneyIn} moneyOut={moneyOut} netCashflow={netCashflow} monthLabel={monthLabel} />
           </div>
@@ -967,6 +1002,7 @@ export default function Reports() {
       )}
 
       {tab === 'Analytics' && <AnalyticsTab />}
+      <DetailBreakdownModal detail={statDetail} onClose={() => setStatDetail(null)} />
     </main>
   );
 }

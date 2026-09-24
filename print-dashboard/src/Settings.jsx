@@ -356,6 +356,7 @@ export default function Settings() {
     try {
       const result = await api.runBackupNow();
       setBackupActionMessage(result.message || (result.ok ? 'Backup completed.' : 'Backup failed.'));
+      await loadSyncDevices();
     } catch (error) {
       setBackupActionMessage(friendlyError(error, 'Backup failed.'));
     } finally {
@@ -836,7 +837,13 @@ export default function Settings() {
               Database Backup
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
-              {backupStatus ? backupStatus.status : 'Checking status…'}
+              {backupStatus
+                ? (backupStatus.backup_in_progress
+                    ? 'A backup is running right now.'
+                    : backupStatus.consecutive_failures > 0
+                      ? `The last ${backupStatus.consecutive_failures} backup(s) had a problem.`
+                      : 'Backups are ready.')
+                : 'Checking status…'}
             </div>
             <button
               onClick={handleRunBackupNow}

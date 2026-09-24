@@ -73,6 +73,122 @@ def build_dashboard_summary():
     }
 
 
+def _row_date(value):
+    return value.isoformat() if value else None
+
+
+def build_dashboard_breakdown():
+    invoices = Invoice.query.all()
+    expenses = Expense.query.all()
+    jobs = Job.query.all()
+
+    sales_rows = []
+    receivable_rows = []
+    revenue_rows = []
+    for invoice in invoices:
+        totals = invoice_totals(invoice)
+        status = invoice_status_from_totals(totals)
+        label = invoice.title or (invoice.job.title if invoice.job else invoice.invoice_ref)
+        client = invoice.client_name
+        if status in active_invoice_statuses():
+            revenue_rows.append({
+                "ref": invoice.invoice_ref,
+                "title": label,
+                "party": client,
+                "amount": totals["total"],
+                "date": _row_date(invoice.issued_on),
+                "status": status,
+            })
+        if status in {"not_paid", "partial"} and totals["balance"] > 0:
+            receivable_rows.append({
+                "ref": invoice.invoice_ref,
+                "title": label,
+                "party": client,
+                "amount": totals["balance"],
+                "date": _row_date(invoice.due_on or invoice.issued_on),
+                "status": status,
+            })
+        payment_rows = invoice.job.payments if invoice.job else invoice.payments
+        for payment in payment_rows:
+            sales_rows.append({
+                "ref": payment.payment_ref,
+                "title": label,
+                "party": client,
+                "amount": money(payment.amount),
+                "date": _row_date(payment.paid_on),
+                "status": payment.method or "paid",
+            })
+
+    paid_expense_rows = [
+        {
+            "ref": expense.expense_ref,
+            "title": expense.title,
+            "party": expense.vendor.name if expense.vendor else (expense.submitted_by or expense.category),
+            "amount": money(expense.amount),
+            "date": _row_date(expense.paid_on or expense.expense_date),
+            "status": expense.status,
+        }
+        for expense in expenses
+        if expense.status in PAID_STATUSES and expense.paid_on
+    ]
+
+    active_job_rows = [
+        {
+            "ref": job.job_ref,
+            "title": job.title,
+            "party": job.client_name,
+            "amount": invoice_totals(job.invoice)["balance"] if job.invoice else 0,
+            "date": _row_date(job.due_date),
+            "status": job.status,
+        }
+        for job in jobs
+        if job.status in {"in_session", "queued", "printing", "finishing"}
+    ]
+
+    paid_total = sum(row["amount"] for row in sales_rows)
+    paid_expense_total = sum(row["amount"] for row in paid_expense_rows)
+    booked_revenue_total = sum(row["amount"] for row in revenue_rows)
+    gross_profit = booked_revenue_total - paid_expense_total
+
+    return {
+        "cash_balance": {
+            "title": "Cash Balance",
+            "summary": [
+                {"label": "Cash In", "amount": paid_total},
+                {"label": "Cash Out", "amount": -paid_expense_total},
+                {"label": "Balance", "amount": paid_total - paid_expense_total},
+            ],
+            "sections": [
+                {"title": "Sales / Payments In", "rows": sorted(sales_rows, key=lambda row: row["date"] or "", reverse=True)},
+                {"title": "Paid Expenses Out", "rows": sorted(paid_expense_rows, key=lambda row: row["date"] or "", reverse=True), "negative": True},
+            ],
+        },
+        "receivables": {
+            "title": "Receivables",
+            "summary": [{"label": "Open Balance", "amount": sum(row["amount"] for row in receivable_rows)}],
+            "sections": [{"title": "Unpaid / Partial Invoices", "rows": sorted(receivable_rows, key=lambda row: row["date"] or "")}],
+        },
+        "expenses": {
+            "title": "Expenses",
+            "summary": [{"label": "Paid Expenses", "amount": paid_expense_total}],
+            "sections": [{"title": "Paid Expenses", "rows": sorted(paid_expense_rows, key=lambda row: row["date"] or "", reverse=True), "negative": True}],
+        },
+        "gross_profit": {
+            "title": "Gross Profit",
+            "summary": [
+                {"label": "Booked Revenue", "amount": booked_revenue_total},
+                {"label": "Paid Expenses", "amount": -paid_expense_total},
+                {"label": "Gross Profit", "amount": gross_profit},
+            ],
+            "sections": [
+                {"title": "Booked Revenue", "rows": sorted(revenue_rows, key=lambda row: row["date"] or "", reverse=True)},
+                {"title": "Paid Expenses", "rows": sorted(paid_expense_rows, key=lambda row: row["date"] or "", reverse=True), "negative": True},
+                {"title": "Active Jobs", "rows": sorted(active_job_rows, key=lambda row: row["date"] or "")},
+            ],
+        },
+    }
+
+
 def build_financial_report(period="month"):
     invoices = Invoice.query.all()
     expenses = Expense.query.all()

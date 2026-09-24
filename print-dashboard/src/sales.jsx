@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
 import { compactDate, money } from './utils/format';
-import { Icon, ModuleHeader, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid } from './components/ModuleStandard';
+import { Icon, ImportedDot, ModuleHeader, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid } from './components/ModuleStandard';
+import { useDeviceIdentity } from './hooks/useDeviceIdentity';
 
 const D = {
   ...STANDARD_ICONS,
@@ -28,10 +29,11 @@ function mapSale(sale) {
     amountValue: Number(sale.amount || 0),
     date: compactDate(sale.created_at),
     status,
+    deviceId: sale.device_id,
   };
 }
 
-function SaleRow({ sale }) {
+function SaleRow({ sale, currentDeviceId }) {
   const statusConfig = {
     full: { label: 'Full', cls: 'paid', accent: 'var(--teal)' },
     partial: { label: 'Partial', cls: 'pending', accent: 'var(--warning)' },
@@ -46,7 +48,7 @@ function SaleRow({ sale }) {
         {String(sale.id).split('-')[1] || 'SL'}
       </div>
       <div className="vendor-info">
-        <div className="vendor-name">{sale.description}</div>
+        <div className="vendor-name">{sale.description}<ImportedDot recordDeviceId={sale.deviceId} currentDeviceId={currentDeviceId} /></div>
         <div className="vendor-cat">{sale.client} - {sale.jobRef || '-'} - {sale.date || '-'}</div>
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '100px' }}>
@@ -64,6 +66,7 @@ export default function Sales() {
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const deviceIdentity = useDeviceIdentity();
 
   const loadSales = () => {
     setLoading(true);
@@ -130,7 +133,7 @@ export default function Sales() {
       <StatsGrid stats={stats} />
       <ModuleToolbar filters={SALE_STATUSES} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search client, description, or job ref..." />
       <RegisterCard title="Sales Register" countLabel={`${filtered.length} sale${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="SALE" emptyMessage="No sales match your filters.">
-        {filtered.map(sale => <SaleRow key={sale.id} sale={sale} />)}
+        {filtered.map(sale => <SaleRow key={sale.id} sale={sale} currentDeviceId={deviceIdentity?.device_id} />)}
       </RegisterCard>
     </main>
   );
