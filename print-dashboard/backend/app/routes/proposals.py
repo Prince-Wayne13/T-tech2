@@ -1,4 +1,6 @@
 #route/proposals.py
+from datetime import date
+
 from flask import Blueprint, jsonify, request
 
 from ..extensions import db
@@ -48,6 +50,13 @@ def create_proposal():
         required_capability_id=data.get("required_capability_id"),
         prepared_by=data.get("prepared_by"),
         notes=data.get("notes"),
+        # The real date this proposal actually happened. Defaults to today
+        # so ordinary same-day entry needs no extra step, but a late entry
+        # (e.g. typing in a 1 August proposal on 24 September) can send its
+        # own work_date and have that be the date that sticks on the
+        # printed document -- created_at still separately records today
+        # as the actual entry time, for the internal log.
+        work_date=parse_date(data.get("work_date")) or date.today(),
     )
     apply_proposal_line_items(proposal, data.get("line_items"))
     db.session.add(proposal)
@@ -76,6 +85,10 @@ def update_proposal(proposal_id):
     for field in ["client_id", "client_name", "title", "status", "discount_amount", "currency", "contact", "priority", "assigned_staff_id", "machine_id", "required_capability_id", "prepared_by", "notes"]:
         if field in data:
             setattr(proposal, field, data[field])
+    if "work_date" in data:
+        # Lets a late/backdated entry be corrected afterwards, same as
+        # Job.work_date's own edit path in routes/jobs.py.
+        proposal.work_date = parse_date(data.get("work_date")) or proposal.work_date
     if "valid_until" in data:
         proposal.valid_until = parse_date(data.get("valid_until"))
         # Fix: keep the derived Job's due_date in sync with the Proposal's
@@ -124,6 +137,11 @@ def accept_proposal(proposal_id):
         machine_id=proposal.machine_id,
         required_capability_id=proposal.required_capability_id,
         notes=proposal.notes,
+        # Carry the proposal's real date forward to the job it becomes --
+        # without this, converting a backdated proposal (e.g. one really
+        # made on 1 August) into a job would silently reset to today, the
+        # exact bug being fixed here, just one step later in the chain.
+        work_date=proposal.work_date,
     )
     invoice = create_invoice_for_job(
         job,
@@ -148,6 +166,7 @@ def accept_proposal(proposal_id):
         discount_amount=proposal.discount_amount,
         currency=proposal.currency,
         notes=proposal.notes,
+        work_date=proposal.work_date,
     )
     db.session.add(job)
     db.session.add(invoice)

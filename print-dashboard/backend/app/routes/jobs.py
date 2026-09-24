@@ -19,6 +19,8 @@ from ..services.machines import IncompatibleMachineError
 from ..services.invoices import apply_line_items, serialize_invoice, sync_invoice_amount
 from ..services.ref_generator import next_job_ref, next_invoice_ref
 from ..services.sales import serialize_sale
+from datetime import date
+
 from ..utils import parse_date
 from .common import apply_search, list_response, require_fields, MissingFieldError
 
@@ -66,6 +68,13 @@ def create_job():
         # as machine_id/client_id above.
         assigned_staff_id=data.get("assigned_staff_id"),
         notes=data.get("notes"),
+        # The real date this job happened. Defaults to today so ordinary
+        # same-day entry needs no extra step, but a late/backdated entry
+        # (e.g. typing in a 1 August job on 24 September) can send its own
+        # work_date and have that be the date that sticks everywhere it's
+        # printed -- created_at still separately records today as the
+        # actual entry time, for the internal log.
+        work_date=parse_date(data.get("work_date")) or date.today(),
     )
     invoice = create_invoice_for_job(
         job,
@@ -74,6 +83,7 @@ def create_job():
         discount_amount=data.get("discount_amount", 0),
         currency=data.get("currency", "MWK"),
         notes=data.get("notes"),
+        work_date=job.work_date,
     )
     db.session.add(job)
     db.session.add(invoice)
@@ -122,6 +132,15 @@ def update_job(job_id):
             setattr(job, field, normalise_job_status(data[field]) if field == "status" else data[field])
     if "due_date" in data:
         job.due_date = parse_date(data.get("due_date"))
+    # Lets a late/backdated entry be corrected after the fact -- e.g. a job
+    # typed in today but actually done on 1 August can have its work_date
+    # fixed here, same as the printed invoice's own Issue Date can be.
+    # previous_work_date is captured before the overwrite so the invoice
+    # sync below can tell "job's date changed" apart from "job's date is
+    # unchanged, some other field was edited".
+    previous_work_date = job.work_date
+    if "work_date" in data:
+        job.work_date = parse_date(data.get("work_date")) or job.work_date
     if job.invoice:
         if "line_items" in data:
             apply_line_items(job.invoice, data.get("line_items") or [])
@@ -134,6 +153,13 @@ def update_job(job_id):
         job.invoice.title = job.title
         job.invoice.due_on = job.due_date
         job.invoice.notes = job.notes
+        # Keep the invoice's printed date following the job's real date,
+        # unless the invoice's own date has since been set independently
+        # via the invoice register's own "Add Date" control (in which case
+        # invoice.issued_on will no longer match the job's prior work_date,
+        # and this leaves that manually-set date alone).
+        if "work_date" in data and job.invoice.issued_on == previous_work_date:
+            job.invoice.issued_on = job.work_date
         # Bug: cancelling a job (item 11) left its linked invoice showing
         # as before - status is derived from paid/total for any job-linked
         # invoice (see invoice_status_from_totals()), which never accounts

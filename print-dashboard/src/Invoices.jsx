@@ -3,6 +3,7 @@ import './styles.css';
 import { api } from './api/client';
 import { compactDate, money } from './utils/format';
 import { PrintPreviewModal } from './components/PrintLayouts';
+import { SetInvoiceDateModal } from './components/Modals';
 import { downloadInvoicePDF } from './components/InvoicePDF';
 import { shareText } from './utils/downloads';
 import { calculateTotal } from './utils/calculateTotal';
@@ -26,6 +27,7 @@ const D = {
   download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3',
   send: 'M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z',
   eye: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  calendar: 'M8 2v4 M16 2v4 M3 10h18 M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
 };
 
 // ── Merge note (T-Tech2 Merge 1) ──────────────────────────────────────────
@@ -85,7 +87,7 @@ function mapInvoice(invoice) {
 // relabeling (sent -> "Due") so it only applies where that framing made
 // sense — it stays off on the "All" tab where showing the true status
 // ("Sent") is more accurate for a full-history view.
-function InvoiceRow({ inv, onPreview, onOutstandingTab, currentDeviceId }) {
+function InvoiceRow({ inv, onPreview, onSetDate, onOutstandingTab, currentDeviceId }) {
   const statusConfig = {
     draft: { label: 'Draft', cls: 'pending', accent: 'var(--warning)' },
     not_paid: { label: onOutstandingTab ? 'Due' : 'Not Paid', cls: 'current', accent: 'var(--secondary)' },
@@ -131,6 +133,9 @@ function InvoiceRow({ inv, onPreview, onOutstandingTab, currentDeviceId }) {
         <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Preview" onClick={() => onPreview(inv)}>
           <Icon d={D.eye} size={11} />
         </button>
+        <button className="notif-btn" style={{ width: '24px', height: '24px' }} title={inv.issued_on ? 'Edit Invoice Date' : 'Add Invoice Date'} onClick={() => onSetDate(inv)}>
+          <Icon d={D.calendar} size={11} />
+        </button>
         <button className="notif-btn" style={{ width: '24px', height: '24px' }} title="Download PDF" onClick={() => downloadInvoicePDF(inv)}>
           <Icon d={D.download} size={11} />
         </button>
@@ -150,8 +155,9 @@ export default function Invoices() {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const { toast } = useModuleToast();
+  const { toast, notify } = useModuleToast();
   const deviceIdentity = useDeviceIdentity();
+  const [dateTarget, setDateTarget] = useState(null);
 
   const loadInvoices = () => {
     setLoading(true);
@@ -178,6 +184,17 @@ export default function Invoices() {
   });
 
   const onOutstandingTab = tab === 'Outstanding';
+
+  const handleSetDate = newDate => {
+    if (!dateTarget) return;
+    api.updateInvoice(dateTarget.backendId, { issued_on: newDate })
+      .then(() => {
+        notify(`Invoice date set to ${newDate}`);
+        setDateTarget(null);
+        loadInvoices();
+      })
+      .catch(() => notify('Could not set invoice date. Check the backend connection.', 'error'));
+  };
 
   // Stats reflect the ACTIVE tab, not always the full unfiltered total.
   // On "Outstanding" the headline is "Total Outstanding," not "Total (All)."
@@ -233,9 +250,15 @@ export default function Invoices() {
       <StatsGrid stats={stats} onOpenDetails={setStatDetail} />
       <ModuleToolbar filters={TABS} filter={tab} setFilter={setTab} search={search} setSearch={setSearch} placeholder="Search client, title, or ID..." />
       <RegisterCard title="Invoice Register" countLabel={`${filtered.length} invoice${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="INV" emptyMessage="No invoices match your filters.">
-        {filtered.map(inv => <InvoiceRow key={inv.id} inv={inv} onPreview={setPreview} onOutstandingTab={onOutstandingTab} currentDeviceId={deviceIdentity?.device_id} />)}
+        {filtered.map(inv => <InvoiceRow key={inv.id} inv={inv} onPreview={setPreview} onSetDate={setDateTarget} onOutstandingTab={onOutstandingTab} currentDeviceId={deviceIdentity?.device_id} />)}
       </RegisterCard>
       <PrintPreviewModal type="invoice" title={preview ? `Invoice Preview: ${preview.id}` : ''} data={preview} onClose={() => setPreview(null)} />
+      <SetInvoiceDateModal
+        isOpen={Boolean(dateTarget)}
+        defaultDate={dateTarget?.issued_on || ''}
+        onClose={() => setDateTarget(null)}
+        onConfirm={handleSetDate}
+      />
       <DetailBreakdownModal detail={statDetail} onClose={() => setStatDetail(null)} />
       <ModuleToast toast={toast} />
     </main>

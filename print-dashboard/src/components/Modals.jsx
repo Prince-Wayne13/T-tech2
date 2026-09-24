@@ -325,6 +325,7 @@ function ProposalPreviewFrame({ data, total }) {
         <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{data.title || 'Untitled'}</div>
       </div>
       <div style={{ fontSize: '10px', marginBottom: '12px' }}><strong>Client:</strong> {data.client || '—'}</div>
+      <div style={{ fontSize: '10px', marginBottom: '12px' }}><strong>Date:</strong> {data.workDate ? new Date(data.workDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</div>
       <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '16px', fontSize: '10px' }}>
         <thead><tr>
           <th style={{ textAlign: 'left', padding: '6px 0', borderBottom: '1px solid var(--border-faint)', color: 'var(--text-muted)' }}>Service</th>
@@ -373,6 +374,10 @@ function JobPreviewFrame({ data, total }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
             <span style={{ color: 'var(--text-muted)' }}>Client</span>
             <strong>{data.client || data.client_name || '—'}</strong>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+            <span style={{ color: 'var(--text-muted)' }}>Date</span>
+            <strong>{data.workDate ? new Date(data.workDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</strong>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
             <span style={{ color: 'var(--text-muted)' }}>Priority</span>
@@ -542,7 +547,11 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
 
 /* ═══════════════════════════════════════ MODAL: New Proposal ═══════════════════════════════════════ */
 export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', validDays: '', contact: '', notes: '', discount: 0, priority: 'medium', assignedStaffId: '', machineId: '' });
+  // workDate: the real date this proposal actually happened, separate from
+  // validUntil below (the proposal's expiry date). Defaults to today so
+  // ordinary same-day entry needs no extra step, but can be changed to
+  // enter a proposal late without it silently taking today's date.
+  const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', validDays: '', workDate: new Date().toISOString().split('T')[0], contact: '', notes: '', discount: 0, priority: 'medium', assignedStaffId: '', machineId: '' });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
   const [rate, setRate] = useState('');
@@ -587,6 +596,7 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
       }),
       validUntil: existingValidUntil,
       validDays: derivedDays,
+      workDate: initialData?.work_date || new Date().toISOString().split('T')[0],
       contact: initialData?.contact || '',
       notes: initialData?.notes || '',
       discount: Number(initialData?.discount_amount || 0),
@@ -702,6 +712,13 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
             </div>
             <div><label style={labelStyle}>Proposal Title</label><input style={inputStyle} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></div>
             <div>
+              <label style={labelStyle}>Proposal Date (when this actually happened)</label>
+              <input type="date" style={inputStyle} value={form.workDate} onChange={e => setForm({ ...form, workDate: e.target.value })} />
+              <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                Entering this late? Set the real date here — it's what prints on the proposal, not today's date.
+              </div>
+            </div>
+            <div>
               <label style={labelStyle}>Valid For (days from today)</label>
               <input type="number" min="0" style={inputStyle} placeholder="e.g. 14" value={form.validDays} onChange={e => setValidDays(e.target.value)} />
               {form.validUntil && (
@@ -798,7 +815,12 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
    member is assigned to run it.
 ═══════════════════════════════════════ */
 export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
-  const [form, setForm] = useState({ client: '', title: '', items: [], specs: [], priority: 'medium', due: '', dueDays: '', machineId: '', assignedStaffId: '', notes: '', discount: 0 });
+  // workDate: the real date this job actually happened (e.g. what's
+  // written on a paper record), separate from "Due In" above, which is
+  // when the job is expected to FINISH. Defaults to today so ordinary
+  // same-day entry needs no extra step, but can be changed to enter a
+  // job late without it silently taking today's date instead.
+  const [form, setForm] = useState({ client: '', title: '', items: [], specs: [], priority: 'medium', due: '', dueDays: '', workDate: new Date().toISOString().split('T')[0], machineId: '', assignedStaffId: '', notes: '', discount: 0 });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
   const [rate, setRate] = useState('');
@@ -830,6 +852,7 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
       priority: initialData?.priority || 'medium',
       due: existingDue,
       dueDays: derivedDays,
+      workDate: initialData?.work_date || new Date().toISOString().split('T')[0],
       printer: initialData?.printer || initialData?.service_category || initialData?.machine_name || '',
       machineId: initialData?.machineId || initialData?.machine_id || '',
       assignedStaffId: initialData?.assignedStaffId || initialData?.assigned_staff_id || '',
@@ -924,6 +947,13 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
             <div><label style={labelStyle}>Job Title</label><input style={inputStyle} placeholder="e.g., Annual Report 500x" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></div>
             <div><label style={labelStyle}>Specs</label><div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>{['A4 B&W', 'A4 Color', 'A3 B&W', 'A3 Color', 'Lamination', 'Binding', 'Delivery', 'Glossy'].map(s => <button key={s} onClick={() => toggleSpec(s)} style={pillBtnStyle(form.specs.includes(s))}>{s}</button>)}</div></div>
             <div><label style={labelStyle}>Priority</label><div style={{ display: 'flex', gap: '6px' }}>{['low', 'medium', 'high'].map(p => <button key={p} onClick={() => setForm({ ...form, priority: p })} style={pillBtnStyle(form.priority === p)}>{p}</button>)}</div></div>
+            <div>
+              <label style={labelStyle}>Job Date (when this actually happened)</label>
+              <input type="date" style={inputStyle} value={form.workDate} onChange={e => setForm({ ...form, workDate: e.target.value })} />
+              <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                Entering this late? Set the real date here — it's what shows on the invoice, not today's date.
+              </div>
+            </div>
             <div>
               <label style={labelStyle}>Due In (days from today)</label>
               <input type="number" min="0" style={inputStyle} placeholder="e.g. 3" value={form.dueDays} onChange={e => setDueDays(e.target.value)} />
@@ -1441,6 +1471,37 @@ export function MarkPaidModal({ isOpen, onClose, onConfirm, defaultDate }) {
       <div style={{ padding: '20px', display: 'grid', gap: '8px' }}>
         <label style={labelStyle}>Date Paid</label>
         <input type="date" style={inputStyle} value={date} onChange={e => setDate(e.target.value)} />
+      </div>
+    </ModalWrapper>
+  );
+}
+
+/* ═══════════════════════════════════════ MODAL: Set Invoice Date ═══════════════════════════════════════
+   Lets the accountant set or correct the real date an invoice is for,
+   directly from the Invoice Register row -- separate from Mark Paid
+   above. Covers the case where an invoice is entered on one day but
+   is actually for earlier work (e.g. typing in a 1 August sale on 24
+   September): this is what makes the invoice's Issue Date -- what
+   prints on the document -- reflect 1 August, not today.
+═══════════════════════════════════════ */
+export function SetInvoiceDateModal({ isOpen, onClose, onConfirm, defaultDate }) {
+  const [date, setDate] = useState(defaultDate || new Date().toISOString().slice(0, 10));
+
+  useEffect(() => {
+    if (isOpen) setDate(defaultDate || new Date().toISOString().slice(0, 10));
+  }, [isOpen, defaultDate]);
+
+  return (
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title={defaultDate ? 'Edit Invoice Date' : 'Add Invoice Date'} footer={<>
+      <button onClick={onClose} style={cancelButton}>Cancel</button>
+      <button onClick={() => onConfirm(date)} style={createButton}>Save Date</button>
+    </>}>
+      <div style={{ padding: '20px', display: 'grid', gap: '8px' }}>
+        <label style={labelStyle}>Invoice Date (when this actually happened)</label>
+        <input type="date" style={inputStyle} value={date} onChange={e => setDate(e.target.value)} />
+        <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '3px' }}>
+          This is the date that prints on the invoice — set it to the real date the work or sale happened, even if that's earlier than today.
+        </div>
       </div>
     </ModalWrapper>
   );

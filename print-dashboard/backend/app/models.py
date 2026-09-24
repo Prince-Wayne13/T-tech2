@@ -281,6 +281,12 @@ class Job(TimestampMixin, SerializableMixin, db.Model):
     completed_count = db.Column(db.Integer, default=0, nullable=False)
     total_count = db.Column(db.Integer, default=0, nullable=False)
     due_date = db.Column(db.Date)
+    # The real date this job actually happened, e.g. what's written on a
+    # paper record -- separate from created_at (when it was typed into the
+    # system) and due_date (when it's expected to finish). Defaults to
+    # today at creation but is editable, so a job entered late can be
+    # backdated to when the work was actually done.
+    work_date = db.Column(db.Date)
     # Item 7 (Prompt 7): FK to Staff, added here. This column was referenced
     # by routes/jobs.py (create_job/update_job's field allowlist) and by
     # schema_migrations.py's ensure_staff_assignment_schema() migration —
@@ -420,6 +426,12 @@ class Proposal(TimestampMixin, SerializableMixin, db.Model):
     status = db.Column(db.String(30), default="draft", index=True)
     discount_amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     currency = db.Column(db.String(10), default="MWK", nullable=False)
+    # The real date this proposal actually happened, e.g. what's written on
+    # a paper record -- separate from created_at (when it was typed into
+    # the system) and valid_until (the proposal's expiry date). Defaults to
+    # today at creation but is editable, so a proposal entered late can be
+    # backdated to when it was actually made.
+    work_date = db.Column(db.Date)
     valid_until = db.Column(db.Date)
     contact = db.Column(db.String(160))
     priority = db.Column(db.String(30), default="medium")

@@ -257,6 +257,33 @@ def ensure_proposal_line_item_quantity_schema():
     return changed
 
 
+def ensure_work_date_schema():
+    """Accountant-facing fix: jobs and proposals previously had no field for
+    'the date this actually happened', only created_at (a hidden log
+    timestamp of when the record was typed in) and a future-facing date
+    (due_date / valid_until). This adds work_date to both tables so someone
+    entering a record late (e.g. typing in a 1 August sale on 24 September)
+    can set the real date, separate from when it was entered into the system.
+    Nullable and unbackfilled on purpose, same reasoning as device_id above:
+    for existing rows we don't know the real date, so leave it blank rather
+    than guessing created_at as a stand-in. New rows get it set explicitly
+    by the app layer at creation time.
+    """
+    changed = []
+    job_columns = _columns("jobs")
+    if "work_date" not in job_columns:
+        _add_column("jobs", "work_date DATE")
+        changed.append("jobs.work_date")
+
+    proposal_columns = _columns("proposals")
+    if "work_date" not in proposal_columns:
+        _add_column("proposals", "work_date DATE")
+        changed.append("proposals.work_date")
+
+    db.session.commit()
+    return changed
+
+
 def ensure_machine_capability_schema():
     """Priority 2 (Machine Management): capabilities table, the
     machine_capabilities join table, ProductionMachine.available/
@@ -739,6 +766,7 @@ def run_full_upgrade():
     proposal_job_planning = ensure_proposal_job_planning_schema()
     proposal_line_item_quantity = ensure_proposal_line_item_quantity_schema()
     proposal_machine = ensure_proposal_machine_schema()
+    work_date_schema = ensure_work_date_schema()
     job_invoice_schema = ensure_job_invoice_schema()
     payment_invoice_nullable = ensure_payment_invoice_nullable_schema()
     # Priority 2 (Machine Management): must run after db.create_all() (so the
@@ -765,6 +793,7 @@ def run_full_upgrade():
         "proposal_job_planning_schema_changes": proposal_job_planning,
         "proposal_line_item_quantity_schema_changes": proposal_line_item_quantity,
         "proposal_machine_schema_changes": proposal_machine,
+        "work_date_schema_changes": work_date_schema,
         "core_staff_seeded": core_staff,
         "payment_invoice_nullable_schema_changes": payment_invoice_nullable,
         "machine_capability_schema_changes": machine_capability_schema,

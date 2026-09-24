@@ -53,6 +53,9 @@ const mapJob = job => ({
   totalCount: job.total_count ?? 0,
   due: job.due_date || 'No due date',
   due_date: job.due_date,
+  // The real date this job happened, so the "Edit Job" form re-opens with
+  // it already filled in, rather than snapping back to today.
+  work_date: job.work_date,
   priority: job.priority || 'medium',
   machine_name: job.machine_name,
   machine_id: job.machine_id,
@@ -109,6 +112,9 @@ function jobPayload(form, fallback = {}, clientId = null) {
     title: form.title || fallback.title || 'New print job',
     priority: form.priority || fallback.priority || 'medium',
     due_date: form.due || fallback.due_date || null,
+    // The real date this job happened, as typed into the "Job Date" box —
+    // separate from due_date above (when it's expected to finish).
+    work_date: form.workDate || fallback.work_date || null,
     machine_id: form.machineId || fallback.machine_id || null,
     service_category: fallback.service_category || form.specs?.[0],
     assigned_staff_id: form.assignedStaffId || fallback.assignedStaffId || null,

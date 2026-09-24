@@ -69,7 +69,7 @@ def serialize_job(job):
     return data
 
 
-def create_invoice_for_job(job, invoice_ref, line_items=None, discount_amount=0, currency="MWK", notes=None):
+def create_invoice_for_job(job, invoice_ref, line_items=None, discount_amount=0, currency="MWK", notes=None, work_date=None):
     invoice = Invoice(
         invoice_ref=invoice_ref,
         job=job,
@@ -80,7 +80,13 @@ def create_invoice_for_job(job, invoice_ref, line_items=None, discount_amount=0,
         discount_amount=discount_amount,
         tax_rate=0,
         currency=currency,
-        issued_on=date.today(),
+        # Fix: this used to always stamp today's date, even when the job
+        # itself carried a real/backdated work_date (e.g. entering a 1
+        # August job on 24 September) -- so the invoice silently showed
+        # today no matter what date the job was actually for. Now it
+        # follows the job's real date, only falling back to today when no
+        # work_date was given at all.
+        issued_on=work_date or date.today(),
         due_on=job.due_date,
         notes=notes if notes is not None else job.notes,
     )

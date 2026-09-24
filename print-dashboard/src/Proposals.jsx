@@ -153,6 +153,9 @@ export default function Proposals() {
       };
     }),
     valid_until: form.validUntil || null,
+    // The real date this proposal happened, as typed into the "Proposal
+    // Date" box -- separate from valid_until above (the expiry date).
+    work_date: form.workDate || null,
     contact: form.contact,
     notes: form.notes,
     status: editRecord?.status || 'draft',
