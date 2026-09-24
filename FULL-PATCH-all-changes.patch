@@ -1,0 +1,256 @@
+diff --git a/log files/dev-log.md b/log files/dev-log.md
+index 91ed5b6..82852c1 100644
+--- a/log files/dev-log.md	
++++ b/log files/dev-log.md	
+@@ -2572,4 +2572,33 @@ Still not fully tested:
+ 
+ Files changed this session: print-dashboard/DIAGNOSTICS_FINDINGS.md and this dev-log entry only. No backend/frontend runtime code was edited.
+ 
++2026-09-24 15:04 - Close direct-invoice payment gap (Sales invisible money)
++
++Author: zcodex claude
++Scope: backend/app/routes/invoices.py only.
++
++- Verified merge_apply.py docstring was already corrected in repo (no "still blocked" text). No change needed.
++- Verified the direct-invoice payment path was NOT actually removed in repo despite prior notes. Fixed now.
++- POST /api/invoices now returns 405 (jobless invoice creation closed; api.createInvoice in client.js had zero callers).
++- PUT /api/invoices/<id> no longer applies a "payments" body; payments only via /api/jobs/<job_id>/payments.
++- Removed PUT /api/invoices/<id>/payments/<pid> route and unused imports (apply_payments, update_payment).
++- Not changed: Invoice.job_id stays nullable. NOT NULL + migration for orphaned rows still needs owner decision.
++- services/invoices.py apply_payments()/update_payment() left in place (unused by routes; seed.py still uses apply_payments).
++
++Verification: create_app() smoke test: POST /api/invoices 405, PUT invoice payment route 405, GET /api/invoices 200, GET /api/jobs 200.
++
++2026-09-24 15:07 - Sales gap follow-up: heal orphan payments, resync Sales, guard jobless payment edits
++
++Author: zcodex claude
++Scope: backend/app/schema_migrations.py, backend/app/services/invoices.py.
++
++Why still open after 0002: closing the routes only stops NEW jobless payments. Existing rows with Payment.job_id NULL still counted in Cash Balance but had no Sale, and backfill_invoice_jobs() only handled invoices with no job (never a job-linked invoice whose payment sat on the invoice ledger only).
++
++- Added reconcile_orphan_payments_and_sales() in schema_migrations.py and wired it into run_full_upgrade() after backfill_missing_sales(). It: attaches NULL-job payments to their invoice's job; gives a jobless invoice a synthetic job first; creates missing Sale rows; re-syncs every Sale.amount. Idempotent. Payments with no invoice AND no job are reported in "unattributable_payments", not guessed at.
++- services/invoices.py update_payment() now raises ValueError for a jobless invoice (defence in depth).
++- Imports: schema_migrations.py now imports Payment, Sale.
++- Deliberately unchanged: apply_payments() (seed.py attaches the job after calling it, a hard guard would break seeding). Invoice.job_id/Payment.job_id stay nullable; NOT NULL still needs owner sign-off.
++
++Verification: test DB with 3 orphan shapes (jobless invoice+payment, job-linked invoice with NULL-job payment, payment with no invoice/job): before sales=0; after sales=2 with amounts 500/1000; second run changes nothing; update_payment guard raises. Not run against the real production DB.
++
+ <!-- New entries go above this line, most recent first --> <!-- New entries go above this line, most recent first -->
+diff --git a/print-dashboard/backend/app/routes/invoices.py b/print-dashboard/backend/app/routes/invoices.py
+index 3124a6a..75113ac 100644
+--- a/print-dashboard/backend/app/routes/invoices.py
++++ b/print-dashboard/backend/app/routes/invoices.py
+@@ -4,7 +4,7 @@ from flask import Blueprint, jsonify, request
+ 
+ from ..extensions import db
+ from ..models import AuditLog, Invoice
+-from ..services.invoices import apply_line_items, apply_payments, serialize_invoice, sync_invoice_amount, update_payment as update_invoice_payment
++from ..services.invoices import apply_line_items, serialize_invoice, sync_invoice_amount
+ from ..services.ref_generator import next_invoice_ref
+ from ..utils import parse_date
+ from .common import apply_search, list_response, require_fields, MissingFieldError
+@@ -24,36 +24,11 @@ def list_invoices():
+ 
+ @bp.post("")
+ def create_invoice():
+-    data = request.get_json() or {}
+-    try:
+-        require_fields(data, [("client_name", "Client"), ("title", "Title")])
+-    except MissingFieldError as error:
+-        return jsonify({"error": str(error)}), 400
+-    invoice = Invoice(
+-        invoice_ref=data.get("invoice_ref") or next_invoice_ref(),
+-        client_id=data.get("client_id"),
+-        client_name=data["client_name"],
+-        title=data["title"],
+-        amount=data.get("amount", 0),
+-        discount_amount=data.get("discount_amount", 0),
+-        tax_rate=data.get("tax_rate", 0),
+-        currency=data.get("currency", "MWK"),
+-        status=data.get("status", "draft"),
+-        issued_on=parse_date(data.get("issued_on")),
+-        due_on=parse_date(data.get("due_on")),
+-        paid_on=parse_date(data.get("paid_on")),
+-        purchase_order=data.get("purchase_order"),
+-        payment_terms=data.get("payment_terms", "Due on receipt"),
+-        notes=data.get("notes"),
+-    )
+-    apply_line_items(invoice, data.get("line_items"))
+-    apply_payments(invoice, data.get("payments"))
+-    sync_invoice_amount(invoice)
+-    db.session.add(invoice)
+-    db.session.flush()
+-    db.session.add(AuditLog(action=f"Created invoice {invoice.invoice_ref}", entity_type="invoice", entity_id=invoice.id))
+-    db.session.commit()
+-    return jsonify(serialize_invoice(invoice, include_document=True)), 201
++    # Direct (jobless) invoice creation is closed: every invoice must come
++    # from a Job (POST /api/jobs or proposal accept), otherwise payments on
++    # it would never produce a Sale row and would be invisible on the Sales
++    # page while still counting toward Cash Balance.
++    return jsonify({"error": "Invoices are created from Jobs/Proposals only"}), 405
+ 
+ 
+ @bp.get("/stats")
+@@ -100,9 +75,8 @@ def update_invoice(invoice_id):
+     if "line_items" in data:
+         apply_line_items(invoice, data.get("line_items"))
+         sync_invoice_amount(invoice)
+-    if "payments" in data:
+-        apply_payments(invoice, data.get("payments"))
+-        sync_invoice_amount(invoice)
++    # "payments" in the body is intentionally ignored: payments are recorded
++    # only via POST/PUT /api/jobs/<job_id>/payments so Sales stays in sync.
+     db.session.add(AuditLog(action=f"Updated invoice {invoice.invoice_ref}", entity_type="invoice", entity_id=invoice.id))
+     db.session.commit()
+     return jsonify(serialize_invoice(invoice, include_document=True))
+@@ -112,28 +86,3 @@ def update_invoice(invoice_id):
+ def invoice_document(invoice_id):
+     return jsonify(serialize_invoice(Invoice.query.get_or_404(invoice_id), include_document=True)["document"])
+ 
+-
+-@bp.put("/<int:invoice_id>/payments/<int:payment_id>")
+-def update_invoice_payment_route(invoice_id, payment_id):
+-    # Direct-invoice compatibility path (no job_id): mirrors the job-linked
+-    # payment-update route in routes/jobs.py. Only applies to invoices whose
+-    # payments live on Invoice.payments directly (job_id is null) — job-linked
+-    # invoices store their ledger on Job.payments and must go through
+-    # PUT /api/jobs/<job_id>/payments/<payment_id> instead, since that is the
+-    # payment_rows source serialize_invoice()/invoice_totals() actually read
+-    # for a job-linked invoice.
+-    invoice = Invoice.query.get_or_404(invoice_id)
+-    data = request.get_json() or {}
+-    payment = update_invoice_payment(invoice, payment_id, data)
+-    db.session.add(AuditLog(action=f"Updated payment {payment.payment_ref} on {invoice.invoice_ref}", entity_type="invoice", entity_id=invoice.id))
+-    db.session.commit()
+-    serialized = serialize_invoice(invoice, include_document=True)
+-    # Item 2: explicit amount-paid-so-far vs total-owed, named plainly rather
+-    # than requiring the frontend to dig into invoice.totals for this.
+-    return jsonify(serialized | {
+-        "payment_summary": {
+-            "total": serialized["totals"]["total"],
+-            "paid": serialized["totals"]["paid"],
+-            "balance": serialized["totals"]["balance"],
+-        },
+-    })
+\ No newline at end of file
+diff --git a/print-dashboard/backend/app/schema_migrations.py b/print-dashboard/backend/app/schema_migrations.py
+index 9fc032c..e098712 100644
+--- a/print-dashboard/backend/app/schema_migrations.py
++++ b/print-dashboard/backend/app/schema_migrations.py
+@@ -3,7 +3,7 @@
+ from sqlalchemy import inspect, text
+ 
+ from .extensions import db
+-from .models import Invoice, Job, Staff
++from .models import Invoice, Job, Payment, Sale, Staff
+ from .services.invoices import sync_invoice_amount
+ from .services.jobs import normalise_job_status
+ 
+@@ -458,6 +458,73 @@ def backfill_invoice_jobs():
+     return created
+ 
+ 
++def reconcile_orphan_payments_and_sales():
++    """Heal the "Sale-invisible money" gap left by jobless invoices/payments.
++
++    Cash Balance sums every Payment, but the Sales page only shows Sale rows,
++    and a Sale only exists for a Job. Two orphan shapes can still exist in a
++    database that predates the direct-invoice route being closed:
++
++    1. Payment.job_id is NULL but its invoice HAS a job (payment sits on the
++       invoice ledger only). backfill_invoice_jobs() only handled invoices with
++       no job, so these were never moved. Attach them to the invoice's job.
++    2. Payment.job_id is NULL and its invoice also has no job (or no invoice at
++       all). Give the invoice a synthetic job first (same shape as
++       backfill_invoice_jobs), then attach. Payments with no invoice AND no job
++       cannot be attributed to anything and are reported, not guessed at.
++
++    Finally every Sale is re-synced from its job's invoice so stale amounts are
++    corrected, and jobs that now have payments but no Sale get one.
++    Idempotent: a second run changes nothing.
++    """
++    from .services.sales import create_sale_for_job, sync_sale_amount
++
++    report = {"payments_attached_to_job": 0, "invoices_given_job": 0, "unattributable_payments": [], "sales_created": 0, "sales_resynced": 0}
++
++    for payment in Payment.query.filter(Payment.job_id.is_(None)).order_by(Payment.id.asc()).all():
++        invoice = payment.invoice
++        if invoice is None:
++            report["unattributable_payments"].append(payment.payment_ref)
++            continue
++        if invoice.job_id is None:
++            job = Job(
++                job_ref=next_job_ref(),
++                client_id=invoice.client_id,
++                client_name=invoice.client_name,
++                title=invoice.title,
++                service_category="Backfilled Invoice Job",
++                status="finished",
++                priority="medium",
++                progress=100,
++                due_date=invoice.due_on,
++                notes=f"Synthetic job backfilled for {invoice.invoice_ref}.",
++            )
++            db.session.add(job)
++            db.session.flush()
++            invoice.job_id = job.id
++            report["invoices_given_job"] += 1
++        payment.job_id = invoice.job_id
++        report["payments_attached_to_job"] += 1
++    db.session.flush()
++
++    for invoice in Invoice.query.filter(Invoice.job_id.isnot(None)).all():
++        db.session.refresh(invoice)
++        sync_invoice_amount(invoice)
++
++    for job in Job.query.filter(Job.payments.any()).order_by(Job.id.asc()).all():
++        if not job.sales:
++            sale = create_sale_for_job(job, description=job.title)
++            db.session.add(sale)
++            report["sales_created"] += 1
++
++    for sale in Sale.query.all():
++        sync_sale_amount(sale)
++        report["sales_resynced"] += 1
++
++    db.session.commit()
++    return report
++
++
+ def next_job_ref():
+     last = Job.query.order_by(Job.id.desc()).first()
+     return f"JOB-{((last.id if last else 0) + 1):04d}"
+@@ -787,6 +854,9 @@ def run_full_upgrade():
+     # themselves paid (invoice.payments carried over), so those need to be
+     # in place before checking for jobs with payments but no Sale yet.
+     sales_backfilled = backfill_missing_sales()
++    # Must run after both backfills above: heals any payment still sitting
++    # with job_id NULL and re-syncs every Sale amount against its invoice.
++    orphan_reconcile = reconcile_orphan_payments_and_sales()
+     return {
+         "prompt4_schema_changes": prompt4,
+         "staff_assignment_schema_changes": staff_assignment,
+@@ -808,5 +878,6 @@ def run_full_upgrade():
+             "statuses_normalized": normalized,
+             "invoice_jobs_backfilled": backfilled,
+             "missing_sales_backfilled": sales_backfilled,
++            "orphan_payment_reconcile": orphan_reconcile,
+         },
+     }
+diff --git a/print-dashboard/backend/app/services/invoices.py b/print-dashboard/backend/app/services/invoices.py
+index 95b48fd..a171293 100644
+--- a/print-dashboard/backend/app/services/invoices.py
++++ b/print-dashboard/backend/app/services/invoices.py
+@@ -156,6 +156,12 @@ def update_payment(invoice, payment_id, data):
+     Job-linked invoices use update_job_payment() in services/jobs.py
+     instead, since their ledger lives on Job.payments, not Invoice.payments.
+     """
++    if not invoice.job_id:
++        # A payment on a jobless invoice never gets a Sale row, so it would
++        # count toward Cash Balance but be invisible on the Sales page.
++        raise ValueError(
++            f"Invoice {invoice.invoice_ref} has no job; record payments through the Job instead"
++        )
+     payment = next((row for row in invoice.payments if row.id == payment_id), None)
+     if payment is None:
+         raise ValueError(f"Payment {payment_id} not found on invoice {invoice.invoice_ref}")

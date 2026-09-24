@@ -4,7 +4,7 @@ from flask import Blueprint, jsonify, request
 
 from ..extensions import db
 from ..models import AuditLog, Invoice
-from ..services.invoices import apply_line_items, apply_payments, serialize_invoice, sync_invoice_amount, update_payment as update_invoice_payment
+from ..services.invoices import apply_line_items, serialize_invoice, sync_invoice_amount
 from ..services.ref_generator import next_invoice_ref
 from ..utils import parse_date
 from .common import apply_search, list_response, require_fields, MissingFieldError
@@ -24,36 +24,11 @@ def list_invoices():
 
 @bp.post("")
 def create_invoice():
-    data = request.get_json() or {}
-    try:
-        require_fields(data, [("client_name", "Client"), ("title", "Title")])
-    except MissingFieldError as error:
-        return jsonify({"error": str(error)}), 400
-    invoice = Invoice(
-        invoice_ref=data.get("invoice_ref") or next_invoice_ref(),
-        client_id=data.get("client_id"),
-        client_name=data["client_name"],
-        title=data["title"],
-        amount=data.get("amount", 0),
-        discount_amount=data.get("discount_amount", 0),
-        tax_rate=data.get("tax_rate", 0),
-        currency=data.get("currency", "MWK"),
-        status=data.get("status", "draft"),
-        issued_on=parse_date(data.get("issued_on")),
-        due_on=parse_date(data.get("due_on")),
-        paid_on=parse_date(data.get("paid_on")),
-        purchase_order=data.get("purchase_order"),
-        payment_terms=data.get("payment_terms", "Due on receipt"),
-        notes=data.get("notes"),
-    )
-    apply_line_items(invoice, data.get("line_items"))
-    apply_payments(invoice, data.get("payments"))
-    sync_invoice_amount(invoice)
-    db.session.add(invoice)
-    db.session.flush()
-    db.session.add(AuditLog(action=f"Created invoice {invoice.invoice_ref}", entity_type="invoice", entity_id=invoice.id))
-    db.session.commit()
-    return jsonify(serialize_invoice(invoice, include_document=True)), 201
+    # Direct (jobless) invoice creation is closed: every invoice must come
+    # from a Job (POST /api/jobs or proposal accept), otherwise payments on
+    # it would never produce a Sale row and would be invisible on the Sales
+    # page while still counting toward Cash Balance.
+    return jsonify({"error": "Invoices are created from Jobs/Proposals only"}), 405
 
 
 @bp.get("/stats")
@@ -100,9 +75,8 @@ def update_invoice(invoice_id):
     if "line_items" in data:
         apply_line_items(invoice, data.get("line_items"))
         sync_invoice_amount(invoice)
-    if "payments" in data:
-        apply_payments(invoice, data.get("payments"))
-        sync_invoice_amount(invoice)
+    # "payments" in the body is intentionally ignored: payments are recorded
+    # only via POST/PUT /api/jobs/<job_id>/payments so Sales stays in sync.
     db.session.add(AuditLog(action=f"Updated invoice {invoice.invoice_ref}", entity_type="invoice", entity_id=invoice.id))
     db.session.commit()
     return jsonify(serialize_invoice(invoice, include_document=True))
@@ -112,28 +86,3 @@ def update_invoice(invoice_id):
 def invoice_document(invoice_id):
     return jsonify(serialize_invoice(Invoice.query.get_or_404(invoice_id), include_document=True)["document"])
 
-
-@bp.put("/<int:invoice_id>/payments/<int:payment_id>")
-def update_invoice_payment_route(invoice_id, payment_id):
-    # Direct-invoice compatibility path (no job_id): mirrors the job-linked
-    # payment-update route in routes/jobs.py. Only applies to invoices whose
-    # payments live on Invoice.payments directly (job_id is null) — job-linked
-    # invoices store their ledger on Job.payments and must go through
-    # PUT /api/jobs/<job_id>/payments/<payment_id> instead, since that is the
-    # payment_rows source serialize_invoice()/invoice_totals() actually read
-    # for a job-linked invoice.
-    invoice = Invoice.query.get_or_404(invoice_id)
-    data = request.get_json() or {}
-    payment = update_invoice_payment(invoice, payment_id, data)
-    db.session.add(AuditLog(action=f"Updated payment {payment.payment_ref} on {invoice.invoice_ref}", entity_type="invoice", entity_id=invoice.id))
-    db.session.commit()
-    serialized = serialize_invoice(invoice, include_document=True)
-    # Item 2: explicit amount-paid-so-far vs total-owed, named plainly rather
-    # than requiring the frontend to dig into invoice.totals for this.
-    return jsonify(serialized | {
-        "payment_summary": {
-            "total": serialized["totals"]["total"],
-            "paid": serialized["totals"]["paid"],
-            "balance": serialized["totals"]["balance"],
-        },
-    })

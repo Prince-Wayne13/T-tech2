@@ -2572,4 +2572,33 @@ Still not fully tested:
 
 Files changed this session: print-dashboard/DIAGNOSTICS_FINDINGS.md and this dev-log entry only. No backend/frontend runtime code was edited.
 
+2026-09-24 15:04 - Close direct-invoice payment gap (Sales invisible money)
+
+Author: zcodex claude
+Scope: backend/app/routes/invoices.py only.
+
+- Verified merge_apply.py docstring was already corrected in repo (no "still blocked" text). No change needed.
+- Verified the direct-invoice payment path was NOT actually removed in repo despite prior notes. Fixed now.
+- POST /api/invoices now returns 405 (jobless invoice creation closed; api.createInvoice in client.js had zero callers).
+- PUT /api/invoices/<id> no longer applies a "payments" body; payments only via /api/jobs/<job_id>/payments.
+- Removed PUT /api/invoices/<id>/payments/<pid> route and unused imports (apply_payments, update_payment).
+- Not changed: Invoice.job_id stays nullable. NOT NULL + migration for orphaned rows still needs owner decision.
+- services/invoices.py apply_payments()/update_payment() left in place (unused by routes; seed.py still uses apply_payments).
+
+Verification: create_app() smoke test: POST /api/invoices 405, PUT invoice payment route 405, GET /api/invoices 200, GET /api/jobs 200.
+
+2026-09-24 15:07 - Sales gap follow-up: heal orphan payments, resync Sales, guard jobless payment edits
+
+Author: zcodex claude
+Scope: backend/app/schema_migrations.py, backend/app/services/invoices.py.
+
+Why still open after 0002: closing the routes only stops NEW jobless payments. Existing rows with Payment.job_id NULL still counted in Cash Balance but had no Sale, and backfill_invoice_jobs() only handled invoices with no job (never a job-linked invoice whose payment sat on the invoice ledger only).
+
+- Added reconcile_orphan_payments_and_sales() in schema_migrations.py and wired it into run_full_upgrade() after backfill_missing_sales(). It: attaches NULL-job payments to their invoice's job; gives a jobless invoice a synthetic job first; creates missing Sale rows; re-syncs every Sale.amount. Idempotent. Payments with no invoice AND no job are reported in "unattributable_payments", not guessed at.
+- services/invoices.py update_payment() now raises ValueError for a jobless invoice (defence in depth).
+- Imports: schema_migrations.py now imports Payment, Sale.
+- Deliberately unchanged: apply_payments() (seed.py attaches the job after calling it, a hard guard would break seeding). Invoice.job_id/Payment.job_id stay nullable; NOT NULL still needs owner sign-off.
+
+Verification: test DB with 3 orphan shapes (jobless invoice+payment, job-linked invoice with NULL-job payment, payment with no invoice/job): before sales=0; after sales=2 with amounts 500/1000; second run changes nothing; update_payment guard raises. Not run against the real production DB.
+
 <!-- New entries go above this line, most recent first --> <!-- New entries go above this line, most recent first -->

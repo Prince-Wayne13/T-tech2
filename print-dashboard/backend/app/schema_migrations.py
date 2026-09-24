@@ -3,7 +3,7 @@
 from sqlalchemy import inspect, text
 
 from .extensions import db
-from .models import Invoice, Job, Staff
+from .models import Invoice, Job, Payment, Sale, Staff
 from .services.invoices import sync_invoice_amount
 from .services.jobs import normalise_job_status
 
@@ -458,6 +458,73 @@ def backfill_invoice_jobs():
     return created
 
 
+def reconcile_orphan_payments_and_sales():
+    """Heal the "Sale-invisible money" gap left by jobless invoices/payments.
+
+    Cash Balance sums every Payment, but the Sales page only shows Sale rows,
+    and a Sale only exists for a Job. Two orphan shapes can still exist in a
+    database that predates the direct-invoice route being closed:
+
+    1. Payment.job_id is NULL but its invoice HAS a job (payment sits on the
+       invoice ledger only). backfill_invoice_jobs() only handled invoices with
+       no job, so these were never moved. Attach them to the invoice's job.
+    2. Payment.job_id is NULL and its invoice also has no job (or no invoice at
+       all). Give the invoice a synthetic job first (same shape as
+       backfill_invoice_jobs), then attach. Payments with no invoice AND no job
+       cannot be attributed to anything and are reported, not guessed at.
+
+    Finally every Sale is re-synced from its job's invoice so stale amounts are
+    corrected, and jobs that now have payments but no Sale get one.
+    Idempotent: a second run changes nothing.
+    """
+    from .services.sales import create_sale_for_job, sync_sale_amount
+
+    report = {"payments_attached_to_job": 0, "invoices_given_job": 0, "unattributable_payments": [], "sales_created": 0, "sales_resynced": 0}
+
+    for payment in Payment.query.filter(Payment.job_id.is_(None)).order_by(Payment.id.asc()).all():
+        invoice = payment.invoice
+        if invoice is None:
+            report["unattributable_payments"].append(payment.payment_ref)
+            continue
+        if invoice.job_id is None:
+            job = Job(
+                job_ref=next_job_ref(),
+                client_id=invoice.client_id,
+                client_name=invoice.client_name,
+                title=invoice.title,
+                service_category="Backfilled Invoice Job",
+                status="finished",
+                priority="medium",
+                progress=100,
+                due_date=invoice.due_on,
+                notes=f"Synthetic job backfilled for {invoice.invoice_ref}.",
+            )
+            db.session.add(job)
+            db.session.flush()
+            invoice.job_id = job.id
+            report["invoices_given_job"] += 1
+        payment.job_id = invoice.job_id
+        report["payments_attached_to_job"] += 1
+    db.session.flush()
+
+    for invoice in Invoice.query.filter(Invoice.job_id.isnot(None)).all():
+        db.session.refresh(invoice)
+        sync_invoice_amount(invoice)
+
+    for job in Job.query.filter(Job.payments.any()).order_by(Job.id.asc()).all():
+        if not job.sales:
+            sale = create_sale_for_job(job, description=job.title)
+            db.session.add(sale)
+            report["sales_created"] += 1
+
+    for sale in Sale.query.all():
+        sync_sale_amount(sale)
+        report["sales_resynced"] += 1
+
+    db.session.commit()
+    return report
+
+
 def next_job_ref():
     last = Job.query.order_by(Job.id.desc()).first()
     return f"JOB-{((last.id if last else 0) + 1):04d}"
@@ -787,6 +854,9 @@ def run_full_upgrade():
     # themselves paid (invoice.payments carried over), so those need to be
     # in place before checking for jobs with payments but no Sale yet.
     sales_backfilled = backfill_missing_sales()
+    # Must run after both backfills above: heals any payment still sitting
+    # with job_id NULL and re-syncs every Sale amount against its invoice.
+    orphan_reconcile = reconcile_orphan_payments_and_sales()
     return {
         "prompt4_schema_changes": prompt4,
         "staff_assignment_schema_changes": staff_assignment,
@@ -808,5 +878,6 @@ def run_full_upgrade():
             "statuses_normalized": normalized,
             "invoice_jobs_backfilled": backfilled,
             "missing_sales_backfilled": sales_backfilled,
+            "orphan_payment_reconcile": orphan_reconcile,
         },
     }

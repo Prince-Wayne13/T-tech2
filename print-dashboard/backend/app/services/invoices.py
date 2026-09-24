@@ -156,6 +156,12 @@ def update_payment(invoice, payment_id, data):
     Job-linked invoices use update_job_payment() in services/jobs.py
     instead, since their ledger lives on Job.payments, not Invoice.payments.
     """
+    if not invoice.job_id:
+        # A payment on a jobless invoice never gets a Sale row, so it would
+        # count toward Cash Balance but be invisible on the Sales page.
+        raise ValueError(
+            f"Invoice {invoice.invoice_ref} has no job; record payments through the Job instead"
+        )
     payment = next((row for row in invoice.payments if row.id == payment_id), None)
     if payment is None:
         raise ValueError(f"Payment {payment_id} not found on invoice {invoice.invoice_ref}")
