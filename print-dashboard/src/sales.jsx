@@ -2,12 +2,27 @@ import React, { useEffect, useState } from 'react';
 import './styles.css';
 import { api } from './api/client';
 import { compactDate, money } from './utils/format';
-import { Icon, ImportedDot, ModuleHeader, ModuleToolbar, RegisterCard, STANDARD_ICONS, StatsGrid } from './components/ModuleStandard';
+import {
+  DetailBreakdownModal,
+  Icon,
+  ImportedDot,
+  ModuleHeader,
+  ModuleToast,
+  ModuleToolbar,
+  RegisterCard,
+  STANDARD_ICONS,
+  StatsGrid,
+  useModuleToast,
+} from './components/ModuleStandard';
+import { PrintPreviewModal } from './components/PrintLayouts';
+import { downloadInvoicePDF } from './components/InvoicePDF';
 import { useDeviceIdentity } from './hooks/useDeviceIdentity';
 
 const D = {
   ...STANDARD_ICONS,
   sales: 'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
+  eye: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3',
 };
 
 // Payment status comes straight from the backend's serialize_sale(), which
@@ -21,6 +36,7 @@ function mapSale(sale) {
   return {
     id: sale.sale_ref || `SALE-${sale.id}`,
     backendId: sale.id,
+    jobId: sale.job_id || null,
     client: sale.client_name || 'Walk-in Client',
     jobRef: sale.job_ref,
     description: sale.description || 'Print job sale',
@@ -36,13 +52,21 @@ function mapSale(sale) {
   };
 }
 
-function SaleRow({ sale, currentDeviceId }) {
+// Row actions (Preview / Download PDF) mirror Invoices.jsx's InvoiceRow
+// exactly: a Sale has no printable document of its own — it's a derived
+// snapshot of its linked Job's Invoice (see services/sales.py) — so both
+// actions here operate on that underlying invoice, fetched on demand by
+// job id (api.job()), the same document the Invoices/Jobs pages already
+// preview and download. Previously this row had no interactive elements
+// at all, unlike every other register page in the app.
+function SaleRow({ sale, currentDeviceId, onPreview, onDownload, downloadingId }) {
   const statusConfig = {
     full: { label: 'Full', cls: 'paid', accent: 'var(--teal)' },
     partial: { label: 'Partial', cls: 'pending', accent: 'var(--warning)' },
     unpaid: { label: 'Unpaid', cls: 'overdue', accent: 'var(--red)' },
   };
   const cfg = statusConfig[sale.status] || statusConfig.unpaid;
+  const hasJob = Boolean(sale.jobId);
 
   return (
     <div className="vendor-item" style={{ position: 'relative', paddingLeft: '14px' }}>
@@ -60,6 +84,26 @@ function SaleRow({ sale, currentDeviceId }) {
         {sale.balanceValue > 0 && <div className="activity-time" style={{ color: 'var(--warning)', fontWeight: 600 }}>Owed: {money(sale.balanceValue)}</div>}
       </div>
       <span className={`status-badge ${cfg.cls}`} style={{ marginLeft: '12px' }}>{cfg.label}</span>
+      <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
+        <button
+          className="notif-btn"
+          style={{ width: '24px', height: '24px', opacity: hasJob ? 1 : 0.4, cursor: hasJob ? 'pointer' : 'not-allowed' }}
+          title={hasJob ? 'Preview Invoice' : 'No linked job/invoice'}
+          disabled={!hasJob}
+          onClick={() => onPreview(sale)}
+        >
+          <Icon d={D.eye} size={11} />
+        </button>
+        <button
+          className="notif-btn"
+          style={{ width: '24px', height: '24px', opacity: hasJob ? 1 : 0.4, cursor: hasJob ? 'pointer' : 'not-allowed' }}
+          title={hasJob ? 'Download Invoice PDF' : 'No linked job/invoice'}
+          disabled={!hasJob || downloadingId === sale.backendId}
+          onClick={() => onDownload(sale)}
+        >
+          <Icon d={D.download} size={11} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -70,7 +114,11 @@ export default function Sales() {
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [statDetail, setStatDetail] = useState(null);
+  const [downloadingId, setDownloadingId] = useState(null);
   const deviceIdentity = useDeviceIdentity();
+  const { toast, notify } = useModuleToast();
 
   const loadSales = () => {
     setLoading(true);
@@ -119,29 +167,112 @@ export default function Sales() {
     return matchesStatus && matchesSearch;
   });
 
-  const total = filtered.reduce((sum, sale) => sum + sale.amountValue, 0);
+  // Fix: "Cash Collected" must mean the same thing here as it does on the
+  // Dashboard's Cash Balance card ("Cash In" — services/reports.py's
+  // build_dashboard_breakdown()) — the sum of every payment ever recorded,
+  // full stop, never scoped to the current search/status filter and never
+  // netted against expenses (expenses are their own separate figure on the
+  // Dashboard, not subtracted from Cash In). The previous version summed
+  // `filtered` instead of `sales`, so switching the status pill or typing
+  // in the search box silently changed what "Cash Collected" meant on this
+  // page, and it would drift from the Dashboard total the moment a filter
+  // was active. This total is always computed from the full, unfiltered
+  // `sales` list.
+  //
+  // Known gap (flagged, not fixed here): a Sale row only ever exists for a
+  // Job-linked Invoice (see services/sales.py — Sale requires a Job).
+  // Payments recorded against a direct/jobless invoice
+  // (routes/invoices.py::apply_payments(), still reachable even though
+  // decisions-and-conventions.md marks the direct invoice payment route
+  // for removal) count toward the Dashboard's Cash Balance but have no
+  // Sale row to appear in, so they will not appear in this total or the
+  // list below until that route is closed and every invoice is required
+  // to have a job_id.
+  const cashCollected = sales.reduce((sum, sale) => sum + sale.amountValue, 0);
   const bookedTotal = filtered.reduce((sum, sale) => sum + sale.invoiceTotal, 0);
   const balanceTotal = filtered.reduce((sum, sale) => sum + sale.balanceValue, 0);
   const fullCount = sales.filter(sale => sale.status === 'full').length;
   const partialCount = sales.filter(sale => sale.status === 'partial').length;
   const unpaidCount = sales.filter(sale => sale.status === 'unpaid').length;
 
+  // Row builder for each stat's drill-down (DetailBreakdownModal), same
+  // shape Invoices.jsx/Expenses.jsx already use for their own stat cards.
+  const saleRows = list => list.map(sale => ({
+    ref: sale.id,
+    title: sale.description,
+    party: sale.client,
+    amount: sale.amountValue,
+    date: sale.date,
+    status: sale.status,
+  }));
+
   const stats = [
-    { label: 'Cash Collected', value: money(total), sub: 'Payments received', icon: D.sales, color: 'primary' },
-    { label: 'Booked Value', value: money(bookedTotal), sub: 'Invoice totals', icon: D.invoices, color: 'secondary' },
-    { label: 'Still Owed', value: money(balanceTotal), sub: 'Uncollected balance', icon: D.clock, color: 'warning' },
-    { label: 'Fully Paid', value: String(fullCount), sub: 'Complete sales', icon: D.check, color: 'teal' },
-    { label: 'Partial / Unpaid', value: String(partialCount + unpaidCount), sub: 'Needs collection', icon: D.alert, color: 'red' },
+    {
+      label: 'Cash Collected', value: money(cashCollected), sub: 'All payments received', icon: D.sales, color: 'primary',
+      details: { title: 'Cash Collected', sections: [{ title: 'All Sales / Payments In', rows: saleRows(sales) }] },
+    },
+    {
+      label: 'Booked Value', value: money(bookedTotal), sub: 'Invoice totals (current filter)', icon: D.invoices, color: 'secondary',
+      details: { title: 'Booked Value', sections: [{ title: 'Current Filter', rows: saleRows(filtered) }] },
+    },
+    {
+      label: 'Still Owed', value: money(balanceTotal), sub: 'Uncollected balance (current filter)', icon: D.clock, color: 'warning',
+      details: { title: 'Still Owed', sections: [{ title: 'Sales With a Balance', rows: saleRows(filtered.filter(sale => sale.balanceValue > 0)) }] },
+    },
+    {
+      label: 'Fully Paid', value: String(fullCount), sub: 'Complete sales', icon: D.check, color: 'teal',
+      details: { title: 'Fully Paid Sales', sections: [{ title: 'Full', rows: saleRows(sales.filter(sale => sale.status === 'full')) }] },
+    },
+    {
+      label: 'Partial / Unpaid', value: String(partialCount + unpaidCount), sub: 'Needs collection', icon: D.alert, color: 'red',
+      details: { title: 'Needs Collection', sections: [{ title: 'Partial / Unpaid', rows: saleRows(sales.filter(sale => sale.status !== 'full')) }] },
+    },
   ];
+
+  // Row-level Preview/Download: a Sale has no document of its own — it
+  // mirrors its Job's Invoice (services/sales.py) — so both fetch that
+  // Job fresh by id and act on its embedded invoice. Mirrors the
+  // Preview/Download pattern every other register page (Invoices, Jobs,
+  // Proposals) already has; this page previously had neither.
+  const handlePreview = sale => {
+    if (!sale.jobId) return;
+    api.job(sale.jobId)
+      .then(job => setPreview(job.invoice || null))
+      .catch(() => notify('Could not load the invoice for this sale.', 'error'));
+  };
+
+  const handleDownload = sale => {
+    if (!sale.jobId) return;
+    setDownloadingId(sale.backendId);
+    api.job(sale.jobId)
+      .then(job => {
+        if (job.invoice) return downloadInvoicePDF(job.invoice);
+        notify('This sale has no linked invoice to download.', 'error');
+      })
+      .catch(() => notify('Could not download the invoice for this sale.', 'error'))
+      .finally(() => setDownloadingId(null));
+  };
 
   return (
     <main className="main-canvas" style={{ display: 'block' }}>
       <ModuleHeader title="Sales" subtitle="Cash collected, with booked invoice value shown separately" />
-      <StatsGrid stats={stats} />
+      <StatsGrid stats={stats} onOpenDetails={setStatDetail} />
       <ModuleToolbar filters={SALE_STATUSES} filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} placeholder="Search client, description, or job ref..." />
       <RegisterCard title="Sales Register" countLabel={`${filtered.length} sale${filtered.length !== 1 ? 's' : ''} found`} loading={loading} error={error} emptyIcon="SALE" emptyMessage="No sales match your filters.">
-        {filtered.map(sale => <SaleRow key={sale.id} sale={sale} currentDeviceId={deviceIdentity?.device_id} />)}
+        {filtered.map(sale => (
+          <SaleRow
+            key={sale.id}
+            sale={sale}
+            currentDeviceId={deviceIdentity?.device_id}
+            onPreview={handlePreview}
+            onDownload={handleDownload}
+            downloadingId={downloadingId}
+          />
+        ))}
       </RegisterCard>
+      <PrintPreviewModal type="invoice" title={preview ? `Invoice Preview: ${preview.invoice_ref || preview.id}` : ''} data={preview} onClose={() => setPreview(null)} />
+      <DetailBreakdownModal detail={statDetail} onClose={() => setStatDetail(null)} />
+      <ModuleToast toast={toast} />
     </main>
   );
 }

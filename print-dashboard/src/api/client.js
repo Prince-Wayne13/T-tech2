@@ -133,6 +133,11 @@ export const api = {
   financialReport: (period = 'month') => request(`/reports/financials?period=${period}`),
   machineRevenue: () => request('/reports/machines/revenue'),
   jobs: (params = '') => request(`/jobs${params}`),
+  // Sales page (row-level preview): fetches one Job (with its embedded
+  // Invoice) by id. The backend route already existed
+  // (GET /jobs/<id> in routes/jobs.py) — this was just the missing
+  // frontend wrapper, same gap as the old acceptProposal()-only pattern.
+  job: (id) => request(`/jobs/${id}`),
   createJob: (payload) => request('/jobs', {
     method: 'POST',
     body: JSON.stringify(payload),
