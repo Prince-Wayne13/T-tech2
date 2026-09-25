@@ -94,12 +94,12 @@ def serialize_invoice(invoice, include_document=False):
         and invoice.due_on < date.today()
         and data["status"] not in {"paid", "cancelled"}
     )
-    # Proposal->Invoice link: invoice.source_proposal is the SQLAlchemy backref from
-    # Proposal.converted_invoice_id. Requires uselist=False on BOTH sides of the
-    # relationship (see models.py) to resolve to a single Proposal or None here —
+    # Quotation->Invoice link: invoice.source_quotation is the SQLAlchemy backref from
+    # Quotation.converted_invoice_id. Requires uselist=False on BOTH sides of the
+    # relationship (see models.py) to resolve to a single Quotation or None here —
     # a string-form backref alone left this list-typed and crashed in production;
     # see dev-log.md for the incident and fix.
-    data["source_proposal_ref"] = invoice.source_proposal.proposal_ref if invoice.source_proposal else None
+    data["source_quotation_ref"] = invoice.source_quotation.quotation_ref if invoice.source_quotation else None
 
     if include_document:
         data["company"] = current_app.config["COMPANY_PROFILE"]

@@ -451,12 +451,12 @@ function ProjectionsSection() {
             <div style={{ padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px' }}>
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>Sent Pipeline</div>
               <div style={{ fontSize: '15px', fontWeight: 700 }}>{money(data.pipeline?.sent_not_expired?.total)}</div>
-              <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{data.pipeline?.sent_not_expired?.count || 0} proposals</div>
+              <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{data.pipeline?.sent_not_expired?.count || 0} quotations</div>
             </div>
             <div style={{ padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px' }}>
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>Accepted, Awaiting Payment</div>
               <div style={{ fontSize: '15px', fontWeight: 700 }}>{money(data.pipeline?.accepted_not_yet_invoiced?.total)}</div>
-              <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{data.pipeline?.accepted_not_yet_invoiced?.count || 0} proposals</div>
+              <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{data.pipeline?.accepted_not_yet_invoiced?.count || 0} quotations</div>
             </div>
             <div style={{ padding: '12px', background: 'var(--bg-canvas)', borderRadius: '8px' }}>
               <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px' }}>Recurring Clients (Avg.)</div>

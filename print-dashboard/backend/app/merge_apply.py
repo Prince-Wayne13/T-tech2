@@ -81,7 +81,7 @@ from .extensions import db
 from .models import (
     Advance, Capability, Client, Expense, ExpenseCategory, ExportJob,
     Invoice, InvoiceLineItem, Job, Material, MaterialTransaction, Payment,
-    PettyCash, PricingItem, ProductionMachine, Proposal, ProposalLineItem,
+    PettyCash, PricingItem, ProductionMachine, Quotation, QuotationLineItem,
     Sale, Staff, SyncConflict, Vendor,
 )
 from .merge_preview import preview_merge
@@ -227,11 +227,11 @@ SAFE_TO_WRITE_TABLES = {
             "client_id": ("clients", "client_ref"),
         },
     },
-    "proposals": {
-        "model": Proposal,
-        "key_column": "proposal_ref",
+    "quotations": {
+        "model": Quotation,
+        "key_column": "quotation_ref",
         "columns": [
-            "proposal_ref", "client_id", "client_name", "title", "status",
+            "quotation_ref", "client_id", "client_name", "title", "status",
             "discount_amount", "currency", "valid_until", "contact",
             "priority", "machine_id", "required_capability_id",
             "prepared_by", "notes", "converted_invoice_id",
@@ -320,7 +320,7 @@ SAFE_TO_WRITE_TABLES = {
 APPLY_ORDER = [
     "production_machines", "capabilities", "vendors",
     "expense_categories", "advances", "export_jobs",
-    "clients", "pricing_items", "jobs", "invoices", "proposals", "payments",
+    "clients", "pricing_items", "jobs", "invoices", "quotations", "payments",
     "expenses", "sales", "petty_cash_entries", "material_transactions",
 ]
 
@@ -386,7 +386,7 @@ DATE_COLUMNS = {
     # set, was left as a raw string -- SQLite/SQLAlchemy rejects a
     # Date column being given a string). These four aren't on any
     # table in SAFE_TO_WRITE_TABLES yet, but adding them now means the
-    # same gap can't resurface silently the next time proposals/
+    # same gap can't resurface silently the next time quotations/
     # expenses/material_transactions get unblocked -- one complete
     # list checked once, not one column added reactively per crash.
     "transaction_date", "valid_until", "expense_date",
@@ -564,12 +564,12 @@ LINE_ITEM_SPECS = {
             "production_notes", "device_id", "created_at", "updated_at",
         ],
     },
-    "proposal_line_items": {
-        "model": ProposalLineItem,
-        "parent_table": "proposals",
-        "parent_key": "proposal_ref",
-        "parent_fk": "proposal_id",
-        "parent_model": Proposal,
+    "quotation_line_items": {
+        "model": QuotationLineItem,
+        "parent_table": "quotations",
+        "parent_key": "quotation_ref",
+        "parent_fk": "quotation_id",
+        "parent_model": Quotation,
         "columns": [
             "position", "description", "quantity", "unit", "unit_price",
             "amount", "pricing_item_id", "machine_id",
@@ -615,7 +615,7 @@ def _translate_optional_line_item_fk(conn_b, row_data: dict, column: str, ref_ta
 
 
 def _apply_dependent_line_items(conn_b, table: str, dry_run_only: bool) -> TableApplyResult:
-    """Merges invoice/proposal line items after parent rows have been
+    """Merges invoice/quotation line items after parent rows have been
     applied. These tables lack *_ref columns, so they are matched by
     parent ref + position.
     """

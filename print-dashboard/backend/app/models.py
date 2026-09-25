@@ -415,38 +415,38 @@ class Payment(TimestampMixin, SerializableMixin, db.Model):
     job = db.relationship("Job", back_populates="payments")
 
 
-class Proposal(TimestampMixin, SerializableMixin, db.Model):
-    __tablename__ = "proposals"
+class Quotation(TimestampMixin, SerializableMixin, db.Model):
+    __tablename__ = "quotations"
 
     id = db.Column(db.Integer, primary_key=True)
-    proposal_ref = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    quotation_ref = db.Column(db.String(40), unique=True, nullable=False, index=True)
     client_id = db.Column(db.Integer, db.ForeignKey("clients.id"))
     client_name = db.Column(db.String(160), nullable=False)
     title = db.Column(db.String(180), nullable=False)
     status = db.Column(db.String(30), default="draft", index=True)
     discount_amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     currency = db.Column(db.String(10), default="MWK", nullable=False)
-    # The real date this proposal actually happened, e.g. what's written on
+    # The real date this quotation actually happened, e.g. what's written on
     # a paper record -- separate from created_at (when it was typed into
-    # the system) and valid_until (the proposal's expiry date). Defaults to
-    # today at creation but is editable, so a proposal entered late can be
+    # the system) and valid_until (the quotation's expiry date). Defaults to
+    # today at creation but is editable, so a quotation entered late can be
     # backdated to when it was actually made.
     work_date = db.Column(db.Date)
     valid_until = db.Column(db.Date)
     contact = db.Column(db.String(160))
     priority = db.Column(db.String(30), default="medium")
     assigned_staff_id = db.Column(db.Integer, db.ForeignKey("staff.id"), nullable=True, index=True)
-    # Build decision #5: "Proposals currently have no machine field at
+    # Build decision #5: "Quotations currently have no machine field at
     # all, so this is also adding that concept there for the first
     # time." Mirrors Job.machine_id / Job.required_capability_id
-    # exactly -- internal-only, not shown on the proposal document,
+    # exactly -- internal-only, not shown on the quotation document,
     # not sent to the client. Populated the same way Job's is: picking
     # a service auto-assigns a compatible machine (see
     # services/machines.py's auto_assign_machine()).
     machine_id = db.Column(db.Integer, db.ForeignKey("production_machines.id"), nullable=True, index=True)
     required_capability_id = db.Column(db.Integer, db.ForeignKey("capabilities.id"), nullable=True, index=True)
     # Item 6: free text, editable at any status. Will later feed "Prepared by"
-    # display on proposal documents; no such display wired in this pass.
+    # display on quotation documents; no such display wired in this pass.
     prepared_by = db.Column(db.String(160))
     notes = db.Column(db.Text)
     converted_invoice_id = db.Column(
@@ -456,36 +456,36 @@ class Proposal(TimestampMixin, SerializableMixin, db.Model):
         unique=True,
     )
 
-    client = db.relationship("Client", backref="proposals")
-    assigned_staff = db.relationship("Staff", backref="assigned_proposals")
-    machine = db.relationship("ProductionMachine", backref="proposals")
-    required_capability = db.relationship("Capability", backref="proposals")
+    client = db.relationship("Client", backref="quotations")
+    assigned_staff = db.relationship("Staff", backref="assigned_quotations")
+    machine = db.relationship("ProductionMachine", backref="quotations")
+    required_capability = db.relationship("Capability", backref="quotations")
     # backref=backref(...) with uselist=False on BOTH sides: the plain string-form
     # backref used previously only sets uselist=False on the forward accessor
-    # (Proposal.converted_invoice); the reverse accessor (Invoice.source_proposal)
+    # (Quotation.converted_invoice); the reverse accessor (Invoice.source_quotation)
     # defaults to a list unless uselist=False is passed explicitly for that side too.
-    # That mismatch is what caused `invoice.source_proposal.proposal_ref` to fail
-    # with "'InstrumentedList' object has no attribute 'proposal_ref'" in production —
-    # source_proposal was actually a list, never a scalar, despite the relationship
+    # That mismatch is what caused `invoice.source_quotation.quotation_ref` to fail
+    # with "'InstrumentedList' object has no attribute 'quotation_ref'" in production —
+    # source_quotation was actually a list, never a scalar, despite the relationship
     # looking like a working one-to-one on a read-through of the code.
     converted_invoice = db.relationship(
         "Invoice",
-        backref=db.backref("source_proposal", uselist=False),
+        backref=db.backref("source_quotation", uselist=False),
         uselist=False,
     )
     line_items = db.relationship(
-        "ProposalLineItem",
-        back_populates="proposal",
+        "QuotationLineItem",
+        back_populates="quotation",
         cascade="all, delete-orphan",
-        order_by="ProposalLineItem.position.asc()",
+        order_by="QuotationLineItem.position.asc()",
     )
 
 
-class ProposalLineItem(TimestampMixin, SerializableMixin, db.Model):
-    __tablename__ = "proposal_line_items"
+class QuotationLineItem(TimestampMixin, SerializableMixin, db.Model):
+    __tablename__ = "quotation_line_items"
 
     id = db.Column(db.Integer, primary_key=True)
-    proposal_id = db.Column(db.Integer, db.ForeignKey("proposals.id"), nullable=False, index=True)
+    quotation_id = db.Column(db.Integer, db.ForeignKey("quotations.id"), nullable=False, index=True)
     position = db.Column(db.Integer, default=1, nullable=False)
     description = db.Column(db.String(255), nullable=False)
     quantity = db.Column(db.Numeric(12, 2), nullable=False, default=1)
@@ -493,15 +493,15 @@ class ProposalLineItem(TimestampMixin, SerializableMixin, db.Model):
     unit_price = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     amount = db.Column(db.Numeric(14, 2), nullable=False, default=0)
     # Build decision #5: mirrors InvoiceLineItem.pricing_item_id /
-    # machine_id exactly. Needed so accept_proposal() (routes/
-    # proposals.py) can carry each line's own machine assignment onto
+    # machine_id exactly. Needed so accept_quotation() (routes/
+    # quotations.py) can carry each line's own machine assignment onto
     # the InvoiceLineItem rows of the Job/Invoice it creates.
     pricing_item_id = db.Column(db.Integer, db.ForeignKey("pricing_items.id"))
     machine_id = db.Column(db.Integer, db.ForeignKey("production_machines.id"))
 
-    proposal = db.relationship("Proposal", back_populates="line_items")
-    pricing_item = db.relationship("PricingItem", backref="proposal_line_items")
-    machine = db.relationship("ProductionMachine", backref="proposal_line_items")
+    quotation = db.relationship("Quotation", back_populates="line_items")
+    pricing_item = db.relationship("PricingItem", backref="quotation_line_items")
+    machine = db.relationship("ProductionMachine", backref="quotation_line_items")
 
 
 class ExpenseCategory(TimestampMixin, SerializableMixin, db.Model):

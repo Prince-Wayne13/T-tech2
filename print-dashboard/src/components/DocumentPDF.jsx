@@ -164,8 +164,8 @@ export async function downloadInvoicePDF(invoice) {
   return downloadPDF(invoice, `${invoice?.invoice_ref || invoice?.id || 'invoice'}.pdf`, 'invoice');
 }
 
-export async function downloadProposalPDF(proposal) {
-  return downloadPDF(proposal, `${proposal?.id || 'proposal'}.pdf`, 'proposal');
+export async function downloadQuotationPDF(quotation) {
+  return downloadPDF(quotation, `${quotation?.id || 'quotation'}.pdf`, 'quotation');
 }
 
 export async function downloadJobPDF(job) {

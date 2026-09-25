@@ -30,7 +30,7 @@ function getTheme(data) {
   const status = data?.status || '';
   
   // Financials -> Darker Yacht Blue
-  if (['Invoice', 'Proposal', 'Expense', 'Receivables', 'Payables'].includes(type) || type === 'document' || status === 'financial') {
+  if (['Invoice', 'Quotation', 'Expense', 'Receivables', 'Payables'].includes(type) || type === 'document' || status === 'financial') {
     return { color: '#2C3A4C', dim: 'rgba(44, 58, 76, 0.08)', label: 'Financial', icon: D.fileText };
   }
   // Jobs/Production -> Teal
@@ -64,7 +64,7 @@ function detectLayout(data) {
   if (data.items || data.line_items) return 'document';
   if (data.metrics && typeof data.metrics === 'object') return 'report';
   if (data.user && data.action && data.target) return 'audit';
-  if (data.type && ['Job', 'Invoice', 'Proposal', 'Receipt', 'Advance', 'Expense', 'Archive'].includes(data.type)) return 'record';
+  if (data.type && ['Job', 'Invoice', 'Quotation', 'Receipt', 'Advance', 'Expense', 'Archive'].includes(data.type)) return 'record';
   return 'metadata';
 }
 

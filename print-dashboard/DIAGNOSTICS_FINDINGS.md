@@ -1,8 +1,8 @@
-# Diagnostics Findings: Proposal, Quotation PDF, Money Flow, Backup/Merge
+# Diagnostics Findings: Quotation, Quotation PDF, Money Flow, Backup/Merge
 
 Date checked: 2026-09-24
 
-Scope: diagnostics of proposal/job/invoice line-item amounts, proposal PDF dates, sales/expense/payment reporting, backup/merge traceability, and terminal-style debug logging.
+Scope: diagnostics of quotation/job/invoice line-item amounts, quotation PDF dates, sales/expense/payment reporting, backup/merge traceability, and terminal-style debug logging.
 
 ## Status Summary
 
@@ -17,94 +17,94 @@ Still worth talking about:
 - 13. Sales stored amount may need resync after restore/merge.
 
 Probably meh / watch only:
-- 12. Backend proposal document payload is currently dead code because frontend PDFs are the live path.
-- Broader proposal redundant fields cleanup after Finding 9's dangerous accept-path bug is fixed.
+- 12. Backend quotation document payload is currently dead code because frontend PDFs are the live path.
+- Broader quotation redundant fields cleanup after Finding 9's dangerous accept-path bug is fixed.
 - True unread/acknowledged sync dots. Current dot is an origin marker, not a clearable unread state.
 - Service picker default pricing/rate is intentionally later because real prices depend on quantity, square meters, materials, installation, etc.
 - Machine auto-assignment is acceptable for now because new services are meant to attach to an appropriate machine automatically.
 
 ## Fixed / Implemented
 
-### ~~1. Proposal PDF date is blank because quotations read invoice-style date fields~~
+### ~~1. Quotation PDF date is blank because quotations read invoice-style date fields~~
 
 Status: Fixed.
 
 Evidence:
 - `src/components/InvoicePDF.jsx:242` defines `QuotationDocument`.
-- In the quotation metadata, `src/components/InvoicePDF.jsx` prints `fmtDate(proposal?.issued_on || proposal?.issued)`.
-- Proposals do not have `issued_on`; backend proposals have `created_at` and `valid_until` instead (`backend/app/models.py`, `Proposal` model).
-- Backend proposal document builder only includes `valid_until`, not an issue/date-created field (`backend/app/services/proposals.py:72-84`).
+- In the quotation metadata, `src/components/InvoicePDF.jsx` prints `fmtDate(quotation?.issued_on || quotation?.issued)`.
+- Quotations do not have `issued_on`; backend quotations have `created_at` and `valid_until` instead (`backend/app/models.py`, `Quotation` model).
+- Backend quotation document builder only includes `valid_until`, not an issue/date-created field (`backend/app/services/quotations.py:72-84`).
 
 Impact:
-- Downloaded proposal/quotation PDFs can show a blank or `-` date, while invoices correctly show `issued_on`.
+- Downloaded quotation/quotation PDFs can show a blank or `-` date, while invoices correctly show `issued_on`.
 
 Likely fix direction:
-- For proposal PDFs, use `proposal.created_at` as the quotation date, falling back to today only for unsaved preview data.
-- Optionally add an explicit `issued_on` or `quotation_date` to `build_proposal_document()` if the backend document endpoint becomes the source of truth.
+- For quotation PDFs, use `quotation.created_at` as the quotation date, falling back to today only for unsaved preview data.
+- Optionally add an explicit `issued_on` or `quotation_date` to `build_quotation_document()` if the backend document endpoint becomes the source of truth.
 
 Fix applied:
 - `QuotationDocument` now reads `created_at`/`createdAt` when invoice-style `issued_on`/`issued` fields are absent, falling back to today only for unsaved data.
-- `build_proposal_document()` now includes proposal `created_at` in its billing payload so the dormant backend document path carries a quotation date too.
+- `build_quotation_document()` now includes quotation `created_at` in its billing payload so the dormant backend document path carries a quotation date too.
 
-### ~~2. Proposal edit flow can corrupt line-item rates by using line total as rate fallback~~
+### ~~2. Quotation edit flow can corrupt line-item rates by using line total as rate fallback~~
 
 Status: Fixed for frontend edit/save paths; backend accept-path hardening remains covered by Finding 9.
 
 Evidence:
 - `src/components/Modals.jsx:579` initializes edit items with:
   - `rate: item.rate || item.unit_price || item.amount || 0`
-- Backend proposal line items store both `unit_price` and `amount` (`backend/app/models.py`, `ProposalLineItem`).
-- Backend computes `amount` from `quantity * unit_price` if no amount is sent (`backend/app/services/proposals.py:44-67`).
+- Backend quotation line items store both `unit_price` and `amount` (`backend/app/models.py`, `QuotationLineItem`).
+- Backend computes `amount` from `quantity * unit_price` if no amount is sent (`backend/app/services/quotations.py:44-67`).
 
 Impact:
-- If a saved proposal line has a missing/zero `unit_price` but has `amount`, reopening/editing treats the whole line amount as the per-unit rate.
+- If a saved quotation line has a missing/zero `unit_price` but has `amount`, reopening/editing treats the whole line amount as the per-unit rate.
 - Example: quantity `10`, saved amount `50,000`, missing rate -> edit form rate becomes `50,000`; saving again sends `unit_price=50,000`, causing total `500,000`.
-- This is not exactly "amounts vanish"; it is a nearby amount-drift bug that can make proposal figures unreliable after edits.
+- This is not exactly "amounts vanish"; it is a nearby amount-drift bug that can make quotation figures unreliable after edits.
 
 Likely fix direction:
-- During proposal edit initialization, use `unit_price`/`rate` only for rate. Do not fall back to `amount` unless quantity is `1`.
+- During quotation edit initialization, use `unit_price`/`rate` only for rate. Do not fall back to `amount` unless quantity is `1`.
 - Add a test/save roundtrip for quantity greater than 1.
 
 Fix applied:
-- Proposal edit initialization no longer treats a line `amount` as the per-unit `rate`.
+- Quotation edit initialization no longer treats a line `amount` as the per-unit `rate`.
 - If an imported/legacy line has `amount` but no usable `unit_price`, the frontend derives the displayed/saved rate as `amount / quantity`, preserving the line total without multiplying it by quantity.
-- `buildProposalPayload()` applies the same `amount / quantity` guard when it has to serialize amount-only line data.
+- `buildQuotationPayload()` applies the same `amount / quantity` guard when it has to serialize amount-only line data.
 
-### ~~3. Backup merge excludes proposal and invoice detail rows, breaking traceability~~
+### ~~3. Backup merge excludes quotation and invoice detail rows, breaking traceability~~
 
 Status: Implemented in merge preview/apply; needs one real cross-device verification run before closing operationally.
 
 Evidence:
 - `backend/app/merge_apply.py` explicitly lists these as not yet safe:
-  - `proposals`
+  - `quotations`
   - `invoice_line_items`
-  - `proposal_line_items`
-- `merge_preview.py` includes `proposals` in `REF_KEYED_TABLES`, so preview can report proposals, but apply does not actually merge them.
+  - `quotation_line_items`
+- `merge_preview.py` includes `quotations` in `REF_KEYED_TABLES`, so preview can report quotations, but apply does not actually merge them.
 - `invoices`, `payments`, `jobs`, `expenses`, `sales`, and `petty_cash_entries` are applied, but line-item tables are not.
 - A real merge test from a device with an invoice totaling MK 116,000 from two line items into an empty device produced the invoice, payment, and job, but zero invoice line items.
 
 Impact:
 - After applying a backup from another device, invoice headers and payment rows may exist without the invoice service rows that explain the amount.
 - Machine revenue, product mix, quantity produced, and PDF line items depend on `invoice_line_items`; those reports can undercount or show blank service breakdowns after merge.
-- Proposal totals depend on `proposal_line_items`; synced proposals are not currently applied at all.
+- Quotation totals depend on `quotation_line_items`; synced quotations are not currently applied at all.
 - In the reproduced merge, financial revenue still showed MK 116,000, but machine revenue was empty and `product_mix` was `{}` because the service rows were absent.
-- The loss can be silent: `proposals` may receive a skip notice, but raw `invoice_line_items` and `proposal_line_items` do not reliably appear in merge results because preview is driven by ref/name-keyed tables.
+- The loss can be silent: `quotations` may receive a skip notice, but raw `invoice_line_items` and `quotation_line_items` do not reliably appear in merge results because preview is driven by ref/name-keyed tables.
 - This is the biggest traceability risk for "every figure is traceable and reflected."
 
 Likely fix direction:
-- Add stable refs to `invoice_line_items` and `proposal_line_items`, or merge them through parent refs plus `position`.
-- Add proposals to apply with FK translations for client, converted invoice, machine/capability, and assigned staff policy.
-- Add consistency checks after merge: invoice total vs line-item sum, proposal total vs line-item sum, payment totals vs invoice totals.
+- Add stable refs to `invoice_line_items` and `quotation_line_items`, or merge them through parent refs plus `position`.
+- Add quotations to apply with FK translations for client, converted invoice, machine/capability, and assigned staff policy.
+- Add consistency checks after merge: invoice total vs line-item sum, quotation total vs line-item sum, payment totals vs invoice totals.
 
 Fix applied:
-- `proposals` are now in the safe merge apply set, with client, converted invoice, machine, and capability FK translation. Staff assignment remains local and is not copied.
-- `merge_preview.py` now reports `invoice_line_items` and `proposal_line_items` by parent ref plus line position.
-- `merge_apply.py` now applies invoice/proposal line items after their parent invoices/proposals are available, translating machine and pricing item FKs.
+- `quotations` are now in the safe merge apply set, with client, converted invoice, machine, and capability FK translation. Staff assignment remains local and is not copied.
+- `merge_preview.py` now reports `invoice_line_items` and `quotation_line_items` by parent ref plus line position.
+- `merge_apply.py` now applies invoice/quotation line items after their parent invoices/quotations are available, translating machine and pricing item FKs.
 
 Remaining verification:
 - Run a real two-device merge using an invoice with multiple service rows and confirm:
   - invoice line item count arrives,
-  - proposal line item count arrives,
+  - quotation line item count arrives,
   - machine revenue and product mix are populated,
   - invoice/payment totals still balance.
 
@@ -173,24 +173,24 @@ Remaining caveat:
 - After a successful backup/export, the live `debug_events` table is rotated so the Audit page keeps only a small recent tail locally while the full readable log remains in the backup/Drive log file.
 - The readable `.log` export is capped to the newest 5000 debug events. The backup zip's `app.db` snapshot still contains the full `debug_events` table as of backup time, before rotation.
 
-### ~~9. Proposal amount fields are stored redundantly~~
+### ~~9. Quotation amount fields are stored redundantly~~
 
 Status: Accept-path multiplier fixed; broader redundant-field cleanup remains a watch item.
 
 Evidence:
-- `ProposalLineItem` stores `quantity`, `unit_price`, and `amount`.
-- `proposal_totals()` sums `item.amount`, not `quantity * unit_price`.
-- `accept_proposal()` converts proposal lines using `unit_price` first, falling back to `amount`.
+- `QuotationLineItem` stores `quantity`, `unit_price`, and `amount`.
+- `quotation_totals()` sums `item.amount`, not `quantity * unit_price`.
+- `accept_quotation()` converts quotation lines using `unit_price` first, falling back to `amount`.
 - The old accept path sent `unit_price: float(item.unit_price or item.amount or 0)` into invoice creation.
-- Reproduced case: a proposal line saved with quantity `10`, amount `50,000`, and missing/zero `unit_price` totaled MK 50,000 as a proposal, but accepting it created a MK 500,000 invoice.
-- Normal UI creation does not trigger this path because `buildProposalPayload()` sends `unit_price`; this requires an API call, script, imported row, or corrupted/legacy row.
+- Reproduced case: a quotation line saved with quantity `10`, amount `50,000`, and missing/zero `unit_price` totaled MK 50,000 as a quotation, but accepting it created a MK 500,000 invoice.
+- Normal UI creation does not trigger this path because `buildQuotationPayload()` sends `unit_price`; this requires an API call, script, imported row, or corrupted/legacy row.
 
 Fix applied:
-- `accept_proposal()` now uses `unit_price` when present, otherwise derives unit price as `amount / quantity`.
+- `accept_quotation()` now uses `unit_price` when present, otherwise derives unit price as `amount / quantity`.
 - The reproduced quantity `10`, amount `50,000`, missing-rate row should now convert to an invoice line of MK 5,000 x 10 = MK 50,000, not MK 500,000.
 
 Remaining caveat:
-- Proposal lines still store redundant `quantity`, `unit_price`, and `amount`. That is less urgent now that the dangerous accept-path multiplier is fixed.
+- Quotation lines still store redundant `quantity`, `unit_price`, and `amount`. That is less urgent now that the dangerous accept-path multiplier is fixed.
 
 ### ~~Backup schedule~~
 
@@ -241,7 +241,7 @@ Evidence:
 - `src/components/Modals.jsx` defines the hardcoded `SERVICES` list with `name` and `unit`, but no `price` or `rate`.
 - `ServiceDropdown` only calls `onSelect(service)`.
 - `AddItemBar` requires `Number(form.rate) > 0` before the service can be added.
-- `NewProposalModal` and `NewJobModal` `handleServiceSelect()` reset quantity to `1`, but do not set a price/rate from the selected service.
+- `NewQuotationModal` and `NewJobModal` `handleServiceSelect()` reset quantity to `1`, but do not set a price/rate from the selected service.
 
 Impact:
 - If a user expects choosing a service to bring its amount/rate with it, the amount appears to "vanish" because the selected service has no price attached and the rate field stays blank.
@@ -260,7 +260,7 @@ Priority note:
 Status: Watch only for now.
 
 Evidence:
-- `NewProposalModal` and `NewJobModal` both call `api.machines(...)` inside `handleServiceSelect()` and later write `form.machineId` when the response returns.
+- `NewQuotationModal` and `NewJobModal` both call `api.machines(...)` inside `handleServiceSelect()` and later write `form.machineId` when the response returns.
 - Added line items capture `machineId: form.machineId || null` at the moment the Add button is clicked.
 - There is no request token/cancellation check to ensure the machine response still belongs to the currently selected service.
 - `machineId` is never cleared when a new item/service is selected.
@@ -269,7 +269,7 @@ Impact:
 - On a slow machine lookup, an older service selection can finish after the user has already selected another service.
 - The stale response can overwrite `form.machineId`, so the next added line can carry the wrong machine assignment.
 - There is also a deterministic, no-race version: if the next service has no available matching machine, the new line silently inherits the previous line's machine.
-- This probably does not zero the amount itself, but it can corrupt service-to-machine traceability in jobs/proposals.
+- This probably does not zero the amount itself, but it can corrupt service-to-machine traceability in jobs/quotations.
 
 Likely fix direction:
 - Track the selected service/category request and ignore stale machine lookup responses.
@@ -330,18 +330,18 @@ Fix applied:
 
 ## Meh / Watch List
 
-### 12. Proposal list endpoint does not include backend document payload
+### 12. Quotation list endpoint does not include backend document payload
 
 Evidence:
-- Proposal rows are serialized without `include_document=True` in list/get routes.
-- PDF download uses frontend data directly rather than backend `build_proposal_document()`.
-- Current route scan found no proposal route passing `include_document=True`; `build_proposal_document()` is effectively dead code right now.
+- Quotation rows are serialized without `include_document=True` in list/get routes.
+- PDF download uses frontend data directly rather than backend `build_quotation_document()`.
+- Current route scan found no quotation route passing `include_document=True`; `build_quotation_document()` is effectively dead code right now.
 
 Impact:
-- There are two document shapes: backend proposal document and frontend PDF component. They can drift, as seen with the missing date.
+- There are two document shapes: backend quotation document and frontend PDF component. They can drift, as seen with the missing date.
 
 Likely fix direction:
-- Either use one normalized frontend PDF payload, or add a proposal document endpoint similar to invoices.
+- Either use one normalized frontend PDF payload, or add a quotation document endpoint similar to invoices.
 
 Priority note:
 - Meh for now. The frontend PDF path is the live one, and Finding 1 already fixed the date issue there.
@@ -356,23 +356,23 @@ Priority note:
    - product mix
 2. Add a "money consistency" diagnostic endpoint/script that reports:
    - invoices where stored amount differs from line item subtotal minus discount
-   - proposals where stored line amount differs from quantity times unit price
-   - invoices/proposals with zero line items but nonzero totals
+   - quotations where stored line amount differs from quantity times unit price
+   - invoices/quotations with zero line items but nonzero totals
    - sales where stored amount differs from linked invoice paid/total rule
    - expense category totals split by paid vs unpaid
 3. Test restore/merge sale amounts after payment changes to decide whether sales should be resynced post-merge or derived live.
 
 ## Sync/Backup UX Features To Keep
 
-- Synced records should remain visually marked as new/from sync. The app already shows an imported dot for records whose `device_id` differs from this laptop on Jobs, Invoices, Proposals, Expenses, Sales, Petty Cash, and Advances; the tooltip now says `New from sync`.
+- Synced records should remain visually marked as new/from sync. The app already shows an imported dot for records whose `device_id` differs from this laptop on Jobs, Invoices, Quotations, Expenses, Sales, Petty Cash, and Advances; the tooltip now says `New from sync`.
 - A future unread/acknowledged state should let the user clear the dot after opening/reviewing the synced record. Current behavior is an origin marker, not a true read/unread tracker.
-- After Apply Sync, the result summary should clearly show counts for jobs, invoices, payments, proposals, invoice line items, proposal line items, expenses, sales, and skipped/conflict rows.
-- Dashboard/report money cards should refresh after sync and balance against the merged details. Add post-sync checks for invoice total vs line items, proposal total vs line items, payments vs invoice paid total, and sales amount vs linked invoice paid/total.
+- After Apply Sync, the result summary should clearly show counts for jobs, invoices, payments, quotations, invoice line items, quotation line items, expenses, sales, and skipped/conflict rows.
+- Dashboard/report money cards should refresh after sync and balance against the merged details. Add post-sync checks for invoice total vs line items, quotation total vs line items, payments vs invoice paid total, and sales amount vs linked invoice paid/total.
 - Conflicts should stay reviewable instead of silently overwriting this laptop's data.
 
 ## Checked From External AI Notes But Not Added As Bugs
 
-- Backend `dict.get("quantity", item.get("qty", 1))` fallback in `apply_proposal_line_items()` is not a current live bug for the existing proposal form, because `Proposals.jsx` sends `quantity` and `unit_price` explicitly.
-- Proposal edit loading does currently read backend `unit_price`, so the simple create/edit roundtrip does not automatically wipe amounts. The remaining risk is the line-total-as-rate fallback described above, plus the service picker UX issues.
-- Legacy proposal-line migration does not appear to corrupt old rows in the tested case, although amount/rate drift remains reproducible when malformed rows enter through API/script/import paths.
+- Backend `dict.get("quantity", item.get("qty", 1))` fallback in `apply_quotation_line_items()` is not a current live bug for the existing quotation form, because `Quotations.jsx` sends `quantity` and `unit_price` explicitly.
+- Quotation edit loading does currently read backend `unit_price`, so the simple create/edit roundtrip does not automatically wipe amounts. The remaining risk is the line-total-as-rate fallback described above, plus the service picker UX issues.
+- Legacy quotation-line migration does not appear to corrupt old rows in the tested case, although amount/rate drift remains reproducible when malformed rows enter through API/script/import paths.
 - Exact line citations in this document may drift as code changes; treat file/function names and evidence text as authoritative unless a line number is rechecked in the current tree.

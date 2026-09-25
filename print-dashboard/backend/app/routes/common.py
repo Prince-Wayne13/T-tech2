@@ -28,7 +28,7 @@ def list_response(query, serializer=lambda item: item.to_dict()):
 class MissingFieldError(Exception):
     """Raised by require_fields() -- a required field was missing or blank.
 
-    Build decision #9: Job/Proposal/Invoice/Client creation used to read
+    Build decision #9: Job/Quotation/Invoice/Client creation used to read
     required fields with raw `data["field"]`, which raises an uncaught
     KeyError on a missing field -- Flask's default error handler turns
     that into a raw stack trace / HTML error page (the same class of

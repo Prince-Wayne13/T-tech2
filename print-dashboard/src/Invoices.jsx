@@ -77,7 +77,7 @@ function mapInvoice(invoice) {
     paid: compactDate(invoice.paid_on),
     line_items: lineItems,
     notes: invoice.notes,
-    sourceProposalRef: invoice.source_proposal_ref || null,
+    sourceQuotationRef: invoice.source_quotation_ref || null,
     discount_amount: Number(invoice.discount_amount || 0),
     deviceId: invoice.device_id,
   };
@@ -108,8 +108,8 @@ function InvoiceRow({ inv, onPreview, onSetDate, onOutstandingTab, currentDevice
       <div className="vendor-info">
         <div className="vendor-name">{inv.title}<ImportedDot recordDeviceId={inv.deviceId} currentDeviceId={currentDeviceId} /></div>
         <div className="vendor-cat">{inv.client} - Due: {inv.due || '-'}</div>
-        {inv.sourceProposalRef && (
-          <div className="activity-time" style={{ marginTop: '2px' }}>Converted from {inv.sourceProposalRef}</div>
+        {inv.sourceQuotationRef && (
+          <div className="activity-time" style={{ marginTop: '2px' }}>Converted from {inv.sourceQuotationRef}</div>
         )}
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0, minWidth: '110px' }}>

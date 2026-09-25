@@ -237,22 +237,22 @@ function InvoiceDocument({ invoice }) {
 }
 
 /* ═══════════════════════════════════════
-   QUOTATION / PROPOSAL
+   QUOTATION / QUOTATION
 ═══════════════════════════════════════ */
-function QuotationDocument({ proposal }) {
-  const lineItems = normaliseItems(proposal);
+function QuotationDocument({ quotation }) {
+  const lineItems = normaliseItems(quotation);
   const subtotal = calculateTotal(lineItems);
-  const discount = Number(proposal?.discount ?? proposal?.discount_amount ?? 0);
+  const discount = Number(quotation?.discount ?? quotation?.discount_amount ?? 0);
   const total = Math.max(subtotal - discount, 0);
   // Fix: this used to fall straight to created_at/today whenever no
-  // issued_on was set, since proposals never had a real "date this
+  // issued_on was set, since quotations never had a real "date this
   // happened" field. work_date now covers that -- checked first, before
-  // the old fallbacks, so a backdated proposal (entered late, but really
+  // the old fallbacks, so a backdated quotation (entered late, but really
   // from an earlier date) prints its actual date, not today's.
-  const quotationDate = proposal?.work_date || proposal?.issued_on || proposal?.issued || proposal?.created_at || proposal?.createdAt || new Date();
+  const quotationDate = quotation?.work_date || quotation?.issued_on || quotation?.issued || quotation?.created_at || quotation?.createdAt || new Date();
 
   return (
-    <Document title={`${proposal?.proposal_ref || proposal?.id || 'quotation'} - T-Tech`} author="T-Tech Suppliers & General Dealers Ltd">
+    <Document title={`${quotation?.quotation_ref || quotation?.id || 'quotation'} - T-Tech`} author="T-Tech Suppliers & General Dealers Ltd">
       <Page size="A4" style={styles.page}>
         <BrandHeader />
 
@@ -265,12 +265,12 @@ function QuotationDocument({ proposal }) {
         <View style={styles.metaRow}>
           <View>
             <Text style={styles.forLabel}>For:</Text>
-            <Text style={styles.forValue}>{proposal?.client_name || proposal?.client || ''}</Text>
+            <Text style={styles.forValue}>{quotation?.client_name || quotation?.client || ''}</Text>
           </View>
           <View style={styles.metaBlockRight}>
             <View style={styles.metaLine}>
               <Text style={styles.metaLabel}>Number:</Text>
-              <Text style={styles.metaValue}>{proposal?.proposal_ref || proposal?.id || '—'}</Text>
+              <Text style={styles.metaValue}>{quotation?.quotation_ref || quotation?.id || '—'}</Text>
             </View>
             <View style={styles.metaLine}>
               <Text style={styles.metaLabel}>Date:</Text>
@@ -279,8 +279,8 @@ function QuotationDocument({ proposal }) {
           </View>
         </View>
 
-        {proposal?.title && (
-          <Text style={{ fontSize: 9.5, fontWeight: 700, color: C.black, marginTop: -10, marginBottom: 10 }}>{proposal.title}</Text>
+        {quotation?.title && (
+          <Text style={{ fontSize: 9.5, fontWeight: 700, color: C.black, marginTop: -10, marginBottom: 10 }}>{quotation.title}</Text>
         )}
 
         <ItemsTable items={lineItems} />
@@ -288,14 +288,14 @@ function QuotationDocument({ proposal }) {
 
         <View style={{ marginTop: 8, flexDirection: 'row', justifyContent: 'flex-end' }}>
           <Text style={{ fontSize: 8, color: C.muted, fontStyle: 'italic' }}>
-            Valid until {fmtDate(proposal?.valid_until || proposal?.validUntil || proposal?.expires)} · Subject to artwork approval
+            Valid until {fmtDate(quotation?.valid_until || quotation?.validUntil || quotation?.expires)} · Subject to artwork approval
           </Text>
         </View>
 
-        {proposal?.notes && (
+        {quotation?.notes && (
           <View style={styles.notesSection}>
             <Text style={styles.notesLabel}>Terms & Notes</Text>
-            <Text style={styles.notesText}>{proposal.notes}</Text>
+            <Text style={styles.notesText}>{quotation.notes}</Text>
           </View>
         )}
       </Page>
@@ -315,12 +315,13 @@ export async function downloadInvoicePDF(invoice) {
   URL.revokeObjectURL(url);
 }
 
-export async function downloadProposalPDF(proposal) {
-  const blob = await pdf(<QuotationDocument proposal={proposal} />).toBlob();
+export async function downloadQuotationPDF(quotation) {
+  const blob = await pdf(<QuotationDocument quotation={quotation} />).toBlob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${proposal?.proposal_ref || proposal?.id || 'quotation'}.pdf`;
+  const quotationRef = quotation?.quotation_ref || quotation?.id || 'quotation';
+  link.download = `${String(quotationRef).replace(/^PROP-/, 'QUOTE-')}.pdf`;
   document.body.appendChild(link);
   link.click();
   link.remove();

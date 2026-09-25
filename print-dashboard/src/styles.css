@@ -865,7 +865,7 @@ svg { display: block; flex-shrink: 0; }
 }
 .activity-icon.invoices  { background: var(--secondary-dim); color: var(--secondary); }
 .activity-icon.printer   { background: var(--teal-dim);      color: var(--teal);      }
-.activity-icon.proposals { background: var(--purple-dim);    color: var(--purple);    }
+.activity-icon.quotations { background: var(--purple-dim);    color: var(--purple);    }
 .activity-icon.check     { background: var(--primary-dim);   color: var(--primary);   }
 .activity-icon.expenses  { background: var(--warning-dim);   color: var(--warning);   }
 .activity-icon.alert     { background: var(--red-dim);       color: var(--red);       }

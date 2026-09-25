@@ -157,7 +157,7 @@ def main() -> None:
 
     # pywebview blocks all file downloads by default (this setting
     # defaults to False). Without this, every "Download PDF" button in
-    # the app -- invoices, proposals, exports, reports -- silently does
+    # the app -- invoices, quotations, exports, reports -- silently does
     # nothing: the click handler runs, the PDF is generated in memory
     # correctly, but pywebview's embedded browser refuses to hand the
     # resulting file off to Windows' normal save-file behavior. This is

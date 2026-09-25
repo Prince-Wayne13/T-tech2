@@ -1,5 +1,38 @@
 # T-Tech2 print-dashboard — Changelog
 
+## 2026-09-24 15:44 UTC — Sales amount now derived from real job payments only; fixed double-counted payment in add_job_payment — Myth Claude
+
+Scope: backend/app/services/sales.py, backend/app/services/jobs.py. Repo cloned fresh from origin/main at 59e3369 ("sales stil aint fixed"); this is the first session where the repo was read directly instead of pasted in.
+
+**Problem (Sales page showed MK 0 for a job with real payments, e.g. job 12):**
+* derive_sale_amount() returned 0 whenever job.invoice was missing, and otherwise capped the Sale at the invoice's calculated total. So the Sale depended on the ORDER the accountant worked in: payment recorded before the invoice was finished (or while its price was still 0) => Sale stays 0 until someone revisits the invoice.
+* Cash Balance sums real payments, so the two screens disagreed.
+
+**Decision (owner-approved):** invoice-first is the wrong source of truth; payment-first is right. The owner rejected wiping and re-entering data (loses real history), so the fix is in the derivation, not the data.
+
+**Changes:**
+* services/sales.py::derive_sale_amount() = sum of Payment rows on the Job. No invoice lookup, no cap at invoice total. Overpayment is kept as real cash. No payments => 0.
+* services/sales.py::serialize_sale(): unchanged logic, comment added. invoice_total is still exposed separately, so Booked Value / Still Owed on sales.jsx keep working (sales.jsx already treats Sale.amount as collected cash and computes balance from invoice_total, so no frontend change was needed).
+* services/jobs.py::add_job_payment(): removed the redundant job.payments.append(payment) and replaced it with db.session.add + flush. NEW FINDING, see below. Added `from ..extensions import db`.
+
+**New finding (found while testing, not part of the original ask):** Payment(job=job, ...) already attaches to job.payments through the back-populated relationship, and the extra .append() put the SAME payment in the list twice from the second payment onward. The DB rows were always correct (2 rows), and totals were correct after any reload, so nothing in the database was ever inflated by this. But everything computed BEFORE commit in the same request was inflated (paid 2000 instead of 1500), including the Sale.amount that _sync_linked_sale() saved at that moment. It self-corrected on the next list_sales() resync, which is why it was hard to see.
+
+**Existing bad rows:** no new migration written. reconcile_orphan_payments_and_sales() (added earlier today by zcodex claude) already re-syncs every Sale via sync_sale_amount(), and run_full_upgrade() calls it at startup, so existing wrong Sales (job 12 shape) heal on the next app restart. Tested below.
+
+**Verification (throwaway SQLite DB, project's pinned requirements in a venv):**
+* 13/13 scenario checks pass: payment with no invoice (old 0 => new 500); invoice priced 0 (old 0 => new 750); invoice fixed later leaves sale correct without a revisit; fully paid; two payments summed; edited payment updates sale; overpayment kept; no payments => 0; total of all Sales == total of all job payments.
+* In-memory total after two payments: 1500 (was 2000 before the append fix), and 1500 after commit + reload.
+* Migration test: a Sale stuck at 0.00 beside a 1200 payment became 1200.00 after reconcile_orphan_payments_and_sales(); second run changed nothing.
+
+**NOT verified / caveats (be honest about scope):**
+* Not run against the real ttech_prod.db or ttech_dev.db, and not run through the real HTTP routes or the built frontend. Tested at service level only.
+* Payments with job_id NULL are still not attributed to any Sale by this change; the earlier migration handles the attachable ones and reports the rest as "unattributable_payments". Cash Balance and Sales can still differ by that amount.
+* Did not audit other places that call job.payments.append(...) or build Payment(job=...) followed by an append; only add_job_payment() was fixed. Worth a grep next session.
+* The SAWarning about a Sale "not in session" appears in my test setup (autoflush ordering); it did not appear as an app error, but I did not chase it further.
+* Did NOT do the dev-log reorder proposed earlier this session (pending owner's answer). This entry is placed at the top of the file only; older entries remain in their existing, mixed order. Duplicate 2026-07-23 entry and mixed author names still present.
+
+**Impact on invoice math:** invoice_totals() reads job.payments too, so the append fix also stops that in-memory inflation for invoice paid/balance computed inside add_job_payment().
+
 Author: Myth Claude
 Date: 2026-07-20
 Scope: Project setup / dev log initialization

@@ -315,13 +315,13 @@ function InvoicePreviewFrame({ data, total }) {
   );
 }
 
-function ProposalPreviewFrame({ data, total }) {
+function QuotationPreviewFrame({ data, total }) {
   const subtotal = calculateTotal(data.items || []);
   const discount = Number(data.discount || 0);
   return (
     <PaperPreview accentColor="#5B7C99">
       <div style={{ textAlign: 'center', marginBottom: '16px', borderBottom: '2px solid #5B7C99', paddingBottom: '10px' }}>
-        <div style={{ fontSize: '13px', fontWeight: 700, color: '#5B7C99' }}>PROPOSAL</div>
+        <div style={{ fontSize: '13px', fontWeight: 700, color: '#5B7C99' }}>QUOTATION</div>
         <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{data.title || 'Untitled'}</div>
       </div>
       <div style={{ fontSize: '10px', marginBottom: '12px' }}><strong>Client:</strong> {data.client || '—'}</div>
@@ -545,12 +545,12 @@ export function NewInvoiceModal({ isOpen, onClose, onSave, initialData = null })
   );
 }
 
-/* ═══════════════════════════════════════ MODAL: New Proposal ═══════════════════════════════════════ */
-export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }) {
-  // workDate: the real date this proposal actually happened, separate from
-  // validUntil below (the proposal's expiry date). Defaults to today so
+/* ═══════════════════════════════════════ MODAL: New Quotation ═══════════════════════════════════════ */
+export function NewQuotationModal({ isOpen, onClose, onSave, initialData = null }) {
+  // workDate: the real date this quotation actually happened, separate from
+  // validUntil below (the quotation's expiry date). Defaults to today so
   // ordinary same-day entry needs no extra step, but can be changed to
-  // enter a proposal late without it silently taking today's date.
+  // enter a quotation late without it silently taking today's date.
   const [form, setForm] = useState({ client: '', title: '', items: [], validUntil: '', validDays: '', workDate: new Date().toISOString().split('T')[0], contact: '', notes: '', discount: 0, priority: 'medium', assignedStaffId: '', machineId: '' });
   const [selectedService, setSelectedService] = useState(null);
   const [qty, setQty] = useState('1');
@@ -600,19 +600,19 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
       contact: initialData?.contact || '',
       notes: initialData?.notes || '',
       discount: Number(initialData?.discount_amount || 0),
-      // Job/Proposal parity: Priority and Assigned Staff are captured here so
-      // they're already known the moment a proposal converts to a Job — but
-      // both are INTERNAL-ONLY. They must never render on the proposal
+      // Job/Quotation parity: Priority and Assigned Staff are captured here so
+      // they're already known the moment a quotation converts to a Job — but
+      // both are INTERNAL-ONLY. They must never render on the quotation
       // document (preview or PDF) and never carry onto the derived invoice.
-      // ProposalPreviewFrame/ProposalPrintLayout are not passed these two
+      // QuotationPreviewFrame/QuotationPrintLayout are not passed these two
       // fields for that reason — see their call sites below/in PrintLayouts.
       priority: initialData?.priority || 'medium',
       assignedStaffId: initialData?.assignedStaffId || initialData?.assigned_staff_id || '',
-      // Build decision #5: "Proposals currently have no machine field
+      // Build decision #5: "Quotations currently have no machine field
       // at all, so this is also adding that concept there for the
       // first time." Internal-only, same as priority/assignedStaffId
       // above -- never shown to the client, never on the PDF, only
-      // relevant once/if this proposal converts into a Job.
+      // relevant once/if this quotation converts into a Job.
       machineId: initialData?.machineId || initialData?.machine_id || '',
     });
     setSelectedService(null); setQty('1'); setRate(''); setShowPreview(false);
@@ -647,7 +647,7 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
 
   // Recompute the stored validUntil date whenever the days input changes.
   // Base is always "today" at the moment of typing/saving — not the
-  // proposal's original creation date on edit — matching the confirmed
+  // quotation's original creation date on edit — matching the confirmed
   // "computed once at save time" behavior.
   const setValidDays = daysStr => {
     const days = Number(daysStr);
@@ -696,7 +696,7 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
   });
 
   return (
-    <ModalWrapper isOpen={isOpen} onClose={onClose} title="New Proposal" wide footer={<>
+    <ModalWrapper isOpen={isOpen} onClose={onClose} title="New Quotation" wide footer={<>
       <button onClick={onClose} style={cancelButton}>Cancel</button>
       <button onClick={handleSave} disabled={submitting} style={submitting ? createButtonBusy : createButton}>{submitting ? 'Saving...' : 'Create'}</button>
     </>}>
@@ -705,17 +705,17 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-faint)', display: 'grid', gap: '10px', flexShrink: 0 }}>
             <div>
               <label style={labelStyle}>Client</label>
-              <input style={inputStyle} list="proposal-client-list" value={form.client} onChange={e => handleClientChange(e.target.value)} />
-              <datalist id="proposal-client-list">
+              <input style={inputStyle} list="quotation-client-list" value={form.client} onChange={e => handleClientChange(e.target.value)} />
+              <datalist id="quotation-client-list">
                 {clients.map(c => <option key={c.id} value={c.name} />)}
               </datalist>
             </div>
-            <div><label style={labelStyle}>Proposal Title</label><input style={inputStyle} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></div>
+            <div><label style={labelStyle}>Quotation Title</label><input style={inputStyle} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></div>
             <div>
-              <label style={labelStyle}>Proposal Date (when this actually happened)</label>
+              <label style={labelStyle}>Quotation Date (when this actually happened)</label>
               <input type="date" style={inputStyle} value={form.workDate} onChange={e => setForm({ ...form, workDate: e.target.value })} />
               <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '3px' }}>
-                Entering this late? Set the real date here — it's what prints on the proposal, not today's date.
+                Entering this late? Set the real date here — it's what prints on the quotation, not today's date.
               </div>
             </div>
             <div>
@@ -737,10 +737,10 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
           {/* Internal-only block: Priority + Assigned Staff. Deliberately
               styled distinctly (dashed border, muted label) to signal this
               data is for internal scheduling only — it is never read by
-              ProposalPreviewFrame below, never sent into the print/PDF
+              QuotationPreviewFrame below, never sent into the print/PDF
               layouts, and never copied onto the invoice created at accept
-              time. It only becomes visible/used once this proposal converts
-              into a Job (see Proposals.jsx::handleSave / handleAccept). */}
+              time. It only becomes visible/used once this quotation converts
+              into a Job (see Quotations.jsx::handleSave / handleAccept). */}
           <div style={{ padding: '12px 20px', borderBottom: '1px dashed var(--border-faint)', display: 'grid', gap: '10px', flexShrink: 0, background: 'var(--bg-canvas)' }}>
             <div style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Internal Only — not shown to client, not on invoice
@@ -797,19 +797,19 @@ export function NewProposalModal({ isOpen, onClose, onSave, initialData = null }
           </div>
           <AddItemBar selectedService={selectedService} form={{ qty, rate }} setForm={f => { setQty(f.qty); setRate(f.rate); }} onAdd={addItem} />
         </>}
-        previewContent={<ProposalPreviewFrame data={form} total={total} />}
+        previewContent={<QuotationPreviewFrame data={form} total={total} />}
       />
     </ModalWrapper>
   );
 }
 
 /* ═══════════════════════════════════════ MODAL: New Job ═══════════════════════════════════════
-   Job/Proposal parity pass: Job now gets everything Proposal already had that
+   Job/Quotation parity pass: Job now gets everything Quotation already had that
    it lacked — client autofill against the real Client directory, scoped
    items via the same ServiceDropdown/AddItemBar, and a discount breakdown
    with a matching live preview. Assigned Staff is Job's own internal field
-   (Proposal gets it too, but only visibly used once a Proposal converts to
-   a Job — see NewProposalModal below); "Assigned Printer" remains its own
+   (Quotation gets it too, but only visibly used once a Quotation converts to
+   a Job — see NewQuotationModal below); "Assigned Printer" remains its own
    separate free-text machine/service field, unchanged, since it means a
    different thing (which press/service does the work) than which staff
    member is assigned to run it.
@@ -871,8 +871,8 @@ export function NewJobModal({ isOpen, onClose, onSave, initialData = null }) {
 
   // Client autofill: typing/selecting a known client name doesn't need to do
   // anything beyond hold the text here — Job has no contact field to
-  // autofill (that's a Proposal/Invoice-facing concept), so this is simpler
-  // than the Proposal version below. Kept as its own handler regardless, so
+  // autofill (that's a Quotation/Invoice-facing concept), so this is simpler
+  // than the Quotation version below. Kept as its own handler regardless, so
   // the datalist wiring reads the same way across both forms.
   const handleClientChange = value => setForm(prev => ({ ...prev, client: value }));
 
@@ -1575,7 +1575,7 @@ export function JobProgressModal({ isOpen, onClose, onSave, job }) {
   if (!job) return null;
 
   // The job's tagged service/item, read from its derived invoice's line
-  // items (the same shape Job/Proposal/Invoice all share by this point in
+  // items (the same shape Job/Quotation/Invoice all share by this point in
   // the pipeline). Falls back to the job title if no line item is present
   // (e.g. a job created before invoice line items existed, or a synthetic
   // backfilled job) — never blocks the modal from opening.

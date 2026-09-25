@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
-from ..models import Client, Expense, Invoice, Job, Proposal, Sale, Vendor
+from ..models import Client, Expense, Invoice, Job, Quotation, Sale, Vendor
 from .invoices import invoice_status_from_totals, invoice_totals
 from .reports import add_months, money, month_key, trailing_month_keys
 
@@ -150,16 +150,16 @@ def build_monthly_projections():
     existing data - not a manual input field.
 
     Pipeline component: per confirmed scope, "Sent + Accepted-not-yet-
-    invoiced" proposals. Note on a real data-model gap: accept_proposal()
-    converts a Proposal to a Job+Invoice in one atomic transaction, so there
+    invoiced" quotations. Note on a real data-model gap: accept_quotation()
+    converts a Quotation to a Job+Invoice in one atomic transaction, so there
     is no "accepted but not yet invoiced" gap state to query - acceptance
     and invoicing happen together, always. The closest honest mapping onto
-    actual data: Sent proposals (not yet decided either way) plus Accepted
-    proposals whose converted invoice has zero payments recorded yet (i.e.
+    actual data: Sent quotations (not yet decided either way) plus Accepted
+    quotations whose converted invoice has zero payments recorded yet (i.e.
     accepted and invoiced, but no cash has moved on it yet - still
-    "pipeline", not yet "realized revenue"). Expired proposals (valid_until
+    "pipeline", not yet "realized revenue"). Expired quotations (valid_until
     in the past) are excluded from the Sent bucket, since an expired-but-
-    still-sent proposal is unlikely to convert.
+    still-sent quotation is unlikely to convert.
 
     Recurring-client component: average monthly revenue (over the same
     13-month recurring window) for clients flagged recurring by item 2,
@@ -169,29 +169,29 @@ def build_monthly_projections():
     """
     today = date.today()
 
-    sent_proposals = (
-        Proposal.query.filter(Proposal.status == "sent")
-        .filter((Proposal.valid_until.is_(None)) | (Proposal.valid_until >= today))
+    sent_quotations = (
+        Quotation.query.filter(Quotation.status == "sent")
+        .filter((Quotation.valid_until.is_(None)) | (Quotation.valid_until >= today))
         .all()
     )
     sent_pipeline_total = Decimal("0.00")
     sent_pipeline_items = []
-    for proposal in sent_proposals:
-        subtotal = sum((item.amount or Decimal("0.00") for item in proposal.line_items), Decimal("0.00"))
-        discount = Decimal(str(proposal.discount_amount or 0))
+    for quotation in sent_quotations:
+        subtotal = sum((item.amount or Decimal("0.00") for item in quotation.line_items), Decimal("0.00"))
+        discount = Decimal(str(quotation.discount_amount or 0))
         total = max(subtotal - discount, Decimal("0.00"))
         sent_pipeline_total += total
         sent_pipeline_items.append({
-            "proposal_ref": proposal.proposal_ref,
-            "client_name": proposal.client_name,
+            "quotation_ref": quotation.quotation_ref,
+            "client_name": quotation.client_name,
             "estimated_total": money(total),
         })
 
     accepted_not_invoiced_total = Decimal("0.00")
     accepted_not_invoiced_items = []
-    accepted_proposals = Proposal.query.filter(Proposal.status == "accepted").all()
-    for proposal in accepted_proposals:
-        invoice = proposal.converted_invoice
+    accepted_quotations = Quotation.query.filter(Quotation.status == "accepted").all()
+    for quotation in accepted_quotations:
+        invoice = quotation.converted_invoice
         if not invoice:
             continue
         totals = invoice_totals(invoice)
@@ -199,9 +199,9 @@ def build_monthly_projections():
             continue
         accepted_not_invoiced_total += Decimal(str(totals["total"]))
         accepted_not_invoiced_items.append({
-            "proposal_ref": proposal.proposal_ref,
+            "quotation_ref": quotation.quotation_ref,
             "invoice_ref": invoice.invoice_ref,
-            "client_name": proposal.client_name,
+            "client_name": quotation.client_name,
             "estimated_total": money(totals["total"]),
         })
 
@@ -246,8 +246,8 @@ def build_monthly_projections():
             "accepted_not_yet_invoiced": {
                 "note": (
                     "No true 'accepted but not invoiced' state exists in this data model - "
-                    "acceptance and invoicing happen atomically in accept_proposal(). This "
-                    "bucket instead means: accepted proposals whose derived invoice has "
+                    "acceptance and invoicing happen atomically in accept_quotation(). This "
+                    "bucket instead means: accepted quotations whose derived invoice has "
                     "received zero payments so far."
                 ),
                 "total": money(accepted_not_invoiced_total),

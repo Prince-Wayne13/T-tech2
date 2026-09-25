@@ -46,8 +46,8 @@ from .backup_scheduler import (
 TIMESTAMPED_TABLES = [
     "clients", "vendors", "capabilities", "production_machines",
     "pricing_items", "materials", "material_transactions", "jobs",
-    "invoices", "invoice_line_items", "payments", "proposals",
-    "proposal_line_items", "expense_categories", "expenses",
+    "invoices", "invoice_line_items", "payments", "quotations",
+    "quotation_line_items", "expense_categories", "expenses",
     "advances", "export_jobs", "staff", "sales", "petty_cash_entries",
 ]
 

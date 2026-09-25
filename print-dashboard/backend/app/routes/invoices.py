@@ -25,10 +25,10 @@ def list_invoices():
 @bp.post("")
 def create_invoice():
     # Direct (jobless) invoice creation is closed: every invoice must come
-    # from a Job (POST /api/jobs or proposal accept), otherwise payments on
+    # from a Job (POST /api/jobs or quotation accept), otherwise payments on
     # it would never produce a Sale row and would be invisible on the Sales
     # page while still counting toward Cash Balance.
-    return jsonify({"error": "Invoices are created from Jobs/Proposals only"}), 405
+    return jsonify({"error": "Invoices are created from Jobs/Quotations only"}), 405
 
 
 @bp.get("/stats")

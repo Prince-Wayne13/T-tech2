@@ -20,6 +20,42 @@ def _add_column(table_name, column_sql):
     db.session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}"))
 
 
+def ensure_quotation_rename_schema():
+    """Rename the legacy proposal tables and reference columns in place."""
+    tables = _tables()
+    changed = []
+
+    if "proposals" in tables and "quotations" not in tables:
+        db.session.execute(text("ALTER TABLE proposals RENAME TO quotations"))
+        changed.append("proposals -> quotations")
+    if "proposal_line_items" in tables and "quotation_line_items" not in tables:
+        db.session.execute(text("ALTER TABLE proposal_line_items RENAME TO quotation_line_items"))
+        changed.append("proposal_line_items -> quotation_line_items")
+
+    if "quotations" in _tables():
+        quotation_columns = _columns("quotations")
+        if "proposal_ref" in quotation_columns and "quotation_ref" not in quotation_columns:
+            db.session.execute(text("ALTER TABLE quotations RENAME COLUMN proposal_ref TO quotation_ref"))
+            changed.append("quotations.proposal_ref -> quotation_ref")
+        if "quotation_ref" in quotation_columns or "proposal_ref" in quotation_columns:
+            db.session.execute(text(
+                "UPDATE quotations "
+                "SET quotation_ref = 'QUOTE-' || substr(quotation_ref, 6) "
+                "WHERE quotation_ref LIKE 'PROP-%'"
+            ))
+            changed.append("quotations PROP refs -> QUOTE refs")
+
+    if "quotation_line_items" in _tables():
+        line_columns = _columns("quotation_line_items")
+        if "proposal_id" in line_columns and "quotation_id" not in line_columns:
+            db.session.execute(text("ALTER TABLE quotation_line_items RENAME COLUMN proposal_id TO quotation_id"))
+            changed.append("quotation_line_items.proposal_id -> quotation_id")
+
+    if changed:
+        db.session.commit()
+    return changed
+
+
 def ensure_material_transaction_vendor_schema():
     """Adds material_transactions.vendor_id for existing databases created
     before per-purchase vendor tracking existed. Lets a purchase record
@@ -144,11 +180,11 @@ def ensure_prompt4_schema():
     were ever added to this migration file at the time, which is why a dev
     database that predates Prompt 4 is currently missing `staff`,
     `expense_categories`, `petty_cash_entries`, `sales`, and several columns
-    on `expenses`/`jobs`/`proposals` entirely — this is what was throwing
+    on `expenses`/`jobs`/`quotations` entirely — this is what was throwing
     'no such table: staff', 'no such column: expenses.category_id', and
-    'no such column: proposals.prepared_by'.
+    'no such column: quotations.prepared_by'.
 
-    `proposals.prepared_by` was missed in this function's first pass — it's
+    `quotations.prepared_by` was missed in this function's first pass — it's
     a Prompt 4 item 6 column (added to the ORM model alongside
     `expenses.category_id` etc.) but wasn't included in the original
     ALTER TABLE checks below, so it was still throwing after that first
@@ -159,14 +195,14 @@ def ensure_prompt4_schema():
     sales, petty_cash_entries) since those are brand-new tables, not altered
     existing ones — CREATE TABLE IF NOT EXISTS-equivalent behavior. What
     create_all() will NOT do is add a new column to an existing table
-    (expenses, jobs, proposals), which is the SQLite ALTER TABLE gap this
+    (expenses, jobs, quotations), which is the SQLite ALTER TABLE gap this
     function covers. Both are called together in run_full_upgrade() below so
     a single call fixes the whole gap regardless of which kind it is.
     """
     changed = []
     expense_columns = _columns("expenses")
     job_columns = _columns("jobs")
-    proposal_columns = _columns("proposals")
+    quotation_columns = _columns("quotations")
 
     # Predates Prompt 4 (added during the earlier Payables-consolidation
     # session per dev-log.md) but was never covered by this migration file
@@ -193,9 +229,9 @@ def ensure_prompt4_schema():
         _add_column("jobs", "total_count INTEGER NOT NULL DEFAULT 0")
         changed.append("jobs.total_count")
 
-    if "prepared_by" not in proposal_columns:
-        _add_column("proposals", "prepared_by VARCHAR(160)")
-        changed.append("proposals.prepared_by")
+    if "prepared_by" not in quotation_columns:
+        _add_column("quotations", "prepared_by VARCHAR(160)")
+        changed.append("quotations.prepared_by")
 
     db.session.commit()
     return changed
@@ -218,47 +254,47 @@ def ensure_staff_assignment_schema():
     return changed
 
 
-def ensure_proposal_job_planning_schema():
-    """Proposal fields that are internal while drafting, then copied to Job."""
+def ensure_quotation_job_planning_schema():
+    """Quotation fields that are internal while drafting, then copied to Job."""
     changed = []
-    proposal_columns = _columns("proposals")
+    quotation_columns = _columns("quotations")
 
-    if "priority" not in proposal_columns:
-        _add_column("proposals", "priority VARCHAR(30) DEFAULT 'medium'")
-        changed.append("proposals.priority")
+    if "priority" not in quotation_columns:
+        _add_column("quotations", "priority VARCHAR(30) DEFAULT 'medium'")
+        changed.append("quotations.priority")
 
-    if "assigned_staff_id" not in proposal_columns:
-        _add_column("proposals", "assigned_staff_id INTEGER REFERENCES staff(id)")
-        changed.append("proposals.assigned_staff_id")
+    if "assigned_staff_id" not in quotation_columns:
+        _add_column("quotations", "assigned_staff_id INTEGER REFERENCES staff(id)")
+        changed.append("quotations.assigned_staff_id")
 
     db.session.commit()
     return changed
 
 
-def ensure_proposal_line_item_quantity_schema():
-    """Keep proposal lines itemized instead of collapsing quantity into amount."""
+def ensure_quotation_line_item_quantity_schema():
+    """Keep quotation lines itemized instead of collapsing quantity into amount."""
     changed = []
-    columns = _columns("proposal_line_items")
+    columns = _columns("quotation_line_items")
 
     if "quantity" not in columns:
-        _add_column("proposal_line_items", "quantity NUMERIC(12, 2) NOT NULL DEFAULT 1")
-        changed.append("proposal_line_items.quantity")
+        _add_column("quotation_line_items", "quantity NUMERIC(12, 2) NOT NULL DEFAULT 1")
+        changed.append("quotation_line_items.quantity")
 
     if "unit" not in columns:
-        _add_column("proposal_line_items", "unit VARCHAR(40) DEFAULT 'item'")
-        changed.append("proposal_line_items.unit")
+        _add_column("quotation_line_items", "unit VARCHAR(40) DEFAULT 'item'")
+        changed.append("quotation_line_items.unit")
 
     if "unit_price" not in columns:
-        _add_column("proposal_line_items", "unit_price NUMERIC(14, 2) NOT NULL DEFAULT 0")
-        changed.append("proposal_line_items.unit_price")
-        db.session.execute(text("UPDATE proposal_line_items SET unit_price = amount WHERE unit_price = 0"))
+        _add_column("quotation_line_items", "unit_price NUMERIC(14, 2) NOT NULL DEFAULT 0")
+        changed.append("quotation_line_items.unit_price")
+        db.session.execute(text("UPDATE quotation_line_items SET unit_price = amount WHERE unit_price = 0"))
 
     db.session.commit()
     return changed
 
 
 def ensure_work_date_schema():
-    """Accountant-facing fix: jobs and proposals previously had no field for
+    """Accountant-facing fix: jobs and quotations previously had no field for
     'the date this actually happened', only created_at (a hidden log
     timestamp of when the record was typed in) and a future-facing date
     (due_date / valid_until). This adds work_date to both tables so someone
@@ -275,10 +311,10 @@ def ensure_work_date_schema():
         _add_column("jobs", "work_date DATE")
         changed.append("jobs.work_date")
 
-    proposal_columns = _columns("proposals")
-    if "work_date" not in proposal_columns:
-        _add_column("proposals", "work_date DATE")
-        changed.append("proposals.work_date")
+    quotation_columns = _columns("quotations")
+    if "work_date" not in quotation_columns:
+        _add_column("quotations", "work_date DATE")
+        changed.append("quotations.work_date")
 
     db.session.commit()
     return changed
@@ -673,8 +709,8 @@ def ensure_device_ownership_schema():
     tables_needing_device_id = [
         "clients", "vendors", "capabilities", "production_machines",
         "pricing_items", "materials", "material_transactions", "jobs",
-        "invoices", "invoice_line_items", "payments", "proposals",
-        "proposal_line_items", "expense_categories", "expenses",
+        "invoices", "invoice_line_items", "payments", "quotations",
+        "quotation_line_items", "expense_categories", "expenses",
         "advances", "export_jobs", "staff", "sales", "petty_cash_entries",
     ]
     existing_tables = _tables()
@@ -749,38 +785,38 @@ def ensure_pricing_item_capabilities():
     return changed
 
 
-def ensure_proposal_machine_schema():
-    """Adds Proposal.machine_id / Proposal.required_capability_id -- see
-    both columns' comments in models.py (build decision #5: "Proposals
+def ensure_quotation_machine_schema():
+    """Adds Quotation.machine_id / Quotation.required_capability_id -- see
+    both columns' comments in models.py (build decision #5: "Quotations
     currently have no machine field at all, so this is also adding
     that concept there for the first time"). Also adds the matching
-    ProposalLineItem.pricing_item_id / machine_id, mirroring
+    QuotationLineItem.pricing_item_id / machine_id, mirroring
     InvoiceLineItem's own columns of the same name -- needed so a
-    proposal's per-line machine survives conversion into a Job.
+    quotation's per-line machine survives conversion into a Job.
 
     No backfill needed for any of these -- there's no existing data to
-    derive a sensible value FROM; every existing proposal simply gets
+    derive a sensible value FROM; every existing quotation simply gets
     NULL/unassigned, same starting state as a brand-new one.
     """
     changed = []
 
-    if "proposals" in _tables():
-        columns = _columns("proposals")
+    if "quotations" in _tables():
+        columns = _columns("quotations")
         if "machine_id" not in columns:
-            _add_column("proposals", "machine_id INTEGER REFERENCES production_machines(id)")
-            changed.append("proposals.machine_id")
+            _add_column("quotations", "machine_id INTEGER REFERENCES production_machines(id)")
+            changed.append("quotations.machine_id")
         if "required_capability_id" not in columns:
-            _add_column("proposals", "required_capability_id INTEGER REFERENCES capabilities(id)")
-            changed.append("proposals.required_capability_id")
+            _add_column("quotations", "required_capability_id INTEGER REFERENCES capabilities(id)")
+            changed.append("quotations.required_capability_id")
 
-    if "proposal_line_items" in _tables():
-        columns = _columns("proposal_line_items")
+    if "quotation_line_items" in _tables():
+        columns = _columns("quotation_line_items")
         if "pricing_item_id" not in columns:
-            _add_column("proposal_line_items", "pricing_item_id INTEGER REFERENCES pricing_items(id)")
-            changed.append("proposal_line_items.pricing_item_id")
+            _add_column("quotation_line_items", "pricing_item_id INTEGER REFERENCES pricing_items(id)")
+            changed.append("quotation_line_items.pricing_item_id")
         if "machine_id" not in columns:
-            _add_column("proposal_line_items", "machine_id INTEGER REFERENCES production_machines(id)")
-            changed.append("proposal_line_items.machine_id")
+            _add_column("quotation_line_items", "machine_id INTEGER REFERENCES production_machines(id)")
+            changed.append("quotation_line_items.machine_id")
 
     if changed:
         db.session.commit()
@@ -807,6 +843,7 @@ def run_full_upgrade():
     db.create_all() succeeded, because create_all() only creates tables that
     don't exist yet — it never ALTERs an existing table to add a column.
     """
+    quotation_rename = ensure_quotation_rename_schema()
     db.create_all()
     # Must run immediately after db.create_all(), before every other
     # ensure_*_schema()/ensure_*_seed() call below: nearly all of them do an
@@ -830,9 +867,9 @@ def run_full_upgrade():
     staff_client_pricing_refs = ensure_staff_client_pricing_refs()
     prompt4 = ensure_prompt4_schema()
     staff_assignment = ensure_staff_assignment_schema()
-    proposal_job_planning = ensure_proposal_job_planning_schema()
-    proposal_line_item_quantity = ensure_proposal_line_item_quantity_schema()
-    proposal_machine = ensure_proposal_machine_schema()
+    quotation_job_planning = ensure_quotation_job_planning_schema()
+    quotation_line_item_quantity = ensure_quotation_line_item_quantity_schema()
+    quotation_machine = ensure_quotation_machine_schema()
     work_date_schema = ensure_work_date_schema()
     job_invoice_schema = ensure_job_invoice_schema()
     payment_invoice_nullable = ensure_payment_invoice_nullable_schema()
@@ -858,11 +895,12 @@ def run_full_upgrade():
     # with job_id NULL and re-syncs every Sale amount against its invoice.
     orphan_reconcile = reconcile_orphan_payments_and_sales()
     return {
+        "quotation_rename_schema_changes": quotation_rename,
         "prompt4_schema_changes": prompt4,
         "staff_assignment_schema_changes": staff_assignment,
-        "proposal_job_planning_schema_changes": proposal_job_planning,
-        "proposal_line_item_quantity_schema_changes": proposal_line_item_quantity,
-        "proposal_machine_schema_changes": proposal_machine,
+        "quotation_job_planning_schema_changes": quotation_job_planning,
+        "quotation_line_item_quantity_schema_changes": quotation_line_item_quantity,
+        "quotation_machine_schema_changes": quotation_machine,
         "work_date_schema_changes": work_date_schema,
         "core_staff_seeded": core_staff,
         "payment_invoice_nullable_schema_changes": payment_invoice_nullable,

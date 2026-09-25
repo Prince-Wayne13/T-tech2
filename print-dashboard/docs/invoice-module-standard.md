@@ -43,7 +43,7 @@ The shared primitives live in `src/components/ModuleStandard.jsx`. `src/Invoices
 Aligned modules:
 
 - `src/Jobs.jsx`
-- `src/Proposals.jsx`
+- `src/Quotations.jsx`
 - `src/Receivables.jsx`
 - `src/Payables.jsx`
 - `src/Expenses.jsx`

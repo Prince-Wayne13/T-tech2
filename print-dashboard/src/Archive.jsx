@@ -14,13 +14,13 @@ const D = {
   eye: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
 };
 
-const ARCHIVE_TYPES = ['All', 'Jobs', 'Invoices', 'Proposals', 'Receipts'];
+const ARCHIVE_TYPES = ['All', 'Jobs', 'Invoices', 'Quotations', 'Receipts'];
 
 function ArchiveRow({ arc, onPreview }) {
   const typeConfig = {
     Job: { label: 'Job', cls: 'active', accent: 'var(--primary)' },
     Invoice: { label: 'Invoice', cls: 'current', accent: 'var(--secondary)' },
-    Proposal: { label: 'Proposal', cls: 'pending', accent: 'var(--warning)' },
+    Quotation: { label: 'Quotation', cls: 'pending', accent: 'var(--warning)' },
     Receipt: { label: 'Receipt', cls: 'paid', accent: 'var(--teal)' },
   };
   const cfg = typeConfig[arc.type] || typeConfig.Invoice;

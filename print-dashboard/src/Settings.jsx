@@ -70,7 +70,7 @@ const TABLE_DISPLAY_NAMES = {
   pricing_items: 'price list items',
   jobs: 'jobs',
   invoices: 'invoices',
-  proposals: 'proposals',
+  quotations: 'quotations',
   expenses: 'expenses',
   petty_cash_entries: 'petty cash entries',
   sales: 'sales',

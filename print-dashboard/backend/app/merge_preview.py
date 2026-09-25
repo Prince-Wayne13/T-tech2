@@ -13,7 +13,7 @@ ref_generator.py's own docstring for the same problem already solved
 for reference numbers. This means "match by id" is actively wrong for
 merge, and the real matching key differs by table:
 
-  - Tables with a unique *_ref column (jobs, invoices, proposals,
+  - Tables with a unique *_ref column (jobs, invoices, quotations,
     expenses, payments, materials, machines, advances, exports, sales,
     petty cash, staff, clients, pricing_items) -- the ref IS the stable
     cross-device identity, because ref_generator.py already embeds a
@@ -50,7 +50,7 @@ from datetime import datetime
 REF_KEYED_TABLES = {
     "jobs": "job_ref",
     "invoices": "invoice_ref",
-    "proposals": "proposal_ref",
+    "quotations": "quotation_ref",
     "expenses": "expense_ref",
     "payments": "payment_ref",
     "production_machines": "machine_ref",
@@ -98,10 +98,10 @@ DEPENDENT_LINE_ITEM_TABLES = {
         "parent_key": "invoice_ref",
         "parent_fk": "invoice_id",
     },
-    "proposal_line_items": {
-        "parent_table": "proposals",
-        "parent_key": "proposal_ref",
-        "parent_fk": "proposal_id",
+    "quotation_line_items": {
+        "parent_table": "quotations",
+        "parent_key": "quotation_ref",
+        "parent_fk": "quotation_id",
     },
 }
 

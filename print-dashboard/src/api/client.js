@@ -136,7 +136,7 @@ export const api = {
   // Sales page (row-level preview): fetches one Job (with its embedded
   // Invoice) by id. The backend route already existed
   // (GET /jobs/<id> in routes/jobs.py) — this was just the missing
-  // frontend wrapper, same gap as the old acceptProposal()-only pattern.
+  // frontend wrapper, same gap as the old acceptQuotation()-only pattern.
   job: (id) => request(`/jobs/${id}`),
   createJob: (payload) => request('/jobs', {
     method: 'POST',
@@ -172,16 +172,16 @@ export const api = {
   }),
   invoiceStats: () => request('/invoices/stats'),
   invoiceDocument: (id) => request(`/invoices/${id}/document`),
-  proposals: (params = '') => request(`/proposals${params}`),
-  createProposal: (payload) => request('/proposals', {
+  quotations: (params = '') => request(`/quotations${params}`),
+  createQuotation: (payload) => request('/quotations', {
     method: 'POST',
     body: JSON.stringify(payload),
   }),
-  updateProposal: (id, payload) => request(`/proposals/${id}`, {
+  updateQuotation: (id, payload) => request(`/quotations/${id}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   }),
-  acceptProposal: (id) => request(`/proposals/${id}/accept`, {
+  acceptQuotation: (id) => request(`/quotations/${id}/accept`, {
     method: 'POST',
   }),
   expenses: (params = '') => request(`/expenses${params}`),

@@ -1,13 +1,14 @@
 #services/jobs.py
 from datetime import date
 
+from ..extensions import db
 from ..models import Invoice, Job, Payment, ProductionMachine
 from ..services.invoices import apply_line_items, decimal_money, next_payment_ref, serialize_invoice, sync_invoice_amount
 from ..services.machines import assert_machine_compatible
 from ..utils import parse_date
 
 # Job fields that stay editable at any status, per prompt item 6
-# (Job.notes free text, editable regardless of job/proposal status).
+# (Job.notes free text, editable regardless of job/quotation status).
 ALWAYS_EDITABLE_JOB_FIELDS = {"notes"}
 
 
@@ -132,7 +133,13 @@ def add_job_payment(job, payload):
         received_by=payload.get("received_by"),
         notes=payload.get("notes"),
     )
-    job.payments.append(payment)
+    # NOTE: no job.payments.append(payment) here. Payment(job=job, ...) above
+    # already attaches it through the back-populated relationship; appending
+    # again put the same payment in job.payments TWICE until the session was
+    # reloaded, which inflated every total computed before commit (including
+    # the Sale amount saved by _sync_linked_sale below).
+    db.session.add(payment)
+    db.session.flush()
     if job.invoice:
         sync_invoice_amount(job.invoice)
     # A Job's first recorded payment is also what should bring its Sale

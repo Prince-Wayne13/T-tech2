@@ -1,12 +1,12 @@
 // path: src/utils/clientMatch.js
 //
-// Item 6 (build decisions): clients typed on a Job/Proposal should become
+// Item 6 (build decisions): clients typed on a Job/Quotation should become
 // real Client records automatically, not stay as plain text - matching
 // close-enough spellings to an existing client instead of creating a
 // duplicate every time. This is the matching logic only; the interactive
 // "Did you mean X?" prompt lives in components/Modals.jsx's
 // ClientMatchModal, and the actual create/link call happens in the two
-// callers (Jobs.jsx, Proposals.jsx) via resolveClientForSave() below.
+// callers (Jobs.jsx, Quotations.jsx) via resolveClientForSave() below.
 
 /** Trim + collapse internal whitespace + lowercase, for comparison only -
  * never used as the value actually saved. "John Banda" and
@@ -58,7 +58,7 @@ const SUGGEST_THRESHOLD = 0.7;
 /**
  * Given the raw typed client name and the list of existing clients (as
  * returned by GET /clients), decides what should happen before saving a
- * Job/Proposal:
+ * Job/Quotation:
  *   - { status: 'empty' }            - nothing typed, caller should fall
  *                                       back to "Walk-in Client" as today.
  *   - { status: 'exact', client }    - normalized match found; link

@@ -134,7 +134,7 @@ export function InvoicePrintLayout({ data, business = businessDefault }) {
   );
 }
 
-export function ProposalPrintLayout({ data, business = businessDefault }) {
+export function QuotationPrintLayout({ data, business = businessDefault }) {
   if (!data) return null;
   const items = normaliseItems(data);
   const subtotal = calculateTotal(items);
@@ -147,14 +147,14 @@ export function ProposalPrintLayout({ data, business = businessDefault }) {
       <div className="print-layout" style={{ fontFamily: 'Inter, sans-serif', maxWidth: '800px', margin: '0 auto', padding: '30px', background: '#fff' }}>
         <div style={{ textAlign: 'center', marginBottom: '30px', borderBottom: '2px solid #5B7C99', paddingBottom: '16px' }}>
           <div style={{ fontSize: '18px', fontWeight: 700, color: '#5B7C99' }}>{business.name}</div>
-          <div style={{ fontSize: '12px', color: '#4A5568', marginTop: '4px' }}>PROJECT PROPOSAL</div>
+          <div style={{ fontSize: '12px', color: '#4A5568', marginTop: '4px' }}>PROJECT QUOTATION</div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px', fontSize: '11px' }}>
           <div><strong>Prepared For:</strong> {data.client || data.client_name || '-'}</div>
           <div><strong>Valid Until:</strong> {data.validUntil || data.valid_until || data.expires || '-'}</div>
         </div>
         <div style={{ marginBottom: '20px' }}>
-          <div style={{ fontSize: '14px', fontWeight: 700, color: '#2D3748', marginBottom: '8px' }}>{data.title || 'Proposal Title'}</div>
+          <div style={{ fontSize: '14px', fontWeight: 700, color: '#2D3748', marginBottom: '8px' }}>{data.title || 'Quotation Title'}</div>
           <div style={{ fontSize: '11px', color: '#4A5568', lineHeight: 1.5 }}>{data.notes || 'Scope of work and pricing breakdown as discussed.'}</div>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '24px' }}>
@@ -278,13 +278,13 @@ export function ReportPrintLayout({ title, rows = [], footer }) {
 
 export function PrintPreviewModal({ type, title, data, onClose, actions, children }) {
   if (!data) return null;
-  const Layout = type === 'proposal' ? ProposalPrintLayout : type === 'job' ? JobTicketPrintLayout : type === 'report' ? ReportPrintLayout : InvoicePrintLayout;
+  const Layout = type === 'quotation' ? QuotationPrintLayout : type === 'job' ? JobTicketPrintLayout : type === 'report' ? ReportPrintLayout : InvoicePrintLayout;
   const reportRows = Array.isArray(data.rows) ? data.rows : [];
 
   // `actions` lets a caller (e.g. Jobs.jsx) inject its own quick-action
   // buttons into the preview header, so "Preview -> Edit" doesn't require
   // closing this shared modal first. Optional and type-agnostic: invoice/
-  // proposal/report previews simply don't pass it and get the old header.
+  // quotation/report previews simply don't pass it and get the old header.
   return (
     <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-modal-overlay)', display: 'grid', placeItems: 'center', padding: '18px', background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)' }} onClick={onClose}>
       <section className="card no-print" style={{ width: 'min(920px, 96vw)', maxHeight: '90vh', overflow: 'auto', borderTop: '2px solid var(--primary)' }} onClick={event => event.stopPropagation()}>

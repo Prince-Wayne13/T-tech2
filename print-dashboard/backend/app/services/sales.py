@@ -12,23 +12,28 @@ def next_sale_ref():
 
 
 def derive_sale_amount(job):
-    """Item 7: Sale.amount is never manually entered - it is derived from the
-    linked Job's Invoice payment status. Fully paid -> the invoice total.
-    Partially paid -> the amount actually paid so far (not the full total,
-    since the sale hasn't fully materialized as cash yet). No invoice, or an
-    invoice with nothing paid -> 0. This mirrors invoice_totals()'s own
-    paid/total split rather than introducing a second definition of "paid".
+    """Sale.amount = the sum of the real Payment rows recorded against this
+    Job. Nothing else.
+
+    It deliberately does NOT look at the invoice. The old version required
+    job.invoice to exist, then capped the result at the invoice's calculated
+    total. That made the Sale depend on the order the accountant worked in:
+    if a payment was recorded before the invoice was finished (or the invoice
+    price was still wrong / zero), the Sale showed 0 even though cash had
+    really been collected, and it stayed wrong until someone revisited the
+    invoice. Cash Balance already sums real payments, so the Sale now uses
+    the same source and the two can no longer disagree.
+
+    No payments -> 0. The invoice total is still exposed separately by
+    serialize_sale() as "invoice_total" so the UI can show Booked Value and
+    Still Owed next to this collected amount.
     """
-    if not job or not job.invoice:
+    if not job:
         return Decimal("0.00")
-    totals = invoice_totals(job.invoice)
-    paid = decimal_money(totals["paid"])
-    total = decimal_money(totals["total"])
-    if paid <= 0:
-        return Decimal("0.00")
-    if paid < total:
-        return paid
-    return total
+    return sum(
+        (decimal_money(payment.amount) for payment in job.payments),
+        Decimal("0.00"),
+    )
 
 
 def sync_sale_amount(sale):
@@ -65,6 +70,9 @@ def serialize_sale(sale):
     elif invoice_total and amount < invoice_total:
         payment_status = "partial"
     else:
+        # Cash was really collected. If the invoice total is missing or still
+        # 0 (invoice not finished yet) there is nothing to be "partial"
+        # against, so this reads as paid rather than being hidden as unpaid.
         payment_status = "full"
     data["payment_status"] = payment_status
     return data

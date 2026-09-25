@@ -2,7 +2,7 @@
 #
 # New file. No Client route/blueprint existed anywhere before this — Client
 # rows were only ever touched implicitly via client_id/client_name on
-# Job/Invoice/Proposal. This is the minimum needed to support the confirmed
+# Job/Invoice/Quotation. This is the minimum needed to support the confirmed
 # "contact autofill, remember on save" flow: list (for dropdown/autofill
 # lookup) and a targeted PUT to update phone/email in place when the user
 # types a different contact than what's on file.
@@ -49,7 +49,7 @@ def create_client():
 
 @bp.put("/<int:client_id>")
 def update_client(client_id):
-    # Used by the Proposal/Job contact-autofill flow: when a user types a
+    # Used by the Quotation/Job contact-autofill flow: when a user types a
     # contact different from what's on file, it's written back here so it
     # doesn't need retyping next time — mirrors VendorPicker's inline
     # create/update pattern in Modals.jsx, applied to the existing Client

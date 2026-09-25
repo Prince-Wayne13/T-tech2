@@ -3,7 +3,7 @@
 ref_generator.py
 
 Single, shared source for every "next reference number" function in the
-app (JOB-0001, INV-0001, PROP-0001, EXP-0001, MAT-0001, ADV-0001), fixing
+app (JOB-0001, INV-0001, QUOTE-0001, EXP-0001, MAT-0001, ADV-0001), fixing
 two real problems found by reading the actual codebase before this pass:
 
   1. DUPLICATION: next_job_ref(), next_invoice_ref(), and next_expense_ref()
@@ -103,9 +103,9 @@ def next_invoice_ref() -> str:
     return _next_sequential_ref(Invoice, "INV")
 
 
-def next_proposal_ref() -> str:
-    from ..models import Proposal
-    return _next_sequential_ref(Proposal, "PROP")
+def next_quotation_ref() -> str:
+    from ..models import Quotation
+    return _next_sequential_ref(Quotation, "PROP")
 
 
 def next_expense_ref() -> str:

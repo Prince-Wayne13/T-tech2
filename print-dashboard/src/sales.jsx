@@ -233,7 +233,7 @@ export default function Sales() {
   // mirrors its Job's Invoice (services/sales.py) — so both fetch that
   // Job fresh by id and act on its embedded invoice. Mirrors the
   // Preview/Download pattern every other register page (Invoices, Jobs,
-  // Proposals) already has; this page previously had neither.
+  // Quotations) already has; this page previously had neither.
   const handlePreview = sale => {
     if (!sale.jobId) return;
     api.job(sale.jobId)

@@ -20,8 +20,8 @@ from .models import (
     PettyCash,
     PricingItem,
     ProductionMachine,
-    Proposal,
-    ProposalLineItem,
+    Quotation,
+    QuotationLineItem,
     Sale,
     Staff,
     Vendor,
@@ -29,7 +29,7 @@ from .models import (
 from .schema_migrations import ensure_default_capabilities_seed
 from .services.invoices import apply_line_items, apply_payments, sync_invoice_amount
 from .services.jobs import create_invoice_for_job
-from .services.proposals import apply_proposal_line_items
+from .services.quotations import apply_quotation_line_items
 from .services.sales import create_sale_for_job
 from .services.petty_cash import record_petty_cash_entry
 
@@ -51,7 +51,7 @@ def spread_days(month_start, month_end, count, force_first=False):
 def seed_mock_data(reset=False):
     random.seed(20250101)
     if reset:
-        for model in [ExportJob, AuditLog, PettyCash, Sale, Advance, Expense, ExpenseCategory, Payment, ProposalLineItem, Proposal, Invoice, Job, PricingItem, ProductionMachine, Vendor, Staff, Client]:
+        for model in [ExportJob, AuditLog, PettyCash, Sale, Advance, Expense, ExpenseCategory, Payment, QuotationLineItem, Quotation, Invoice, Job, PricingItem, ProductionMachine, Vendor, Staff, Client]:
             db.session.query(model).delete()
         db.session.commit()
 
@@ -619,12 +619,12 @@ def seed_mock_data(reset=False):
     db.session.add_all(advances)
     db.session.flush()
 
-    # ── PROPOSALS: draft/sent/accepted/declined, mirroring the real
-    # accept_proposal() conversion flow (routes/proposals.py) for accepted
+    # ── QUOTATIONS: draft/sent/accepted/declined, mirroring the real
+    # accept_quotation() conversion flow (routes/quotations.py) for accepted
     # ones rather than hand-setting converted_invoice_id, so the
-    # uselist=False one-to-one Invoice.source_proposal relationship (see
+    # uselist=False one-to-one Invoice.source_quotation relationship (see
     # dev-log.md incident notes) is exercised the same way production does.
-    proposal_line_pools = [
+    quotation_line_pools = [
         [
             {"description": "Corporate rebrand: business cards", "quantity": 500, "unit": "cards", "unit_price": 500},
             {"description": "Letterhead and envelope design", "quantity": 1, "unit": "service", "unit_price": 65000},
@@ -647,13 +647,13 @@ def seed_mock_data(reset=False):
             {"description": "Site survey and installation", "quantity": 1, "unit": "service", "unit_price": 140000},
         ],
     ]
-    proposal_titles = [
+    quotation_titles = [
         "Corporate rebrand package", "Product launch print package", "Staff uniform branding",
         "Annual report design & print", "Trade show merchandise package", "Branch fit-out signage",
     ]
-    proposal_statuses = ["draft", "sent", "sent", "accepted", "accepted", "declined"]
+    quotation_statuses = ["draft", "sent", "sent", "accepted", "accepted", "declined"]
 
-    proposals = []
+    quotations = []
     prop_counter = 1
     current = start_date
     while current <= today:
@@ -666,17 +666,17 @@ def seed_mock_data(reset=False):
             if issued_on > today:
                 break
             client = random.choice(clients)
-            line_items = random.choice(proposal_line_pools)
-            status = random.choice(proposal_statuses)
+            line_items = random.choice(quotation_line_pools)
+            status = random.choice(quotation_statuses)
             valid_until = issued_on + timedelta(days=random.randint(14, 30))
             staff_member = random.choice(staff_members)
 
-            proposal = Proposal(
-                proposal_ref=f"PROP-{prop_counter:04d}",
+            quotation = Quotation(
+                quotation_ref=f"QUOTE-{prop_counter:04d}",
                 client_id=client.id,
                 client_name=client.name,
-                title=random.choice(proposal_titles),
-                status=status if status != "accepted" else "draft",  # set to accepted only after conversion below, matching accept_proposal()'s own ordering
+                title=random.choice(quotation_titles),
+                status=status if status != "accepted" else "draft",  # set to accepted only after conversion below, matching accept_quotation()'s own ordering
                 currency="MWK",
                 valid_until=valid_until,
                 contact=client.phone,
@@ -685,54 +685,54 @@ def seed_mock_data(reset=False):
                 prepared_by=staff_member.name,
                 notes="Prices valid for the period stated above. 50% deposit required to commence production.",
             )
-            apply_proposal_line_items(proposal, line_items)
-            proposal.created_at = as_datetime(issued_on)
-            proposal.updated_at = as_datetime(issued_on)
-            for item in proposal.line_items:
+            apply_quotation_line_items(quotation, line_items)
+            quotation.created_at = as_datetime(issued_on)
+            quotation.updated_at = as_datetime(issued_on)
+            for item in quotation.line_items:
                 item.created_at = as_datetime(issued_on)
                 item.updated_at = as_datetime(issued_on)
-            db.session.add(proposal)
+            db.session.add(quotation)
             db.session.flush()
 
             if status == "accepted":
                 converted_job = Job(
-                    job_ref=f"JOB-PROP-{prop_counter}",
-                    client_id=proposal.client_id,
-                    client_name=proposal.client_name,
-                    title=proposal.title,
+                    job_ref=f"JOB-QUOTE-{prop_counter}",
+                    client_id=quotation.client_id,
+                    client_name=quotation.client_name,
+                    title=quotation.title,
                     status="completed",
-                    priority=proposal.priority,
+                    priority=quotation.priority,
                     progress=100,
-                    total_count=len(proposal.line_items),
+                    total_count=len(quotation.line_items),
                     # Fix (seed.py job-count bug, flagged 2026-07-26): total_count
-                    # was already set here (matching accept_proposal()'s own
-                    # line-item-count convention in routes/proposals.py - not
+                    # was already set here (matching accept_quotation()'s own
+                    # line-item-count convention in routes/quotations.py - not
                     # changed to a unit-quantity sum, to stay consistent with the
                     # real accept flow's behavior), but completed_count was never
                     # set, so a "completed" job was showing "0 of N" instead of
                     # "N of N". status="completed"/progress=100 means fully done.
-                    completed_count=len(proposal.line_items),
-                    due_date=proposal.valid_until,
-                    assigned_staff_id=proposal.assigned_staff_id,
-                    notes=proposal.notes,
+                    completed_count=len(quotation.line_items),
+                    due_date=quotation.valid_until,
+                    assigned_staff_id=quotation.assigned_staff_id,
+                    notes=quotation.notes,
                 )
                 converted_invoice = create_invoice_for_job(
                     converted_job,
-                    f"INV-PROP-{prop_counter}",
+                    f"INV-QUOTE-{prop_counter}",
                     [
                         {"description": item.description, "quantity": float(item.quantity), "unit": item.unit, "unit_price": float(item.unit_price)}
-                        for item in proposal.line_items
+                        for item in quotation.line_items
                     ],
-                    discount_amount=proposal.discount_amount,
-                    currency=proposal.currency,
-                    notes=proposal.notes,
+                    discount_amount=quotation.discount_amount,
+                    currency=quotation.currency,
+                    notes=quotation.notes,
                 )
                 # create_invoice_for_job() hardcodes issued_on=date.today() (real
-                # "today" at call time) since in production a proposal is accepted
+                # "today" at call time) since in production a quotation is accepted
                 # whenever a user clicks the button — there's no historical date to
                 # use. For seeding, that would bunch every converted invoice on the
                 # actual seed-run date instead of spreading across the window, so
-                # it's overridden here to a date shortly after the proposal was
+                # it's overridden here to a date shortly after the quotation was
                 # issued instead, matching how the rest of this file backdates data.
                 converted_paid_on = valid_until + timedelta(days=random.randint(1, 5)) if valid_until + timedelta(days=random.randint(1, 5)) <= today else None
                 converted_issued = min(valid_until, today)
@@ -743,7 +743,7 @@ def seed_mock_data(reset=False):
                 converted_invoice.created_at = as_datetime(converted_issued)
                 converted_invoice.updated_at = as_datetime(converted_paid_on or converted_issued)
                 if converted_paid_on:
-                    apply_payments(converted_invoice, [{"amount": float(sum(i.amount for i in proposal.line_items) - proposal.discount_amount), "method": random.choice(payment_methods), "paid_on": converted_paid_on, "received_by": random.choice(payment_receivers)}])
+                    apply_payments(converted_invoice, [{"amount": float(sum(i.amount for i in quotation.line_items) - quotation.discount_amount), "method": random.choice(payment_methods), "paid_on": converted_paid_on, "received_by": random.choice(payment_receivers)}])
                     sync_invoice_amount(converted_invoice)
                     for payment in converted_invoice.payments:
                         payment.job = converted_job
@@ -752,23 +752,23 @@ def seed_mock_data(reset=False):
                 db.session.add(converted_job)
                 db.session.add(converted_invoice)
                 db.session.flush()
-                proposal.status = "accepted"
-                proposal.converted_invoice_id = converted_invoice.id
-                converted_sale = create_sale_for_job(converted_job, description=proposal.title, notes="Seeded from accepted-proposal conversion.")
+                quotation.status = "accepted"
+                quotation.converted_invoice_id = converted_invoice.id
+                converted_sale = create_sale_for_job(converted_job, description=quotation.title, notes="Seeded from accepted-quotation conversion.")
                 db.session.add(converted_sale)
                 converted_sale.created_at = converted_invoice.created_at
                 converted_sale.updated_at = converted_invoice.updated_at
                 sales.append(converted_sale)
             else:
-                proposal.status = status
+                quotation.status = status
 
-            proposals.append(proposal)
+            quotations.append(quotation)
             prop_counter += 1
         next_month = (current.replace(day=28) + timedelta(days=4)).replace(day=1)
         current = next_month
 
     # (sales are added to the session individually at creation time above,
-    # both in the invoice loop and in the accepted-proposal conversion block)
+    # both in the invoice loop and in the accepted-quotation conversion block)
 
     # ── LOYAL CLIENT, BIG ORDER, REAL DISCOUNT ──────────────────────────────
     # Nyasa Fresh Foods appears repeatedly across the seeded invoice pool above
@@ -1004,7 +1004,7 @@ def seed_mock_data(reset=False):
         "invoices": len(invoices),
         "expenses": len(expenses),
         "advances": len(advances),
-        "proposals": len(proposals),
+        "quotations": len(quotations),
         "sales": len(sales),
         "petty_cash_entries": len(petty_cash_entries),
         "expense_categories": len(expense_categories),

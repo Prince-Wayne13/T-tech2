@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import './styles.css';
 import Jobs from './Jobs';
-import Proposals from './Proposals';
+import Quotations from './Quotations';
 import Invoices from './Invoices';
 import Expenses from './Expenses';
 import Vendors from './Vendors';
@@ -27,7 +27,7 @@ import {
   AddExpenseModal,
   ActivityPreviewModal,
   NewJobModal,
-  NewProposalModal,
+  NewQuotationModal,
   NewVendorModal,
   QuickEntryModal,
   SearchResultsModal,
@@ -56,7 +56,7 @@ function Icon({ d, size = 14 }) {
 
 const D = {
   dashboard:  'M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
-  proposals:  'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8',
+  quotations:  'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8',
   invoices:   'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 0 2-2h2a2 2 0 0 0 2 2M12 12v4M10 14h4',
   jobs:       'M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0',
   ar:         'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
@@ -91,7 +91,7 @@ const NAV_GROUPS = [
     items: [
       { id: 'Dashboard',   icon: 'dashboard'  },
       { id: 'Jobs',        icon: 'jobs'       },
-      { id: 'Proposals',   icon: 'proposals'  },
+      { id: 'Quotations',   icon: 'quotations'  },
       { id: 'Invoices',    icon: 'invoices'   },
       { id: 'Expenses',    icon: 'expenses'   },
       { id: 'Sales',       icon: 'sales'      },
@@ -127,7 +127,7 @@ const FIN_CARDS = [
 
 const QUICK_ACTIONS = [
   { label: 'New Job',        color: 'teal',      icon: 'jobs'      },
-  { label: 'New Proposal',   color: 'purple',    icon: 'proposals' },
+  { label: 'New Quotation',   color: 'purple',    icon: 'quotations' },
   { label: 'Add Expense',    color: 'warning',   icon: 'expenses'  },
   { label: 'New Vendor',     color: 'red',       icon: 'vendors'   },
   { label: 'Add Petty Cash', color: 'secondary', icon: 'pettyCash' },
@@ -135,7 +135,7 @@ const QUICK_ACTIONS = [
 
 const ACTION_FIELDS = {
   'New Job': ['Client name', 'Job title', 'Due date'],
-  'New Proposal': ['Client name', 'Proposal title', 'Estimated value'],
+  'New Quotation': ['Client name', 'Quotation title', 'Estimated value'],
   'Add Expense': ['Expense title', 'Category', 'Amount'],
   'New Vendor': ['Vendor name', 'Category', 'Contact'],
   'Quick Entry': ['Type', 'Name', 'Amount'],
@@ -540,7 +540,7 @@ function mapRecentActivity(entry) {
   const iconByEntity = {
     invoice: 'invoices',
     job: 'printer',
-    proposal: 'proposals',
+    quotation: 'quotations',
     expense: 'expenses',
     vendor: 'vendors',
     advance: 'advances',
@@ -550,7 +550,7 @@ function mapRecentActivity(entry) {
   const badgeByEntity = {
     invoice: 'current',
     job: 'active',
-    proposal: 'pending',
+    quotation: 'pending',
     expense: 'overdue',
     vendor: 'paid',
     advance: 'pending',
@@ -810,7 +810,7 @@ export default function App() {
         });
         setPreview({ title: `Petty Cash Entry Recorded: ${created.entry_ref}`, data: created });
       } else {
-        const type = action.includes('Proposal') ? 'proposal' : null;
+        const type = action.includes('Quotation') ? 'quotation' : null;
         if (type) setPrintPreview({ type, title: `${action} Preview`, data: { id: 'Draft', ...values } });
         else setPreview({ title: `${action} Preview`, data: { action, values, status: 'Draft ready' } });
       }
@@ -834,7 +834,7 @@ export default function App() {
   const renderPage = () => {
     switch(active) {
       case 'Jobs': return <Jobs />;
-      case 'Proposals': return <Proposals />;
+      case 'Quotations': return <Quotations />;
       case 'Invoices': return <Invoices />;
       case 'Expenses': return <Expenses />;
       case 'Vendors': return <Vendors />;
@@ -876,7 +876,7 @@ export default function App() {
         {renderPage()}
       </React.Fragment>
       <NewJobModal isOpen={actionModal === 'New Job'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('New Job', values)} />
-      <NewProposalModal isOpen={actionModal === 'New Proposal'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('New Proposal', values)} />
+      <NewQuotationModal isOpen={actionModal === 'New Quotation'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('New Quotation', values)} />
       <AddExpenseModal isOpen={actionModal === 'Add Expense'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('Add Expense', values)} />
       <NewVendorModal isOpen={actionModal === 'New Vendor'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('New Vendor', values)} />
       <AddPettyCashModal isOpen={actionModal === 'Add Petty Cash'} onClose={() => setActionModal(null)} onSave={(values) => submitAction('Add Petty Cash', values)} staffList={dashboardStaff} defaultType="staff_expense" />
